@@ -39,6 +39,7 @@ static struct pin_config * pin_table;
 static unsigned long pin_table_sz;
 
 extern struct pin_config * omap730_pins;
+extern struct pin_config * omap850_pins;
 extern struct pin_config * omap1xxx_pins;
 extern struct pin_config * omap24xx_pins;
 

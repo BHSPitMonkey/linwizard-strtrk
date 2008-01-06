@@ -174,7 +174,7 @@ void omap_mcbsp_config(unsigned int id, const struct omap_mcbsp_reg_cfg * config
 
 static int omap_mcbsp_check(unsigned int id)
 {
-	if (cpu_is_omap730()) {
+  if (cpu_is_omap730()||cpu_is_omap850 ()) {
 		if (id > OMAP_MAX_MCBSP_COUNT - 1) {
 		       printk(KERN_ERR "OMAP-McBSP: McBSP%d doesn't exist\n", id + 1);
 		       return -1;

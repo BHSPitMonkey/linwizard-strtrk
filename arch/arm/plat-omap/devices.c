@@ -192,6 +192,18 @@ static void omap_init_kp(void)
 		omap_cfg_reg(E4_730_KBC2);
 		omap_cfg_reg(F4_730_KBC3);
 		omap_cfg_reg(E3_730_KBC4);
+	} else if (machine_is_omap_htcwizard()) {
+		omap_cfg_reg(E2_850_KBR0);
+		omap_cfg_reg(J7_850_KBR1);
+		omap_cfg_reg(E1_850_KBR2);
+		omap_cfg_reg(F3_850_KBR3);
+		omap_cfg_reg(D2_850_KBR4);
+
+		omap_cfg_reg(C2_850_KBC0);
+		omap_cfg_reg(D3_850_KBC1);
+		omap_cfg_reg(E4_850_KBC2);
+		omap_cfg_reg(F4_850_KBC3);
+		omap_cfg_reg(E3_850_KBC4);
 	} else if (machine_is_omap_h4()) {
 		omap_cfg_reg(T19_24XX_KBR0);
 		omap_cfg_reg(R19_24XX_KBR1);
