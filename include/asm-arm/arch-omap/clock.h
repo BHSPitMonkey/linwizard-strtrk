@@ -117,6 +117,7 @@ extern void clk_enable_init_clocks(void);
 /* bits 13-20 are currently free */
 #define CLOCK_IN_OMAP310	(1 << 21)
 #define CLOCK_IN_OMAP730	(1 << 22)
+#define CLOCK_IN_OMAP850	(1 << 22)
 #define CLOCK_IN_OMAP1510	(1 << 23)
 #define CLOCK_IN_OMAP16XX	(1 << 24)
 #define CLOCK_IN_OMAP242X	(1 << 25)
