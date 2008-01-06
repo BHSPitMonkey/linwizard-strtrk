@@ -107,6 +107,7 @@ static inline int is_omap ##subclass (void)		\
 }
 
 IS_OMAP_CLASS(7xx, 0x07)
+IS_OMAP_CLASS(8xx, 0x08)
 IS_OMAP_CLASS(15xx, 0x15)
 IS_OMAP_CLASS(16xx, 0x16)
 IS_OMAP_CLASS(24xx, 0x24)
@@ -179,6 +180,7 @@ IS_OMAP_SUBCLASS(343x, 0x343)
  * These are only rarely needed.
  * cpu_is_omap330():	True for OMAP330
  * cpu_is_omap730():	True for OMAP730
+ * cpu_is_omap850():	True for OMAP850
  * cpu_is_omap1510():	True for OMAP1510
  * cpu_is_omap1610():	True for OMAP1610
  * cpu_is_omap1611():	True for OMAP1611
