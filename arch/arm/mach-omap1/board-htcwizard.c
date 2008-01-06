@@ -130,6 +130,12 @@ static struct platform_device lcd_device = {
 };
 
 
+static struct platform_device *devices[] __initdata = {
+/* 	&gsm_device, */
+	&kp_device,
+	&lcd_device,
+};
+
 /* Init functions from here on */
 
 static void __init htcwizard_map_io(void)
