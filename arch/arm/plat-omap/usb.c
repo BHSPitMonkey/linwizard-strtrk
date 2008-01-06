@@ -704,7 +704,7 @@ omap_usb_init(void)
 	}
 	platform_data = *config;
 
-	if (cpu_is_omap730() || cpu_is_omap850 || cpu_is_omap16xx() ||\
+	if (cpu_is_omap730() || cpu_is_omap850() || cpu_is_omap16xx() || \
 	    cpu_is_omap24xx())
 		omap_otg_init(&platform_data);
 	else if (cpu_is_omap15xx())

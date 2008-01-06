@@ -1,4 +1,3 @@
-
 /*
  * Modified from board-perseus2.c and htcwizard.c
  *
@@ -174,7 +173,7 @@ static void __init htcwizard_init(void)
   htcwizard_disable_watchdog();
 }
 
-MACHINE_START(HTCWIZARD, "HTC Wizard")
+MACHINE_START(OMAP_HTCWIZARD, "HTC Wizard")
         /* Maintainer: Unai Uribarri <unaiur@gmail.com> */
 		  /* Maintainer: linwizard.sourceforge.net */
         .phys_io        = 0xfff00000,
