@@ -1,3 +1,4 @@
+
 /*
  * Modified from board-perseus2.c and htcwizard.c
  *
@@ -22,6 +23,25 @@
  *
  */
 
+#include <linux/kernel.h>
+#include <linux/init.h>
+#include <linux/platform_device.h>
+#include <linux/input.h>
+
+#include <asm/mach-types.h>
+#include <asm/mach/arch.h>
+#include <asm/mach/map.h>
+#include <asm/arch/omap730.h>
+#include <asm/page.h>
+#include <asm/memory.h>
+#include <asm/arch/common.h>
+#include <asm/arch/board.h>
+#include <asm/arch/io.h>
+#include <asm/arch/irqs.h>
+#include <asm/arch/gpio.h>
+#include <asm/arch/keypad.h>
+
+#include <linux/delay.h>
 
 /* Keyboard definition */
 
