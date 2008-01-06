@@ -104,7 +104,7 @@ static struct platform_device kp_device = {
 
 /* LCD Device resources */
 static struct platform_device lcd_device = {
-	.name		= "lcd_wizard",
+	.name		= "lcd_htcwizard",
 	.id		= -1,
 };
 
