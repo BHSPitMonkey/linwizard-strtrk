@@ -104,7 +104,14 @@
 #define OMAP730_IDLECT3		0xfffece24
 #define OMAP730_IDLE_LOOP_REQUEST	0x0C00
 
+#define OMAP850_IDLECT1_SLEEP_VAL	0x16c7
+#define OMAP850_IDLECT2_SLEEP_VAL	0x09c7
+#define OMAP850_IDLECT3_VAL		0x3f
+#define OMAP850_IDLECT3		0xfffece24
+#define OMAP850_IDLE_LOOP_REQUEST	0x0C00
+
 #if     !defined(CONFIG_ARCH_OMAP730) && \
+	!defined(CONFIG_ARCH_OMAP8xx) && \
 	!defined(CONFIG_ARCH_OMAP15XX) && \
 	!defined(CONFIG_ARCH_OMAP16XX) && \
 	!defined(CONFIG_ARCH_OMAP24XX)
@@ -137,19 +144,23 @@ extern void omap_pm_suspend(void);
 extern void omap2_block_sleep(void);
 extern void omap2_allow_sleep(void);
 extern void omap730_cpu_suspend(unsigned short, unsigned short);
+extern void omap850_cpu_suspend(unsigned short, unsigned short);
 extern void omap1510_cpu_suspend(unsigned short, unsigned short);
 extern void omap1610_cpu_suspend(unsigned short, unsigned short);
 extern void omap24xx_cpu_suspend(u32 dll_ctrl, u32 cpu_revision);
 extern void omap730_idle_loop_suspend(void);
+extern void omap850_idle_loop_suspend(void);
 extern void omap1510_idle_loop_suspend(void);
 extern void omap1610_idle_loop_suspend(void);
 extern void omap24xx_idle_loop_suspend(void);
 
 extern unsigned int omap730_cpu_suspend_sz;
+extern unsigned int omap850_cpu_suspend_sz;
 extern unsigned int omap1510_cpu_suspend_sz;
 extern unsigned int omap1610_cpu_suspend_sz;
 extern unsigned int omap24xx_cpu_suspend_sz;
 extern unsigned int omap730_idle_loop_suspend_sz;
+extern unsigned int omap850_idle_loop_suspend_sz;
 extern unsigned int omap1510_idle_loop_suspend_sz;
 extern unsigned int omap1610_idle_loop_suspend_sz;
 extern unsigned int omap24xx_idle_loop_suspend_sz;
@@ -176,6 +187,10 @@ extern void omap_serial_wake_trigger(int enable);
 #define MPUI730_SAVE(x) mpui730_sleep_save[MPUI730_SLEEP_SAVE_##x] = omap_readl(x)
 #define MPUI730_RESTORE(x) omap_writel((mpui730_sleep_save[MPUI730_SLEEP_SAVE_##x]), (x))
 #define MPUI730_SHOW(x) mpui730_sleep_save[MPUI730_SLEEP_SAVE_##x]
+
+#define MPUI850_SAVE(x) mpui850_sleep_save[MPUI850_SLEEP_SAVE_##x] = omap_readl(x)
+#define MPUI850_RESTORE(x) omap_writel((mpui730_sleep_save[MPUI850_SLEEP_SAVE_##x]), (x))
+#define MPUI850_SHOW(x) mpui850_sleep_save[MPUI850_SLEEP_SAVE_##x]
 
 #define MPUI1510_SAVE(x) mpui1510_sleep_save[MPUI1510_SLEEP_SAVE_##x] = omap_readl(x)
 #define MPUI1510_RESTORE(x) omap_writel((mpui1510_sleep_save[MPUI1510_SLEEP_SAVE_##x]), (x))
@@ -270,6 +285,28 @@ enum mpui730_save_state {
 	MPUI730_SLEEP_SAVE_SIZE = 0
 #endif
 };
+
+enum mpui850_save_state {
+	MPUI730_SLEEP_SAVE_START = 0,
+	/*
+	 * MPUI registers 32 bits
+	 */
+	MPUI850_SLEEP_SAVE_MPUI_CTRL,
+	MPUI850_SLEEP_SAVE_MPUI_DSP_BOOT_CONFIG,
+	MPUI850_SLEEP_SAVE_MPUI_DSP_API_CONFIG,
+	MPUI850_SLEEP_SAVE_MPUI_DSP_STATUS,
+	MPUI850_SLEEP_SAVE_EMIFF_SDRAM_CONFIG,
+	MPUI850_SLEEP_SAVE_EMIFS_CONFIG,
+	MPUI850_SLEEP_SAVE_OMAP_IH1_MIR,
+	MPUI850_SLEEP_SAVE_OMAP_IH2_0_MIR,
+	MPUI850_SLEEP_SAVE_OMAP_IH2_1_MIR,
+#if defined(CONFIG_ARCH_OMAP850)
+	MPUI850_SLEEP_SAVE_SIZE
+#else
+	MPUI850_SLEEP_SAVE_SIZE = 0
+#endif
+};
+
 
 enum mpui1610_save_state {
 	MPUI1610_SLEEP_SAVE_START = 0,

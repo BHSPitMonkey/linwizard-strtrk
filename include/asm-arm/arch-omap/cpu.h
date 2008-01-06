@@ -46,6 +46,14 @@ extern unsigned int system_rev;
 #  define OMAP_NAME omap730
 # endif
 #endif
+#ifdef CONFIG_ARCH_OMAP850
+# ifdef OMAP_NAME
+#  undef  MULTI_OMAP1
+#  define MULTI_OMAP1
+# else
+#  define OMAP_NAME omap850
+# endif
+#endif
 #ifdef CONFIG_ARCH_OMAP15XX
 # ifdef OMAP_NAME
 #  undef  MULTI_OMAP1
@@ -83,6 +91,7 @@ extern unsigned int system_rev;
  * Macros to group OMAP into cpu classes.
  * These can be used in most places.
  * cpu_is_omap7xx():	True for OMAP730
+ * cpu_is_omap8xx():	True for OMAP850
  * cpu_is_omap15xx():	True for OMAP1510, OMAP5910 and OMAP310
  * cpu_is_omap16xx():	True for OMAP1610, OMAP5912 and OMAP1710
  * cpu_is_omap24xx():	True for OMAP2420, OMAP2422, OMAP2423, OMAP2430

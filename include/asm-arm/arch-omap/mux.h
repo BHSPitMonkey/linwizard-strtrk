@@ -68,6 +68,16 @@
 					.pull_bit = bit, \
 					.pull_val = status,
 
+#define MUX_REG_850(reg, mode_offset, mode) .mux_reg_name = "OMAP850_IO_CONF_"#reg, \
+					.mux_reg = OMAP850_IO_CONF_##reg, \
+					.mask_offset = mode_offset, \
+					.mask = mode,
+
+#define PULL_REG_850(reg, bit, status)	.pull_name = "OMAP850_IO_CONF_"#reg, \
+					.pull_reg = OMAP850_IO_CONF_##reg, \
+					.pull_bit = bit, \
+					.pull_val = status,
+
 #else
 
 #define MUX_REG(reg, mode_offset, mode) .mux_reg = FUNC_MUX_CTRL_##reg, \
@@ -87,6 +97,15 @@
 					.mask = mode,
 
 #define PULL_REG_730(reg, bit, status)	.pull_reg = OMAP730_IO_CONF_##reg, \
+					.pull_bit = bit, \
+					.pull_val = status,
+
+#define MUX_REG_850(reg, mode_offset, mode) \
+					.mux_reg = OMAP850_IO_CONF_##reg, \
+					.mask_offset = mode_offset, \
+					.mask = mode,
+
+#define PULL_REG_850(reg, bit, status)	.pull_reg = OMAP850_IO_CONF_##reg, \
 					.pull_bit = bit, \
 					.pull_val = status,
 
@@ -118,6 +137,16 @@
 	.debug = debug_status,				\
 	MUX_REG_730(mux_reg, mode_offset, mode)		\
 	PULL_REG_730(mux_reg, pull_bit, pull_status)	\
+	PU_PD_REG(NA, 0)		\
+},
+
+#define MUX_CFG_850(desc, mux_reg, mode_offset, mode,	\
+		   pull_bit, pull_status, debug_status)\
+{							\
+	.name =	 desc,					\
+	.debug = debug_status,				\
+	MUX_REG_850(mux_reg, mode_offset, mode)		\
+	PULL_REG_850(mux_reg, pull_bit, pull_status)	\
 	PU_PD_REG(NA, 0)		\
 },
 
@@ -176,6 +205,25 @@ enum omap730_index {
 	AA17_730_USB_DM,
 	W16_730_USB_PU_EN,
 	W17_730_USB_VBUSI,
+};
+
+enum omap850_index {
+	/* OMAP 730 keyboard */
+	E2_850_KBR0,
+	J7_850_KBR1,
+	E1_850_KBR2,
+	F3_850_KBR3,
+	D2_850_KBR4,
+	C2_850_KBC0,
+	D3_850_KBC1,
+	E4_850_KBC2,
+	F4_850_KBC3,
+	E3_850_KBC4,
+
+	/* USB */
+	AA17_850_USB_DM,
+	W16_850_USB_PU_EN,
+	W17_850_USB_VBUSI,
 };
 
 enum omap1xxx_index {

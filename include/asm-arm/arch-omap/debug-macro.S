@@ -59,7 +59,7 @@
 		and	\rd, \rd, #0x60
 		teq	\rd, #0x60
 		beq	1002f
-		ldrb	\rd, [\rx, #(0x5 << 0)]	@ OMAP-730 only
+		ldrb	\rd, [\rx, #(0x5 << 0)]	@ OMAP-730 and 850 only
 		and	\rd, \rd, #0x60
 		teq	\rd, #0x60
 		bne	1001b
