@@ -208,7 +208,7 @@ enum omap730_index {
 };
 
 enum omap850_index {
-	/* OMAP 730 keyboard */
+	/* OMAP 850 keyboard */
 	E2_850_KBR0,
 	J7_850_KBR1,
 	E1_850_KBR2,

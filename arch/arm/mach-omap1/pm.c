@@ -65,6 +65,7 @@ static unsigned int arm_sleep_save[ARM_SLEEP_SAVE_SIZE];
 static unsigned short dsp_sleep_save[DSP_SLEEP_SAVE_SIZE];
 static unsigned short ulpd_sleep_save[ULPD_SLEEP_SAVE_SIZE];
 static unsigned int mpui730_sleep_save[MPUI730_SLEEP_SAVE_SIZE];
+static unsigned int mpui850_sleep_save[MPUI850_SLEEP_SAVE_SIZE];
 static unsigned int mpui1510_sleep_save[MPUI1510_SLEEP_SAVE_SIZE];
 static unsigned int mpui1610_sleep_save[MPUI1610_SLEEP_SAVE_SIZE];
 
@@ -200,6 +201,9 @@ static void omap_pm_wakeup_setup(void)
 	if (cpu_is_omap730())
 		level1_wake = OMAP_IRQ_BIT(INT_730_GPIO_BANK1) |
 			OMAP_IRQ_BIT(INT_730_IH2_IRQ);
+	else if (cpu_is_omap850())
+		level1_wake = OMAP_IRQ_BIT(INT_850_GPIO_BANK1) |
+			OMAP_IRQ_BIT(INT_850_IH2_IRQ);
 	else if (cpu_is_omap15xx())
 		level1_wake = OMAP_IRQ_BIT(INT_GPIO_BANK1) |
 			OMAP_IRQ_BIT(INT_1510_IH2_IRQ);
@@ -213,6 +217,11 @@ static void omap_pm_wakeup_setup(void)
 		omap_writel(~level2_wake, OMAP_IH2_0_MIR);
 		omap_writel(~(OMAP_IRQ_BIT(INT_730_WAKE_UP_REQ) |
 				OMAP_IRQ_BIT(INT_730_MPUIO_KEYPAD)),
+				OMAP_IH2_1_MIR);
+	} else if (cpu_is_omap850()) {
+		omap_writel(~level2_wake, OMAP_IH2_0_MIR);
+		omap_writel(~(OMAP_IRQ_BIT(INT_850_WAKE_UP_REQ) |
+				OMAP_IRQ_BIT(INT_850_MPUIO_KEYPAD)),
 				OMAP_IH2_1_MIR);
 	} else if (cpu_is_omap15xx()) {
 		level2_wake |= OMAP_IRQ_BIT(INT_KEYBOARD);
@@ -275,7 +284,15 @@ void omap_pm_suspend(void)
 		MPUI730_SAVE(MPUI_DSP_API_CONFIG);
 		MPUI730_SAVE(EMIFS_CONFIG);
 		MPUI730_SAVE(EMIFF_SDRAM_CONFIG);
-
+	} else if (cpu_is_omap850()) {
+		MPUI850_SAVE(OMAP_IH1_MIR);
+		MPUI850_SAVE(OMAP_IH2_0_MIR);
+		MPUI850_SAVE(OMAP_IH2_1_MIR);
+		MPUI850_SAVE(MPUI_CTRL);
+		MPUI850_SAVE(MPUI_DSP_BOOT_CONFIG);
+		MPUI850_SAVE(MPUI_DSP_API_CONFIG);
+		MPUI850_SAVE(EMIFS_CONFIG);
+		MPUI850_SAVE(EMIFF_SDRAM_CONFIG);
 	} else if (cpu_is_omap15xx()) {
 		MPUI1510_SAVE(OMAP_IH1_MIR);
 		MPUI1510_SAVE(OMAP_IH2_MIR);
@@ -319,7 +336,7 @@ void omap_pm_suspend(void)
 	omap_writew(omap_readw(ARM_RSTCT1) & ~(1 << DSP_EN), ARM_RSTCT1);
 
 		/* shut down dsp_ck */
-	if (!cpu_is_omap730())
+	if (!cpu_is_omap730() && !cpu_is_omap850)
 		omap_writew(omap_readw(ARM_CKCTL) & ~(1 << EN_DSPCK), ARM_CKCTL);
 
 	/* temporarily enabling api_ck to access DSP registers */
@@ -402,6 +419,12 @@ void omap_pm_suspend(void)
 		MPUI730_RESTORE(OMAP_IH1_MIR);
 		MPUI730_RESTORE(OMAP_IH2_0_MIR);
 		MPUI730_RESTORE(OMAP_IH2_1_MIR);
+	} else if (cpu_is_omap850()) {
+		MPUI850_RESTORE(EMIFS_CONFIG);
+		MPUI850_RESTORE(EMIFF_SDRAM_CONFIG);
+		MPUI850_RESTORE(OMAP_IH1_MIR);
+		MPUI850_RESTORE(OMAP_IH2_0_MIR);
+		MPUI850_RESTORE(OMAP_IH2_1_MIR);
 	} else if (cpu_is_omap15xx()) {
 		MPUI1510_RESTORE(MPUI_CTRL);
 		MPUI1510_RESTORE(MPUI_DSP_BOOT_CONFIG);
@@ -480,6 +503,13 @@ static int omap_pm_read_proc(
 		MPUI730_SAVE(MPUI_DSP_API_CONFIG);
 		MPUI730_SAVE(EMIFF_SDRAM_CONFIG);
 		MPUI730_SAVE(EMIFS_CONFIG);
+	} else if (cpu_is_omap850()) {
+		MPUI850_SAVE(MPUI_CTRL);
+		MPUI850_SAVE(MPUI_DSP_STATUS);
+		MPUI850_SAVE(MPUI_DSP_BOOT_CONFIG);
+		MPUI850_SAVE(MPUI_DSP_API_CONFIG);
+		MPUI850_SAVE(EMIFF_SDRAM_CONFIG);
+		MPUI850_SAVE(EMIFS_CONFIG);
 	} else if (cpu_is_omap15xx()) {
 		MPUI1510_SAVE(MPUI_CTRL);
 		MPUI1510_SAVE(MPUI_DSP_STATUS);
@@ -543,6 +573,20 @@ static int omap_pm_read_proc(
 			   MPUI730_SHOW(MPUI_DSP_API_CONFIG),
 			   MPUI730_SHOW(EMIFF_SDRAM_CONFIG),
 			   MPUI730_SHOW(EMIFS_CONFIG));
+		} else if (cpu_is_omap850()) {
+			my_buffer_offset += sprintf(my_base + my_buffer_offset,
+			   "MPUI850_CTRL_REG	     0x%-8x \n"
+			   "MPUI850_DSP_STATUS_REG:      0x%-8x \n"
+			   "MPUI850_DSP_BOOT_CONFIG_REG: 0x%-8x \n"
+			   "MPUI850_DSP_API_CONFIG_REG:  0x%-8x \n"
+			   "MPUI850_SDRAM_CONFIG_REG:    0x%-8x \n"
+			   "MPUI850_EMIFS_CONFIG_REG:    0x%-8x \n",
+			   MPUI850_SHOW(MPUI_CTRL),
+			   MPUI850_SHOW(MPUI_DSP_STATUS),
+			   MPUI850_SHOW(MPUI_DSP_BOOT_CONFIG),
+			   MPUI850_SHOW(MPUI_DSP_API_CONFIG),
+			   MPUI850_SHOW(EMIFF_SDRAM_CONFIG),
+			   MPUI850_SHOW(EMIFS_CONFIG));
 		} else if (cpu_is_omap15xx()) {
 			my_buffer_offset += sprintf(my_base + my_buffer_offset,
 			   "MPUI1510_CTRL_REG             0x%-8x \n"
@@ -696,6 +740,11 @@ static int __init omap_pm_init(void)
 						omap730_idle_loop_suspend_sz);
 		omap_sram_suspend = omap_sram_push(omap730_cpu_suspend,
 						   omap730_cpu_suspend_sz);
+	} else if (cpu_is_omap850()) {
+		omap_sram_idle = omap_sram_push(omap850_idle_loop_suspend,
+						omap850_idle_loop_suspend_sz);
+		omap_sram_suspend = omap_sram_push(omap850_cpu_suspend,
+						   omap850_cpu_suspend_sz);
 	} else if (cpu_is_omap15xx()) {
 		omap_sram_idle = omap_sram_push(omap1510_idle_loop_suspend,
 						omap1510_idle_loop_suspend_sz);
@@ -717,6 +766,8 @@ static int __init omap_pm_init(void)
 
 	if (cpu_is_omap730())
 		setup_irq(INT_730_WAKE_UP_REQ, &omap_wakeup_irq);
+	else if (cpu_is_omap850())
+		setup_irq(INT_850_WAKE_UP_REQ, &omap_wakeup_irq);
 	else if (cpu_is_omap16xx())
 		setup_irq(INT_1610_WAKE_UP_REQ, &omap_wakeup_irq);
 
@@ -733,6 +784,8 @@ static int __init omap_pm_init(void)
 		omap_writel(OMAP730_IDLECT3_VAL, OMAP730_IDLECT3);
 	else if (cpu_is_omap16xx())
 		omap_writel(OMAP1610_IDLECT3_VAL, OMAP1610_IDLECT3);
+	else if (cpu_is_omap850())
+		omap_writel(OMAP850_IDLECT3_VAL, OMAP850_IDLECT3);
 
 	pm_set_ops(&omap_pm_ops);
 

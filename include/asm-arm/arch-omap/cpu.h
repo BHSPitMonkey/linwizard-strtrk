@@ -127,6 +127,7 @@ IS_OMAP_SUBCLASS(243x, 0x243)
 IS_OMAP_SUBCLASS(343x, 0x343)
 
 #define cpu_is_omap7xx()		0
+#define cpu_is_omap8xx()		0
 #define cpu_is_omap15xx()		0
 #define cpu_is_omap16xx()		0
 #define cpu_is_omap24xx()		0

@@ -31,11 +31,13 @@ struct omap_id {
 	u32	type;		/* Cpu id bits [31:08], cpu class bits [07:00] */
 };
 
-/* Register values to detect the OMAP version */
+/* Register values to detect the OMAP version - FIXME: jtag and omap_ids for 850 are guessed.*/
 static struct omap_id omap_ids[] __initdata = {
 	{ .jtag_id = 0xb574, .die_rev = 0x2, .omap_id = 0x03310315, .type = 0x03100000},
 	{ .jtag_id = 0x355f, .die_rev = 0x0, .omap_id = 0x03320000, .type = 0x07300100},
 	{ .jtag_id = 0xb55f, .die_rev = 0x0, .omap_id = 0x03320000, .type = 0x07300300},
+	{ .jtag_id = 0x355f, .die_rev = 0x0, .omap_id = 0x03320500, .type = 0x08500100},
+	{ .jtag_id = 0xb55f, .die_rev = 0x0, .omap_id = 0x03320500, .type = 0x08500300},
 	{ .jtag_id = 0xb470, .die_rev = 0x0, .omap_id = 0x03310100, .type = 0x15100000},
 	{ .jtag_id = 0xb576, .die_rev = 0x0, .omap_id = 0x03320000, .type = 0x16100000},
 	{ .jtag_id = 0xb576, .die_rev = 0x2, .omap_id = 0x03320100, .type = 0x16110000},
@@ -69,7 +71,7 @@ static u16 __init omap_get_jtag_id(void)
 	prod_id = omap_readl(OMAP_PRODUCTION_ID_1);
 	omap_id = omap_readl(OMAP32_ID_1);
 
-	/* Check for unusable OMAP_PRODUCTION_ID_1 on 1611B/5912 and 730 */
+	/* Check for unusable OMAP_PRODUCTION_ID_1 on 1611B/5912 and 730/850 */
 	if (((prod_id >> 20) == 0) || (prod_id == omap_id))
 		prod_id = 0;
 	else

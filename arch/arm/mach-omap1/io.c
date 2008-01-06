@@ -56,12 +56,12 @@ static struct map_desc omap730_io_desc[] __initdata = {
 static struct map_desc omap850_io_desc[] __initdata = {
 	{
 		.virtual	= OMAP850_DSP_BASE,
-		.pfn		= __phys_to_pfn(OMAP730_DSP_START),
+		.pfn		= __phys_to_pfn(OMAP850_DSP_START),
 		.length		= OMAP850_DSP_SIZE,
 		.type		= MT_DEVICE
 	}, {
 		.virtual	= OMAP850_DSPREG_BASE,
-		.pfn		= __phys_to_pfn(OMAP730_DSPREG_START),
+		.pfn		= __phys_to_pfn(OMAP850_DSPREG_START),
 		.length		= OMAP850_DSPREG_SIZE,
 		.type		= MT_DEVICE
 	}
