@@ -3,6 +3,7 @@
  *
  * HTC Wizard init stuff
  * Copyright (C) 2006 Unai Uribarri
+ * Copyright (C) 2008 linwizard.sourceforge.net
  *
  * This  program is  free  software; you  can  redistribute it  and/or
  * modify  it under the  terms of  the GNU  General Public  License as
@@ -149,6 +150,7 @@ static void __init htcwizard_init(void)
 
 MACHINE_START(HTCWIZARD, "HTC Wizard")
         /* Maintainer: Unai Uribarri <unaiur@gmail.com> */
+		  /* Maintainer: linwizard.sourceforge.net */
         .phys_io        = 0xfff00000,
         .io_pg_offst    = ((0xfef00000) >> 18) & 0xfffc,
         .boot_params    = 0x10000100,
