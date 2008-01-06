@@ -282,6 +282,7 @@
  */
 
 #include "omap730.h"
+#include "omap850.h"
 #include "omap1510.h"
 #include "omap16xx.h"
 #include "omap24xx.h"
@@ -355,6 +356,11 @@
 #include "board-sx1.h"
 #endif
 
+#ifdef CONFIG_MACH_OMAP_HTCWIZARD
+#include "board-htcwizard.h"
+#endif 
+
 #endif /* !__ASSEMBLER__ */
 
 #endif	/* __ASM_ARCH_OMAP_HARDWARE_H */
+h
