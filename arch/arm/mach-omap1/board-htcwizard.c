@@ -30,7 +30,7 @@
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
-#include <asm/arch/omap730.h>
+#include <asm/arch/omap850.h>
 #include <asm/page.h>
 #include <asm/memory.h>
 #include <asm/arch/common.h>
@@ -105,8 +105,8 @@ struct omap_kp_platform_data kp_data = {
 
 static struct resource kp_resources[] = {
 	[0] = {
-		.start	= INT_730_MPUIO_KEYPAD,
-		.end	= INT_730_MPUIO_KEYPAD,
+		.start	= INT_850_MPUIO_KEYPAD,
+		.end	= INT_850_MPUIO_KEYPAD,
 		.flags	= IORESOURCE_IRQ,
 	},
 };
@@ -159,7 +159,7 @@ static void __init htcwizard_disable_watchdog()
      * disable a potentially running watchdog timer before
      * it kills us.
      */
-    printk("OMAP730 Watchdog seems to be activated, disabling it for now.\n");
+    printk("OMAP850 Watchdog seems to be activated, disabling it for now.\n");
     omap_writel(0xF5, OMAP_WDT_TIMER_MODE);
     omap_writel(0xA0, OMAP_WDT_TIMER_MODE);
   }
