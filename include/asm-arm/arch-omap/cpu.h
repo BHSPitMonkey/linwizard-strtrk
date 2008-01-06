@@ -149,7 +149,7 @@ IS_OMAP_SUBCLASS(343x, 0x343)
 # endif
 # if defined(CONFIG_ARCH_OMAP850)
 #  undef  cpu_is_omap8xx
-#  define cpu_is_omap8xx()              1
+#  define cpu_is_omap8xx()
 # endif 
 # if defined(CONFIG_ARCH_OMAP15XX)
 #  undef  cpu_is_omap15xx
