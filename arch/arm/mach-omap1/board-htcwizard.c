@@ -79,6 +79,7 @@ static int htc_wizard_keymap[] = {
 struct omap_kp_platform_data kp_data = {
 	.rows	= 8,
 	.cols	= 8,
+	.delay = 9,
 	.keymap = htc_wizard_keymap,
 };
 
@@ -124,11 +125,9 @@ static void __init htcwizard_init_irq(void)
 	omap_gpio_init();
 }
 
-static void __init htcwizard_init(void)
+static void __init htcwizard_disable_watchdog()
 {
-  printk("HTC Wizard init.\n");
-  platform_add_devices(devices, ARRAY_SIZE(devices));
-  // Disable watchdog if running
+  /* Disable watchdog if running */
   if (omap_readl(OMAP_WDT_TIMER_MODE) & 0x8000) {
     /*
      * disable a potentially running watchdog timer before
@@ -138,6 +137,14 @@ static void __init htcwizard_init(void)
     omap_writel(0xF5, OMAP_WDT_TIMER_MODE);
     omap_writel(0xA0, OMAP_WDT_TIMER_MODE);
   }
+}
+
+static void __init htcwizard_init(void)
+{
+  printk("HTC Wizard init.\n");
+  platform_add_devices(devices, ARRAY_SIZE(devices));
+  
+  htcwizard_disable_watchdog();
 }
 
 MACHINE_START(HTCWIZARD, "HTC Wizard")
