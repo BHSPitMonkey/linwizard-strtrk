@@ -127,7 +127,7 @@ ENTRY(omap850_idle_loop_suspend)
 	mov	r5, #IDLE_WAIT_CYCLES & 0xff
 	orr	r5, r5, #IDLE_WAIT_CYCLES & 0xff00
 l_850:	subs	r5, r5, #1
-	bne	l_730
+	bne	l_850
 /*
  * Let's wait for the next clock tick to wake us up.
  */
