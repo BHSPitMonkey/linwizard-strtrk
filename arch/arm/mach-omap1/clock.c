@@ -734,7 +734,7 @@ int __init omap1_clk_init(void)
 			crystal_type = info->system_clock_type;
 	}
 
-#if (defined(CONFIG_ARCH_OMAP730) || defined(CONFIG_ARCH_OMAP850) 
+#if (defined(CONFIG_ARCH_OMAP730) || defined(CONFIG_ARCH_OMAP850)) 
 	ck_ref.rate = 13000000;
 #elif defined(CONFIG_ARCH_OMAP16XX)
 	if (crystal_type == 2)

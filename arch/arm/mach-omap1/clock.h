@@ -363,7 +363,7 @@ static struct arm_idlect1_clk tc_ck = {
 		.name		= "tc_ck",
 		.parent		= &ck_dpll1,
 		.flags		= CLOCK_IN_OMAP1510 | CLOCK_IN_OMAP16XX |
-				  CLOCK_IN_OMAP730 | CLOCK_IN_OMAP850 | CLOCK_IN_OMAP310
+				  CLOCK_IN_OMAP730 | CLOCK_IN_OMAP850 | CLOCK_IN_OMAP310 |
 				  RATE_CKCTL | RATE_PROPAGATES |
 				  ALWAYS_ENABLED | CLOCK_IDLE_CONTROL,
 		.rate_offset	= CKCTL_TCDIV_OFFSET,
