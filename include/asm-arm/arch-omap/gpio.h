@@ -46,8 +46,7 @@
 #define OMAP_MPUIO_GPIO_MASKIT		0x16
 #define OMAP_MPUIO_GPIO_DEBOUNCING	0x18
 #define OMAP_MPUIO_LATCH		0x1a
-#else
-#ifdef CONFIG_ARCH_OMAP850
+#elif CONFIG_ARCH_OMAP850
 #define OMAP_MPUIO_INPUT_LATCH		0x00
 #define OMAP_MPUIO_OUTPUT		0x02
 #define OMAP_MPUIO_IO_CNTL		0x04
@@ -162,9 +161,9 @@ static inline int gpio_to_irq(unsigned gpio)
 
 static inline int irq_to_gpio(unsigned irq)
 {
-	if (cpu_class_is_omap1() && (irq < (IH_MPUIO_BASE + 16)))
-		return (irq - IH_MPUIO_BASE) + OMAP_MAX_GPIO_LINES;
-	return irq - IH_GPIO_BASE;
+  if (cpu_class_is_omap1() && (irq < (IH_MPUIO_BASE + 16)))
+    return (irq - IH_MPUIO_BASE) + OMAP_MAX_GPIO_LINES;
+  return irq - IH_GPIO_BASE;
 }
 
 #endif
