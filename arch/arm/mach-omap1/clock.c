@@ -282,9 +282,9 @@ static int omap1_select_table_rate(struct clk * clk, unsigned long rate)
 	/*
 	 * In most cases we should not need to reprogram DPLL.
 	 * Reprogramming the DPLL is tricky, it must be done from SRAM.
-	 * (on 730, bit 13 must always be 1)
+	 * (on 730 and 850, bit 13 must always be 1)
 	 */
-	if (cpu_is_omap730())
+	if (cpu_is_omap730() || cpu_is_omap850())
 		omap_sram_reprogram_clock(ptr->dpllctl_val, ptr->ckctl_val | 0x2000);
 	else
 		omap_sram_reprogram_clock(ptr->dpllctl_val, ptr->ckctl_val);
@@ -717,6 +717,11 @@ int __init omap1_clk_init(void)
 			continue;
 		}
 
+		if (((*clkp)->flags &CLOCK_IN_OMAP850) && cpu_is_omap850()) {
+			clk_register(*clkp);
+			continue;
+		}
+		
 		if (((*clkp)->flags &CLOCK_IN_OMAP310) && cpu_is_omap310()) {
 			clk_register(*clkp);
 			continue;
@@ -729,7 +734,7 @@ int __init omap1_clk_init(void)
 			crystal_type = info->system_clock_type;
 	}
 
-#if defined(CONFIG_ARCH_OMAP730)
+#if (defined(CONFIG_ARCH_OMAP730) || defined(CONFIG_ARCH_OMAP850) 
 	ck_ref.rate = 13000000;
 #elif defined(CONFIG_ARCH_OMAP16XX)
 	if (crystal_type == 2)
@@ -777,7 +782,7 @@ int __init omap1_clk_init(void)
 		printk(KERN_ERR "System frequencies not set. Check your config.\n");
 		/* Guess sane values (60MHz) */
 		omap_writew(0x2290, DPLL_CTL);
-		omap_writew(cpu_is_omap730() ? 0x3005 : 0x1005, ARM_CKCTL);
+		omap_writew((cpu_is_omap730() || cpu_is_omap850()) ? 0x3005 : 0x1005, ARM_CKCTL);
 		ck_dpll1.rate = 60000000;
 		propagate_rate(&ck_dpll1);
 	}
@@ -803,7 +808,7 @@ int __init omap1_clk_init(void)
 
 	/* Turn off DSP and ARM_TIMXO. Make sure ARM_INTHCK is not divided */
 	/* (on 730, bit 13 must not be cleared) */
-	if (cpu_is_omap730())
+	if (cpu_is_omap730() || cpu_is_omap850())
 		omap_writew(omap_readw(ARM_CKCTL) & 0x2fff, ARM_CKCTL);
 	else
 		omap_writew(omap_readw(ARM_CKCTL) & 0x0fff, ARM_CKCTL);
