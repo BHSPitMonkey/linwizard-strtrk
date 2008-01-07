@@ -518,10 +518,15 @@ CFLAGS += $(call cc-option,-Wdeclaration-after-statement,)
 
 # disable pointer signed / unsigned warnings in gcc 4.0
 CFLAGS += $(call cc-option,-Wno-pointer-sign,)
-
+#
+# --build-id is disabled, as it is breaks objcopy. See the
+# http://lkml.org/lkml/2007/9/14/285 for additional information
+#
+ifdef REALLY_USE_BUILD_ID_OBJCOPY_NO_LONGER_BROKEN
 # Use --build-id when available.
 LDFLAGS_BUILD_ID = $(patsubst -Wl$(comma)%,%,\
 			      $(call ld-option, -Wl$(comma)--build-id,))
+endif
 LDFLAGS_MODULE += $(LDFLAGS_BUILD_ID)
 LDFLAGS_vmlinux += $(LDFLAGS_BUILD_ID)
 
