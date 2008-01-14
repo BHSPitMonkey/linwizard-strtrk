@@ -1,6 +1,6 @@
-/* linux/include/asm-arm/arch-omap/omap750.h
+/* linux/include/asm-arm/arch-omap/omap850.h
  *
- * Hardware definitions for TI OMAP750 processor.
+ * Hardware definitions for TI OMAP850 processor.
  *
  * Cleanup for Linux-2.6 by Dirk Behme <dirk.behme@de.bosch.com>
  *
