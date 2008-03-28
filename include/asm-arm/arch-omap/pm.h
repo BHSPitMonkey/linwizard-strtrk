@@ -189,7 +189,7 @@ extern void omap_serial_wake_trigger(int enable);
 #define MPUI730_SHOW(x) mpui730_sleep_save[MPUI730_SLEEP_SAVE_##x]
 
 #define MPUI850_SAVE(x) mpui850_sleep_save[MPUI850_SLEEP_SAVE_##x] = omap_readl(x)
-#define MPUI850_RESTORE(x) omap_writel((mpui730_sleep_save[MPUI850_SLEEP_SAVE_##x]), (x))
+#define MPUI850_RESTORE(x) omap_writel((mpui850_sleep_save[MPUI850_SLEEP_SAVE_##x]), (x))
 #define MPUI850_SHOW(x) mpui850_sleep_save[MPUI850_SLEEP_SAVE_##x]
 
 #define MPUI1510_SAVE(x) mpui1510_sleep_save[MPUI1510_SLEEP_SAVE_##x] = omap_readl(x)
