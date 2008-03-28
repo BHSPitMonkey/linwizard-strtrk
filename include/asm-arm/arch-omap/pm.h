@@ -287,7 +287,7 @@ enum mpui730_save_state {
 };
 
 enum mpui850_save_state {
-	MPUI730_SLEEP_SAVE_START = 0,
+	MPUI850_SLEEP_SAVE_START = 0,
 	/*
 	 * MPUI registers 32 bits
 	 */
