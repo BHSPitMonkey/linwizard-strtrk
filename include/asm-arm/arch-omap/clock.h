@@ -114,9 +114,9 @@ extern void clk_enable_init_clocks(void);
 #define CONFIG_PARTICIPANT	(1 << 10)	/* Fundamental clock */
 #define ENABLE_ON_INIT		(1 << 11)	/* Enable upon framework init */
 #define INVERT_ENABLE           (1 << 12)       /* 0 enables, 1 disables */
-/* bits 13-20 are currently free */
-#define CLOCK_IN_OMAP310	(1 << 21)
-#define CLOCK_IN_OMAP730	(1 << 22)
+/* bits 13-19 are currently free */
+#define CLOCK_IN_OMAP310	(1 << 20)
+#define CLOCK_IN_OMAP730	(1 << 21)
 #define CLOCK_IN_OMAP850	(1 << 22)
 #define CLOCK_IN_OMAP1510	(1 << 23)
 #define CLOCK_IN_OMAP16XX	(1 << 24)

@@ -154,7 +154,7 @@ static struct clk ck_ref = {
 	.name		= "ck_ref",
 	.rate		= 12000000,
 	.flags		= CLOCK_IN_OMAP1510 | CLOCK_IN_OMAP16XX |
-			  CLOCK_IN_OMAP310 | ALWAYS_ENABLED,
+			  CLOCK_IN_OMAP310 | CLOCK_IN_OMAP850 | ALWAYS_ENABLED,
 	.enable		= &omap1_clk_enable_generic,
 	.disable	= &omap1_clk_disable_generic,
 };

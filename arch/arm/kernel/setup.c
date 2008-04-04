@@ -43,6 +43,10 @@
 #define MEM_SIZE	(16*1024*1024)
 #endif
 
+#if defined CONFIG_EFB_DEBUG
+#include <asm/arch/efb.h>
+#endif
+
 #if defined(CONFIG_FPE_NWFPE) || defined(CONFIG_FPE_FASTFPE)
 char fpe_type[8];
 
@@ -779,6 +783,8 @@ void __init setup_arch(char **cmdline_p)
 	setup_processor();
 	mdesc = setup_machine(machine_arch_type);
 	machine_name = mdesc->name;
+	efb_putstr(machine_name);
+	efb_putstr("\n\n");
 
 	if (mdesc->soft_reboot)
 		reboot_setup("s");
@@ -814,6 +820,16 @@ void __init setup_arch(char **cmdline_p)
 	memcpy(boot_command_line, from, COMMAND_LINE_SIZE);
 	boot_command_line[COMMAND_LINE_SIZE-1] = '\0';
 	parse_cmdline(cmdline_p, from);
+	
+#ifdef CONFIG_EFB_DEBUG
+	/*
+	* paging_init is going to wipe out any section other than the 
+	* kernel code and data allocated in head.S so the framebuffer
+	* is going to not be available during paging_int.
+	*/
+	efb_disable();
+#endif
+	
 	paging_init(&meminfo, mdesc);
 	request_standard_resources(&meminfo, mdesc);
 

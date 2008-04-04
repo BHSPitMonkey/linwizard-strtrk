@@ -52,6 +52,10 @@
 #include <asm/mach/irq.h>
 #include <asm/mach/time.h>
 
+#include <asm/arch/clock.h>
+#ifdef CONFIG_EFB_DEBUG
+#include <asm/arch/efb.h>
+#endif
 
 #define OMAP_MPU_TIMER_BASE		OMAP_MPU_TIMER1_BASE
 #define OMAP_MPU_TIMER_OFFSET		0x100
@@ -283,19 +287,23 @@ unsigned long long sched_clock(void)
  */
 static void __init omap_timer_init(void)
 {
+	efb_putstr("OMAP init\n");
 	struct clk	*ck_ref = clk_get(NULL, "ck_ref");
 	unsigned long	rate;
-
+	efb_putstr(ck_ref->name);
 	BUG_ON(IS_ERR(ck_ref));
 
+	efb_putstr("\nOMAP timer clock OK\n");
 	rate = clk_get_rate(ck_ref);
 	clk_put(ck_ref);
 
 	/* PTV = 0 */
 	rate /= 2;
-
+	efb_putstr("MPU\n");
 	omap_init_mpu_timer(rate);
+	efb_putstr("source\n");
 	omap_init_clocksource(rate);
+	efb_putstr("Out\n");
 }
 
 struct sys_timer omap_timer = {

@@ -327,6 +327,18 @@ __create_page_tables:
 	str	r3, [r0]
 #endif
 #endif
+
+#ifdef CONFIG_EFB_DEBUG
+	/* 
+	 * map frame buffer from 0x20000000 to 0xD0000000
+	 * in order to help debugging
+	*/
+	add	r0, r4, #0xD0000000 >> 18
+	mov r3, #0x20000000
+	add r3, r3, r7
+	str	r3, [r0]
+#endif
+	  
 	mov	pc, lr
 	.ltorg
 

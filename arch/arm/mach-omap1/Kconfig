@@ -219,3 +219,8 @@ config OMAP_ARM_30MHZ
 	help
           Enable 30MHz clock for OMAP CPU. If unsure, say N.
 
+config EFB_DEBUG
+	bool "Early Frame Buffer debugging routines"
+	depends on ARCH_OMAP850
+	help
+		Output in framebuffer of the HTC phones as early as possible (experimental, ...).

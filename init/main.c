@@ -66,6 +66,10 @@
 #include <asm/smp.h>
 #endif
 
+
+#ifdef CONFIG_EFB_DEBUG
+#include <asm/arch/efb.h>
+#endif
 /*
  * This is one of the first .c files built. Error out early if we have compiler
  * trouble.
@@ -527,15 +531,18 @@ asmlinkage void __init start_kernel(void)
 	local_irq_disable();
 	early_boot_irqs_off();
 	early_init_irq_lock_class();
+	efb_init();
 
 /*
  * Interrupts are still disabled. Do necessary setups, then
  * enable them
  */
+	efb_putstr("Prepairing to enable Interupts...\n");
 	lock_kernel();
 	tick_init();
 	boot_cpu_init();
 	page_address_init();
+	efb_putstr("Printing Linux Banner\n");
 	printk(KERN_NOTICE);
 	printk(linux_banner);
 	setup_arch(&command_line);
@@ -543,6 +550,7 @@ asmlinkage void __init start_kernel(void)
 	unwind_setup();
 	setup_per_cpu_areas();
 	smp_prepare_boot_cpu();	/* arch-specific boot-cpu hooks */
+	
 
 	/*
 	 * Set up the scheduler prior starting any interrupts (such as the
@@ -550,6 +558,7 @@ asmlinkage void __init start_kernel(void)
 	 * time - but meanwhile we still have a functioning scheduler.
 	 */
 	sched_init();
+	efb_putstr("starting scheduler\n");
 	/*
 	 * Disable preemption - early bootup scheduling is extremely
 	 * fragile until we cpu_idle() for the first time.
@@ -557,6 +566,7 @@ asmlinkage void __init start_kernel(void)
 	preempt_disable();
 	build_all_zonelists();
 	page_alloc_init();
+	efb_putstr("Parsing cmd\n");
 	printk(KERN_NOTICE "Kernel command line: %s\n", boot_command_line);
 	parse_early_param();
 	parse_args("Booting kernel", static_command_line, __start___param,
@@ -565,23 +575,33 @@ asmlinkage void __init start_kernel(void)
 	if (!irqs_disabled()) {
 		printk(KERN_WARNING "start_kernel(): bug: interrupts were "
 				"enabled *very* early, fixing it\n");
+		efb_putstr("!Iterupts were enabled VERY early\n");
 		local_irq_disable();
 	}
 	sort_main_extable();
 	trap_init();
 	rcu_init();
+	efb_putstr("init, IRQ\n");
 	init_IRQ();
 	pidhash_init();
 	init_timers();
 	hrtimers_init();
 	softirq_init();
 	timekeeping_init();
+	efb_putstr("init, time\n");
 	time_init();
+	efb_putstr("profile init\n");
 	profile_init();
+	efb_putstr("check IRQ again\n");
 	if (!irqs_disabled())
+	{
+		efb_putstr("interupts enabled early\n");
 		printk("start_kernel(): bug: interrupts were enabled early\n");
+	}
+	efb_putstr("init, boot IRQ\n");
 	early_boot_irqs_on();
 	local_irq_enable();
+	efb_putstr("IRQ enabled\n");
 
 	/*
 	 * HACK ALERT! This is early. We're enabling the console before

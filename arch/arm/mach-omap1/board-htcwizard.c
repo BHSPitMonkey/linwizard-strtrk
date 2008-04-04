@@ -35,6 +35,11 @@
 #include <asm/memory.h>
 #include <asm/arch/common.h>
 #include <asm/arch/board.h>
+
+#ifdef CONFIG_EFB_DEBUG
+#include <asm/arch/efb.h>
+#endif
+
 #include <asm/arch/io.h>
 #include <asm/arch/irqs.h>
 #include <asm/arch/gpio.h>
@@ -42,6 +47,15 @@
 
 #include <linux/delay.h>
 
+
+static struct omap_lcd_config htcwizard_lcd_config __initdata = {
+	.ctrl_name	= "internal",
+};
+
+static struct omap_board_config_kernel htcwizard_config[] = 
+{
+	{ OMAP_TAG_LCD, &htcwizard_lcd_config },
+};
 /* Keyboard definition */
 
 static int htc_wizard_keymap[] = {
@@ -141,17 +155,13 @@ static void __init htcwizard_map_io(void)
 {
 	omap1_map_common_io();
 	printk("htcwizard_map_io done.\n");
+
+#ifdef CONFIG_EFB_DEBUG
+	efb_enable();
+#endif
 }
 
-static void __init htcwizard_init_irq(void)
-{
-	printk("htcwizard_init_irq.\n");
-	omap1_init_common_hw();
-	omap_init_irq();
-	omap_gpio_init();
-}
-
-static void __init htcwizard_disable_watchdog()
+static void __init htcwizard_disable_watchdog(void)
 {
   /* Disable watchdog if running */
   if (omap_readl(OMAP_WDT_TIMER_MODE) & 0x8000) {
@@ -168,9 +178,20 @@ static void __init htcwizard_disable_watchdog()
 static void __init htcwizard_init(void)
 {
   printk("HTC Wizard init.\n");
+  efb_putstr("HTC init");
+  omap_board_config = htcwizard_config;
+  omap_board_config_size = ARRAY_SIZE(htcwizard_config);
   platform_add_devices(devices, ARRAY_SIZE(devices));
   
   htcwizard_disable_watchdog();
+}
+
+static void __init htcwizard_init_irq(void)
+{
+	printk("htcwizard_init_irq.\n");
+	omap1_init_common_hw();
+	omap_init_irq();
+	omap_gpio_init();
 }
 
 MACHINE_START(OMAP_HTCWIZARD, "HTC Wizard")

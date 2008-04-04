@@ -29,6 +29,9 @@
 
 #include "clock.h"
 
+#ifdef CONFIG_EFB_DEBUG
+#include <asm/arch/efb.h>
+#endif
 __u32 arm_idlect1_mask;
 
 /*-------------------------------------------------------------------------
@@ -713,11 +716,15 @@ int __init omap1_clk_init(void)
 		}
 
 		if (((*clkp)->flags &CLOCK_IN_OMAP730) && cpu_is_omap730()) {
+			efb_putstr((*clkp)->name);
+			efb_putstr("...730");
 			clk_register(*clkp);
 			continue;
 		}
 
 		if (((*clkp)->flags &CLOCK_IN_OMAP850) && cpu_is_omap850()) {
+			efb_putstr((*clkp)->name);
+			efb_putstr("...850");
 			clk_register(*clkp);
 			continue;
 		}
@@ -726,6 +733,7 @@ int __init omap1_clk_init(void)
 			clk_register(*clkp);
 			continue;
 		}
+		efb_putstr("_CLK\n");
 	}
 
 	info = omap_get_config(OMAP_TAG_CLOCK, struct omap_clock_config);
@@ -823,7 +831,10 @@ int __init omap1_clk_init(void)
 	 * of the ARM_IDLECT2 register must be set to zero. The power-on
 	 * default value of this bit is one.
 	 */
-	omap_writew(0x0000, ARM_IDLECT2);	/* Turn LCD clock off also */
+	if (cpu_is_omap850())
+		omap_writew(0x0008, ARM_IDLECT2);
+	else
+		omap_writew(0x0000, ARM_IDLECT2);	/* Turn LCD clock off also */
 
 	/*
 	 * Only enable those clocks we will need, let the drivers

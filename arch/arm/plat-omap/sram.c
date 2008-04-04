@@ -33,6 +33,9 @@
 
 #if defined(CONFIG_ARCH_OMAP24XX) || defined(CONFIG_ARCH_OMAP34XX)
 #define SRAM_BOOTLOADER_SZ	0x00
+#elif defined(CONFIG_EFB_DEBUG)
+/* reserve memory for frame buffer too ... */
+#define SRAM_BOOTLOADER_SZ (0x1020 + 320 * 240 * 2)
 #else
 #define SRAM_BOOTLOADER_SZ	0x80
 #endif

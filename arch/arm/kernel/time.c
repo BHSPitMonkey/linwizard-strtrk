@@ -35,6 +35,10 @@
 #include <asm/thread_info.h>
 #include <asm/mach/time.h>
 
+#ifdef CONFIG_EFB_DEBUG
+#include <asm/arch/efb.h>
+#endif
+
 /*
  * Our system timer.
  */
@@ -506,13 +510,20 @@ void __init time_init(void)
 {
 #ifndef CONFIG_GENERIC_TIME
 	if (system_timer->offset == NULL)
+	{
 		system_timer->offset = dummy_gettimeoffset;
+	}
 #endif
+	efb_putstr("Timer init...");
 	system_timer->init();
 
 #ifdef CONFIG_NO_IDLE_HZ
 	if (system_timer->dyn_tick)
+	{
+		efb_putstr("no idle");
 		spin_lock_init(&system_timer->dyn_tick->lock);
+	}
 #endif
+	efb_putstr("Timer leave\n");
 }
 
