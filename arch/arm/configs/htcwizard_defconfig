@@ -1,7 +1,7 @@
 #
 # Automatically generated make config: don't edit
 # Linux kernel version: 2.6.23-omap1
-# Mon Jan  7 13:58:45 2008
+# Fri Apr  4 10:02:08 2008
 #
 CONFIG_ARM=y
 CONFIG_SYS_SUPPORTS_APM_EMULATION=y
@@ -181,6 +181,7 @@ CONFIG_OMAP_ARM_195MHZ=y
 # CONFIG_OMAP_ARM_120MHZ is not set
 # CONFIG_OMAP_ARM_60MHZ is not set
 # CONFIG_OMAP_ARM_30MHZ is not set
+CONFIG_EFB_DEBUG=y
 
 #
 # Boot options
