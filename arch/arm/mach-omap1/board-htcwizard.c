@@ -45,16 +45,29 @@
 #include <asm/arch/gpio.h>
 #include <asm/arch/keypad.h>
 
+#include <linux/spi/spi.h>
+#include <linux/spi/ads7846.h>
+
 #include <linux/delay.h>
 
+#define ADS7846_PENDOWN_GPIO	76
 
 static struct omap_lcd_config htcwizard_lcd_config __initdata = {
 	.ctrl_name	= "internal",
 };
 
+static struct omap_usb_config htcwizard_usb_config __initdata = {
+	.otg		= 1,
+	.register_host	= 1,
+	.register_dev	= 1,
+	.hmc_mode	= 16,
+	.pins[0]	= 2,
+};
+
 static struct omap_board_config_kernel htcwizard_config[] = 
 {
 	{ OMAP_TAG_LCD, &htcwizard_lcd_config },
+	{ OMAP_TAG_USB, &htcwizard_usb_config },
 };
 /* Keyboard definition */
 
@@ -149,8 +162,42 @@ static struct platform_device *devices[] __initdata = {
 	&lcd_device,
 };
 
-/* Init functions from here on */
 
+/*
+ * SPI Stuff based on nokia770-board.c
+ */
+static int ads7846_get_pendown_state(void)
+{
+	return !omap_get_gpio_datain(ADS7846_PENDOWN_GPIO);
+}
+
+/* Values below need to be verified */
+static struct ads7846_platform_data htcwizard_ads7846_platform_data __initdata = {
+	.x_max		= 0x0fff,
+	.y_max		= 0x0fff,
+	.x_plate_ohms	= 180,
+	.pressure_max	= 255,
+	.debounce_max	= 10,
+	.debounce_tol	= 3,
+	.debounce_rep	= 1,
+	.get_pendown_state	= ads7846_get_pendown_state,
+};
+
+/* Values below need to be verified */
+static struct spi_board_info htcwizard_spi_board_info[] __initdata = {
+	[0] = {
+		.modalias       = "ads7846",
+		.bus_num        = 2,
+		.chip_select    = 0,
+		.max_speed_hz   = 2500000,
+		.irq		= OMAP_GPIO_IRQ(15),
+		.platform_data	= &htcwizard_ads7846_platform_data,
+	},
+};
+
+/*
+ * Init functions from here on
+ */
 static void __init htcwizard_map_io(void)
 {
 	omap1_map_common_io();
@@ -175,6 +222,13 @@ static void __init htcwizard_disable_watchdog(void)
   }
 }
 
+/* TSC2046 init from board-nokia770.c */
+static void ads7846_dev_init(void)
+{
+	if (omap_request_gpio(ADS7846_PENDOWN_GPIO) < 0)
+		printk(KERN_ERR "can't get ads7846 pen down GPIO\n");
+}
+
 static void __init htcwizard_init(void)
 {
   printk("HTC Wizard init.\n");
@@ -182,8 +236,15 @@ static void __init htcwizard_init(void)
   omap_board_config = htcwizard_config;
   omap_board_config_size = ARRAY_SIZE(htcwizard_config);
   platform_add_devices(devices, ARRAY_SIZE(devices));
-  
+
   htcwizard_disable_watchdog();
+
+  /* For testing.. Disable for now
+	* spi_register_board_info(htcwizard_spi_board_info,
+				ARRAY_SIZE(htcwizard_spi_board_info));
+  
+  ads7846_dev_init(); */
+
 }
 
 static void __init htcwizard_init_irq(void)

@@ -597,7 +597,7 @@ omap_otg_init(struct omap_usb_config *config)
 	if (config->otg) {
 		syscon &= ~OTG_IDLE_EN;
 		otg_device.dev.platform_data = config;
-		if (cpu_is_omap730() || cpu_is_ompa850 ())
+		if (cpu_is_omap730() || cpu_is_omap850 ())
 			otg_resources[1].start = INT_730_USB_OTG;
 		status = platform_device_register(&otg_device);
 		if (status)

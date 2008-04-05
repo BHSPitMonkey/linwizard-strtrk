@@ -336,7 +336,7 @@ void omap_pm_suspend(void)
 	omap_writew(omap_readw(ARM_RSTCT1) & ~(1 << DSP_EN), ARM_RSTCT1);
 
 		/* shut down dsp_ck */
-	if (!cpu_is_omap730() && !cpu_is_omap850)
+	if (!cpu_is_omap730() && !cpu_is_omap850())
 		omap_writew(omap_readw(ARM_CKCTL) & ~(1 << EN_DSPCK), ARM_CKCTL);
 
 	/* temporarily enabling api_ck to access DSP registers */
