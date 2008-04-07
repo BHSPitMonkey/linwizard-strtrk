@@ -65,6 +65,11 @@
 #undef USE_DMA
 #endif
 
+/* FIXME: DMA doesn't work on wizard. */
+#ifdef CONFIG_MACH_OMAP_HTCWIZARD
+#undef USE_DMA
+#endif
+
 /* ISO too */
 #define	USE_ISO
 
@@ -2557,6 +2562,7 @@ omap_ep_setup(char *name, u8 addr, u8 type,
 		 */
 		if ((!use_dma && (addr & USB_DIR_IN))
 				|| machine_is_omap_apollon()
+				|| machine_is_omap_htcwizard()
 				|| cpu_is_omap15xx())
 			dbuf = 0;
 

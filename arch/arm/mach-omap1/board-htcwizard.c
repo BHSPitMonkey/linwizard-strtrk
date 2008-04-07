@@ -52,6 +52,9 @@
 
 #define ADS7846_PENDOWN_GPIO	76
 
+#define HTCWIZARD_GPIO_DM 35
+#define HTCWIZARD_GPIO_DP 36
+
 static struct omap_lcd_config htcwizard_lcd_config __initdata = {
 	.ctrl_name	= "internal",
 };
@@ -229,6 +232,70 @@ static void ads7846_dev_init(void)
 		printk(KERN_ERR "can't get ads7846 pen down GPIO\n");
 }
 
+static void __init htcwizard_usb_enable(void)
+{
+	unsigned int tries = 20;
+	printk("trying to enable USB.\n");
+
+	/* force USB_EN GPIO to 0 */
+	do {
+		omap_set_gpio_direction(33, 0); /* output */
+		omap_set_gpio_dataout(33, 0); /* low */
+		--tries;
+	} while(omap_get_gpio_datain(33) && tries);
+	if (tries) {
+		printk("unable to reset USB_EN GPIO after 20 tries.\n");
+		printk("I will try to continue anyway: USB may not be available.\n");
+	}
+	printk("USB_EN to 0 after %i tries.\n", tries);
+
+	omap_set_gpio_dataout(73, 0);
+	
+	omap_set_gpio_direction(HTCWIZARD_GPIO_DM, 1); /* input */
+	
+	/* get uart control from GSM */
+	
+	/* select GPIO35 for D_MCLK_OUT */
+	/* select GPIO36 for D_CRESET */
+	omap_writel(omap_readl(OMAP730_IO_CONF_3) & 0xffffffcc, OMAP730_IO_CONF_3);
+	omap_writel(omap_readl(OMAP730_IO_CONF_3) | 0x000000cc, OMAP730_IO_CONF_3);
+	
+
+	omap_set_gpio_direction(HTCWIZARD_GPIO_DP, 1); /* input */
+
+	/* select D_DM, D_DP for D_DM and disable PE_DM control */
+	omap_writel(omap_readl(OMAP730_IO_CONF_2) & 0xff1fffff, OMAP730_IO_CONF_2);
+	omap_writel(omap_readl(OMAP730_IO_CONF_2) | 0x00100000, OMAP730_IO_CONF_2);
+	mdelay(100);
+
+	/* select USB_VBUSI for D_VBUSI, enable PE_VIBUSI pull enable control  */
+	omap_writel(omap_readl(OMAP730_IO_CONF_2) & 0xf1ffffff, OMAP730_IO_CONF_2);
+	omap_writel(omap_readl(OMAP730_IO_CONF_2) | 0x01000000, OMAP730_IO_CONF_2);
+
+	/* set USB_VBUS_CTRL */
+	omap_writel(omap_readl(OMAP730_MODE_1) | (1 << 25), OMAP730_MODE_1);
+}
+
+static void __init htcwizard_usb_otg(void)
+{
+	/* clock configuration */
+	omap_writew(omap_readw(ULPD_SOFT_REQ) | (1 << 8) | SOFT_USB_CLK_REQ, ULPD_SOFT_REQ);
+
+	//  clk_enable(&l3_ocpi_ck);
+	omap_writew(omap_readw(ARM_IDLECT3) | (1 << 0), ARM_IDLECT3);
+
+	/* pin muxing */
+	omap_writel(omap_readl(OMAP730_MODE_1) & ~(1 <<  2), OMAP730_MODE_1);
+	omap_writel(omap_readl(OMAP730_MODE_1) & ~(1 <<  3), OMAP730_MODE_1);
+	omap_writel(omap_readl(OMAP730_MODE_1) |  (1 << 15), OMAP730_MODE_1);
+	omap_writel(omap_readl(OMAP730_MODE_1) |  (1 << 23), OMAP730_MODE_1);
+	omap_writel(omap_readl(OMAP730_MODE_1) |  (1 << 26), OMAP730_MODE_1);
+	omap_writel(omap_readl(OMAP730_MODE_1) |  (1 << 25), OMAP730_MODE_1);
+	omap_writel(omap_readl(OMAP730_MODE_1) & ~(1 << 24), OMAP730_MODE_1);
+	omap_writel(omap_readl(OMAP730_MODE_1) & ~(1 << 10), OMAP730_MODE_1);
+	omap_writel(omap_readl(OMAP730_MODE_1) & ~(1 << 11), OMAP730_MODE_1);
+}
+
 static void __init htcwizard_init(void)
 {
   printk("HTC Wizard init.\n");
@@ -238,6 +305,9 @@ static void __init htcwizard_init(void)
   platform_add_devices(devices, ARRAY_SIZE(devices));
 
   htcwizard_disable_watchdog();
+
+  htcwizard_usb_otg();
+  htcwizard_usb_enable();
 
   /* For testing.. Disable for now
 	* spi_register_board_info(htcwizard_spi_board_info,
