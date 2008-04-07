@@ -27,6 +27,7 @@
 #include <linux/init.h>
 #include <linux/platform_device.h>
 #include <linux/usb/otg.h>
+#include <asm/mach-types.h>
 
 #include <asm/io.h>
 #include <asm/irq.h>
@@ -148,9 +149,12 @@ static u32 __init omap_usb0_init(unsigned nwires, unsigned is_device)
 		 *  - OTG support on this port not yet written
 		 */
 
-		USB_TRANSCEIVER_CTRL_REG &= ~(7 << 4);
-		if (!is_device)
-			USB_TRANSCEIVER_CTRL_REG |= (3 << 1);
+		/* This code harms wizard */
+		if (!machine_is_omap_htcwizard()) {
+			USB_TRANSCEIVER_CTRL_REG &= ~(7 << 4);
+			if (!is_device)
+				USB_TRANSCEIVER_CTRL_REG |= (3 << 1);
+		}
 
 		return 3 << 16;
 	}
@@ -574,7 +578,12 @@ omap_otg_init(struct omap_usb_config *config)
 	if (config->otg || config->register_dev) {
 		syscon &= ~DEV_IDLE_EN;
 		udc_device.dev.platform_data = config;
-		/* FIXME patch IRQ numbers for omap730 */
+		/* IRQ numbers for omap730 */
+		if(cpu_is_omap730() || cpu_is_omap850()) {
+			udc_resources[1].start = INT_730_USB_GENI;
+			udc_resources[2].start = INT_730_USB_NON_ISO;
+			udc_resources[3].start = INT_730_USB_ISO;
+		}
 		status = platform_device_register(&udc_device);
 		if (status)
 			pr_debug("can't register UDC device, %d\n", status);

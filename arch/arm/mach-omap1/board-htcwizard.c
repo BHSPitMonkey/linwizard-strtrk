@@ -57,10 +57,10 @@ static struct omap_lcd_config htcwizard_lcd_config __initdata = {
 };
 
 static struct omap_usb_config htcwizard_usb_config __initdata = {
-	.otg		= 1,
-	.register_host	= 1,
+	.otg		= 0,
+	.register_host	= 0,
 	.register_dev	= 1,
-	.hmc_mode	= 16,
+	.hmc_mode	= 4,
 	.pins[0]	= 2,
 };
 

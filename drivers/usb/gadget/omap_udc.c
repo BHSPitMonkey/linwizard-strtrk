@@ -2048,6 +2048,7 @@ static inline int machine_without_vbus_sense(void)
 	return (machine_is_omap_innovator()
 		|| machine_is_omap_osk()
 		|| machine_is_omap_apollon()
+		|| machine_is_omap_htcwizard()
 #ifndef CONFIG_MACH_OMAP_H4_OTG
 		|| machine_is_omap_h4()
 #endif
