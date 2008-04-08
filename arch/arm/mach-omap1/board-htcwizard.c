@@ -86,10 +86,12 @@ static int htc_wizard_keymap[] = {
 	KEY(1,1,KEY_COMMA),
 	KEY(1,2,KEY_M),
 	KEY(1,3,KEY_K),
-	KEY(1,4,KEY_OK),
+	KEY(1,4,KEY_SLASH), /* FIXME: Should be KEY_OK */
 	KEY(1,5,KEY_I),
 	KEY(1,6,KEY_U),
-	KEY(2,0,KEY_RED), // FIX ME
+	/* Handle red button as alt key,
+	 * and map keys on defkeymap */
+	KEY(2,0,KEY_LEFTALT),
 	KEY(2,1,KEY_TAB),
 	KEY(2,2,KEY_N),
 	KEY(2,3,KEY_J),
