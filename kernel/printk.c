@@ -44,10 +44,6 @@ void __attribute__((weak)) early_printk(const char *fmt, ...)
 
 #define __LOG_BUF_LEN	(1 << CONFIG_LOG_BUF_SHIFT)
 
-#ifdef        CONFIG_DEBUG_LL
-extern void printascii(char *);
-#endif
-
 /* printk's without a loglevel use this.. */
 #define DEFAULT_MESSAGE_LOGLEVEL 4 /* KERN_WARNING */
 
@@ -563,23 +559,12 @@ static void zap_locks(void)
 	init_MUTEX(&console_sem);
 }
 
-static int printk_time = 0;
-
-#ifdef CONFIG_PRINTK_TIME
-
-/*
- * Initialize printk time. Note that on some systems sched_clock()
- * does not work until timer is initialized.
- */
-static int __init printk_time_init(void)
-{
-	printk_time = 1;
-
-	return 0;
-}
-subsys_initcall(printk_time_init);
-
+#if defined(CONFIG_PRINTK_TIME)
+static int printk_time = 1;
 #else
+static int printk_time = 0;
+#endif
+module_param_named(time, printk_time, bool, S_IRUGO | S_IWUSR);
 
 /* Check if we have any console registered that can be called early in boot. */
 static int have_callable_console(void)
@@ -716,10 +701,6 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 	/* Emit the output into the temporary buffer */
 	printed_len += vscnprintf(printk_buf + printed_len,
 				  sizeof(printk_buf) - printed_len, fmt, args);
-
-#ifdef	CONFIG_DEBUG_LL
-	printascii(printk_buf);
-#endif
 
 	/*
 	 * Copy the output into log_buf.  If the caller didn't provide
