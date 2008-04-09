@@ -129,8 +129,8 @@ static int htc_wizard_keymap[] = {
 };
 
 struct omap_kp_platform_data kp_data = {
-	.rows	= 8,
-	.cols	= 8,
+	.rows	= 7,
+	.cols	= 7,
 	.delay = 10,
 	.keymap = htc_wizard_keymap,
 };
