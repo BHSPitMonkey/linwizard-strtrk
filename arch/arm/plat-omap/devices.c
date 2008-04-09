@@ -480,7 +480,8 @@ static int __init omap_init_devices(void)
 	omap_init_wdt();
 	omap_init_rng();
 	if (!cpu_is_omap2430() && !cpu_is_omap34xx()) {
-		omap_init_i2c();
+					// Broken in linwizard
+					//		omap_init_i2c();
 	}
 	return 0;
 }
