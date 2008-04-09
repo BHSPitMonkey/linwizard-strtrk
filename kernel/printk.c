@@ -801,6 +801,8 @@ out_restore_irqs:
 EXPORT_SYMBOL(printk);
 EXPORT_SYMBOL(vprintk);
 
+#else
+
 asmlinkage long sys_syslog(int type, char __user *buf, int len)
 {
 	return -ENOSYS;
