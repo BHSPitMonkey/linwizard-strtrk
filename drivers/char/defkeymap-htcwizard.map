@@ -4,8 +4,12 @@
 # Copyright (C) 2008, The linwizard team
 # http://linwizard.sourceforge.net
 #
-# Alt key will be used as Red dot key available on htc wizard
+# Red dot key available on htc wizard will behave as Alt
+#
 # TODO: Set ctrl sequences, directional keys and composite strings
+# NOTE: After editing this file dont forget to run
+# loadkeys --mktable defkeymap-htcwizard.map > defkeymap-htcwizard.c
+#
 keymaps 0-2,4-5,8,12
 
 keycode 14 = Delete
