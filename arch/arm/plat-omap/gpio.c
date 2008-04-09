@@ -1585,7 +1585,6 @@ static int __init _omap_gpio_init(void)
 
 			gpio_count = 32; /* 730 has 32-bit GPIOs */
 		}
-#endif
 #ifdef CONFIG_ARCH_OMAP850
 		if (bank->method == METHOD_GPIO_850) {
 			__raw_writel(0xffffffff, bank->base + OMAP850_GPIO_INT_MASK);
