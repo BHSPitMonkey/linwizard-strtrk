@@ -102,7 +102,8 @@ check_filename(char *str, int len, __be32 err)
 out:						\
 	return status;				\
 xdr_error:					\
-	printk(KERN_NOTICE "xdr error! (%s:%d)\n", __FILE__, __LINE__);	\
+	dprintk("NFSD: xdr error (%s:%d)\n",	\
+			__FILE__, __LINE__);	\
 	status = nfserr_bad_xdr;		\
 	goto out
 
@@ -124,7 +125,8 @@ xdr_error:					\
 	if (!(x = (p==argp->tmp || p == argp->tmpp) ? \
  		savemem(argp, p, nbytes) :	\
  		(char *)p)) {			\
-		printk(KERN_NOTICE "xdr error! (%s:%d)\n", __FILE__, __LINE__); \
+		dprintk("NFSD: xdr error (%s:%d)\n", \
+				__FILE__, __LINE__); \
 		goto xdr_error;			\
 		}				\
 	p += XDR_QUADLEN(nbytes);		\
@@ -140,17 +142,18 @@ xdr_error:					\
 		p = argp->p;			\
 		argp->p += XDR_QUADLEN(nbytes);	\
 	} else if (!(p = read_buf(argp, nbytes))) { \
-		printk(KERN_NOTICE "xdr error! (%s:%d)\n", __FILE__, __LINE__); \
+		dprintk("NFSD: xdr error (%s:%d)\n", \
+				__FILE__, __LINE__); \
 		goto xdr_error;			\
 	}					\
 } while (0)
 
-static __be32 *read_buf(struct nfsd4_compoundargs *argp, int nbytes)
+static __be32 *read_buf(struct nfsd4_compoundargs *argp, u32 nbytes)
 {
 	/* We want more bytes than seem to be available.
 	 * Maybe we need a new page, maybe we have just run out
 	 */
-	int avail = (char*)argp->end - (char*)argp->p;
+	unsigned int avail = (char *)argp->end - (char *)argp->p;
 	__be32 *p;
 	if (avail + argp->pagelen < nbytes)
 		return NULL;
@@ -166,6 +169,11 @@ static __be32 *read_buf(struct nfsd4_compoundargs *argp, int nbytes)
 			return NULL;
 		
 	}
+	/*
+	 * The following memcpy is safe because read_buf is always
+	 * called with nbytes > avail, and the two cases above both
+	 * guarantee p points to at least nbytes bytes.
+	 */
 	memcpy(p, argp->p, avail);
 	/* step to next page */
 	argp->p = page_address(argp->pagelist[0]);
@@ -948,7 +956,8 @@ nfsd4_decode_write(struct nfsd4_compoundargs *argp, struct nfsd4_write *write)
 	 */
 	avail = (char*)argp->end - (char*)argp->p;
 	if (avail + argp->pagelen < write->wr_buflen) {
-		printk(KERN_NOTICE "xdr error! (%s:%d)\n", __FILE__, __LINE__); 
+		dprintk("NFSD: xdr error (%s:%d)\n",
+				__FILE__, __LINE__);
 		goto xdr_error;
 	}
 	argp->rqstp->rq_vec[0].iov_base = p;
@@ -1019,7 +1028,7 @@ nfsd4_decode_compound(struct nfsd4_compoundargs *argp)
 		argp->ops = kmalloc(argp->opcnt * sizeof(*argp->ops), GFP_KERNEL);
 		if (!argp->ops) {
 			argp->ops = argp->iops;
-			printk(KERN_INFO "nfsd: couldn't allocate room for COMPOUND\n");
+			dprintk("nfsd: couldn't allocate room for COMPOUND\n");
 			goto xdr_error;
 		}
 	}
@@ -1321,12 +1330,12 @@ static char *nfsd4_path(struct svc_rqst *rqstp, struct svc_export *exp, __be32 *
 	*stat = exp_pseudoroot(rqstp, &tmp_fh);
 	if (*stat)
 		return NULL;
-	rootpath = tmp_fh.fh_export->ex_path;
+	rootpath = tmp_fh.fh_export->ex_pathname;
 
-	path = exp->ex_path;
+	path = exp->ex_pathname;
 
 	if (strncmp(path, rootpath, strlen(rootpath))) {
-		printk("nfsd: fs_locations failed;"
+		dprintk("nfsd: fs_locations failed;"
 			"%s is not contained in %s\n", path, rootpath);
 		*stat = nfserr_notsupp;
 		return NULL;
@@ -1444,7 +1453,7 @@ static __be32 fattr_handle_absent_fs(u32 *bmval0, u32 *bmval1, u32 *rdattr_err)
 __be32
 nfsd4_encode_fattr(struct svc_fh *fhp, struct svc_export *exp,
 		struct dentry *dentry, __be32 *buffer, int *countp, u32 *bmval,
-		struct svc_rqst *rqstp)
+		struct svc_rqst *rqstp, int ignore_crossmnt)
 {
 	u32 bmval0 = bmval[0];
 	u32 bmval1 = bmval[1];
@@ -1472,10 +1481,11 @@ nfsd4_encode_fattr(struct svc_fh *fhp, struct svc_export *exp,
 			goto out;
 	}
 
-	err = vfs_getattr(exp->ex_mnt, dentry, &stat);
+	err = vfs_getattr(exp->ex_path.mnt, dentry, &stat);
 	if (err)
 		goto out_nfserr;
-	if ((bmval0 & (FATTR4_WORD0_FILES_FREE | FATTR4_WORD0_FILES_TOTAL)) ||
+	if ((bmval0 & (FATTR4_WORD0_FILES_FREE | FATTR4_WORD0_FILES_TOTAL |
+			FATTR4_WORD0_MAXNAME)) ||
 	    (bmval1 & (FATTR4_WORD1_SPACE_AVAIL | FATTR4_WORD1_SPACE_FREE |
 		       FATTR4_WORD1_SPACE_TOTAL))) {
 		err = vfs_statfs(dentry, &statfs);
@@ -1679,7 +1689,7 @@ out_acl:
 	if (bmval0 & FATTR4_WORD0_FILEID) {
 		if ((buflen -= 8) < 0)
 			goto out_resource;
-		WRITE64((u64) stat.ino);
+		WRITE64(stat.ino);
 	}
 	if (bmval0 & FATTR4_WORD0_FILES_AVAIL) {
 		if ((buflen -= 8) < 0)
@@ -1721,7 +1731,7 @@ out_acl:
 	if (bmval0 & FATTR4_WORD0_MAXNAME) {
 		if ((buflen -= 4) < 0)
 			goto out_resource;
-		WRITE32(~(u32) 0);
+		WRITE32(statfs.f_namelen);
 	}
 	if (bmval0 & FATTR4_WORD0_MAXREAD) {
 		if ((buflen -= 8) < 0)
@@ -1821,16 +1831,20 @@ out_acl:
 		WRITE32(stat.mtime.tv_nsec);
 	}
 	if (bmval1 & FATTR4_WORD1_MOUNTED_ON_FILEID) {
-		struct dentry *mnt_pnt, *mnt_root;
-
 		if ((buflen -= 8) < 0)
                 	goto out_resource;
-		mnt_root = exp->ex_mnt->mnt_root;
-		if (mnt_root->d_inode == dentry->d_inode) {
-			mnt_pnt = exp->ex_mnt->mnt_mountpoint;
-			WRITE64((u64) mnt_pnt->d_inode->i_ino);
-		} else
-                	WRITE64((u64) stat.ino);
+		/*
+		 * Get parent's attributes if not ignoring crossmount
+		 * and this is the root of a cross-mounted filesystem.
+		 */
+		if (ignore_crossmnt == 0 &&
+		    exp->ex_path.mnt->mnt_root->d_inode == dentry->d_inode) {
+			err = vfs_getattr(exp->ex_path.mnt->mnt_parent,
+				exp->ex_path.mnt->mnt_mountpoint, &stat);
+			if (err)
+				goto out_nfserr;
+		}
+		WRITE64(stat.ino);
 	}
 	*attrlenp = htonl((char *)p - (char *)attrlenp - 4);
 	*countp = p - buffer;
@@ -1860,13 +1874,25 @@ nfsd4_encode_dirent_fattr(struct nfsd4_readdir *cd,
 	struct svc_export *exp = cd->rd_fhp->fh_export;
 	struct dentry *dentry;
 	__be32 nfserr;
+	int ignore_crossmnt = 0;
 
 	dentry = lookup_one_len(name, cd->rd_fhp->fh_dentry, namlen);
 	if (IS_ERR(dentry))
 		return nfserrno(PTR_ERR(dentry));
 
 	exp_get(exp);
-	if (d_mountpoint(dentry)) {
+	/*
+	 * In the case of a mountpoint, the client may be asking for
+	 * attributes that are only properties of the underlying filesystem
+	 * as opposed to the cross-mounted file system. In such a case,
+	 * we will not follow the cross mount and will fill the attribtutes
+	 * directly from the mountpoint dentry.
+	 */
+	if (d_mountpoint(dentry) &&
+	    (cd->rd_bmval[0] & ~FATTR4_WORD0_RDATTR_ERROR) == 0 &&
+	    (cd->rd_bmval[1] & ~FATTR4_WORD1_MOUNTED_ON_FILEID) == 0)
+		ignore_crossmnt = 1;
+	else if (d_mountpoint(dentry)) {
 		int err;
 
 		/*
@@ -1885,7 +1911,7 @@ nfsd4_encode_dirent_fattr(struct nfsd4_readdir *cd,
 
 	}
 	nfserr = nfsd4_encode_fattr(NULL, exp, dentry, p, buflen, cd->rd_bmval,
-					cd->rd_rqstp);
+					cd->rd_rqstp, ignore_crossmnt);
 out_put:
 	dput(dentry);
 	exp_put(exp);
@@ -2039,7 +2065,7 @@ nfsd4_encode_getattr(struct nfsd4_compoundres *resp, __be32 nfserr, struct nfsd4
 	buflen = resp->end - resp->p - (COMPOUND_ERR_SLACK_SPACE >> 2);
 	nfserr = nfsd4_encode_fattr(fhp, fhp->fh_export, fhp->fh_dentry,
 				    resp->p, &buflen, getattr->ga_bmval,
-				    resp->rqstp);
+				    resp->rqstp, 0);
 	if (!nfserr)
 		resp->p += buflen;
 	return nfserr;

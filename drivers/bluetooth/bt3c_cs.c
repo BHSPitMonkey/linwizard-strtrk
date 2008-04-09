@@ -344,10 +344,7 @@ static irqreturn_t bt3c_interrupt(int irq, void *dev_inst)
 	unsigned int iobase;
 	int iir;
 
-	if (!info || !info->hdev) {
-		BT_ERR("Call of irq %d for unknown device", irq);
-		return IRQ_NONE;
-	}
+	BUG_ON(!info->hdev);
 
 	iobase = info->p_dev->io.BasePort1;
 
@@ -707,7 +704,7 @@ static int next_tuple(struct pcmcia_device *handle, tuple_t *tuple, cisparse_t *
 
 static int bt3c_config(struct pcmcia_device *link)
 {
-	static kio_addr_t base[5] = { 0x3f8, 0x2f8, 0x3e8, 0x2e8, 0x0 };
+	static unsigned int base[5] = { 0x3f8, 0x2f8, 0x3e8, 0x2e8, 0x0 };
 	bt3c_info_t *info = link->priv;
 	tuple_t tuple;
 	u_short buf[256];

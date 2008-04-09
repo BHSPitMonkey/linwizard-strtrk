@@ -56,14 +56,15 @@ struct sane_reply_net_start {
 	/* other fields aren't interesting for conntrack */
 };
 
-static int help(struct sk_buff **pskb,
+static int help(struct sk_buff *skb,
 		unsigned int protoff,
 		struct nf_conn *ct,
 		enum ip_conntrack_info ctinfo)
 {
 	unsigned int dataoff, datalen;
-	struct tcphdr _tcph, *th;
-	char *sb_ptr;
+	const struct tcphdr *th;
+	struct tcphdr _tcph;
+	void *sb_ptr;
 	int ret = NF_ACCEPT;
 	int dir = CTINFO2DIR(ctinfo);
 	struct nf_ct_sane_master *ct_sane_info;
@@ -80,26 +81,26 @@ static int help(struct sk_buff **pskb,
 		return NF_ACCEPT;
 
 	/* Not a full tcp header? */
-	th = skb_header_pointer(*pskb, protoff, sizeof(_tcph), &_tcph);
+	th = skb_header_pointer(skb, protoff, sizeof(_tcph), &_tcph);
 	if (th == NULL)
 		return NF_ACCEPT;
 
 	/* No data? */
 	dataoff = protoff + th->doff * 4;
-	if (dataoff >= (*pskb)->len)
+	if (dataoff >= skb->len)
 		return NF_ACCEPT;
 
-	datalen = (*pskb)->len - dataoff;
+	datalen = skb->len - dataoff;
 
 	spin_lock_bh(&nf_sane_lock);
-	sb_ptr = skb_header_pointer(*pskb, dataoff, datalen, sane_buffer);
+	sb_ptr = skb_header_pointer(skb, dataoff, datalen, sane_buffer);
 	BUG_ON(sb_ptr == NULL);
 
 	if (dir == IP_CT_DIR_ORIGINAL) {
 		if (datalen != sizeof(struct sane_request))
 			goto out;
 
-		req = (struct sane_request *)sb_ptr;
+		req = sb_ptr;
 		if (req->RPC_code != htonl(SANE_NET_START)) {
 			/* Not an interesting command */
 			ct_sane_info->state = SANE_STATE_NORMAL;
@@ -123,7 +124,7 @@ static int help(struct sk_buff **pskb,
 		goto out;
 	}
 
-	reply = (struct sane_reply_net_start *)sb_ptr;
+	reply = sb_ptr;
 	if (reply->status != htonl(SANE_STATUS_SUCCESS)) {
 		/* saned refused the command */
 		pr_debug("nf_ct_sane: unsuccessful SANE_STATUS = %u\n",

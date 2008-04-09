@@ -10,8 +10,10 @@
  *  Copyright (c) 2000-2003 David McCullough <davidm@snapgear.com>
  *  Copyright (c) 2000-2001 D Jeff Dionne <jeff@uClinux.org>
  *  Copyright (c) 2002      Greg Ungerer <gerg@snapgear.com>
+ *  Copyright (c) 2007      Paul Mundt <lethal@linux-sh.org>
  */
 
+#include <linux/module.h>
 #include <linux/mm.h>
 #include <linux/mman.h>
 #include <linux/swap.h>
@@ -44,7 +46,6 @@ int sysctl_max_map_count = DEFAULT_MAX_MAP_COUNT;
 int heap_stack_gap = 0;
 
 EXPORT_SYMBOL(mem_map);
-EXPORT_SYMBOL(__vm_enough_memory);
 EXPORT_SYMBOL(num_physpages);
 
 /* list of shareable VMAs */
@@ -167,7 +168,7 @@ EXPORT_SYMBOL(get_user_pages);
 DEFINE_RWLOCK(vmlist_lock);
 struct vm_struct *vmlist;
 
-void vfree(void *addr)
+void vfree(const void *addr)
 {
 	kfree(addr);
 }
@@ -176,19 +177,40 @@ EXPORT_SYMBOL(vfree);
 void *__vmalloc(unsigned long size, gfp_t gfp_mask, pgprot_t prot)
 {
 	/*
-	 * kmalloc doesn't like __GFP_HIGHMEM for some reason
+	 *  You can't specify __GFP_HIGHMEM with kmalloc() since kmalloc()
+	 * returns only a logical address.
 	 */
 	return kmalloc(size, (gfp_mask | __GFP_COMP) & ~__GFP_HIGHMEM);
 }
 EXPORT_SYMBOL(__vmalloc);
 
-struct page * vmalloc_to_page(void *addr)
+void *vmalloc_user(unsigned long size)
+{
+	void *ret;
+
+	ret = __vmalloc(size, GFP_KERNEL | __GFP_HIGHMEM | __GFP_ZERO,
+			PAGE_KERNEL);
+	if (ret) {
+		struct vm_area_struct *vma;
+
+		down_write(&current->mm->mmap_sem);
+		vma = find_vma(current->mm, (unsigned long)ret);
+		if (vma)
+			vma->vm_flags |= VM_USERMAP;
+		up_write(&current->mm->mmap_sem);
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL(vmalloc_user);
+
+struct page *vmalloc_to_page(const void *addr)
 {
 	return virt_to_page(addr);
 }
 EXPORT_SYMBOL(vmalloc_to_page);
 
-unsigned long vmalloc_to_pfn(void *addr)
+unsigned long vmalloc_to_pfn(const void *addr)
 {
 	return page_to_pfn(virt_to_page(addr));
 }
@@ -252,10 +274,17 @@ EXPORT_SYMBOL(vmalloc_32);
  *
  * The resulting memory area is 32bit addressable and zeroed so it can be
  * mapped to userspace without leaking data.
+ *
+ * VM_USERMAP is set on the corresponding VMA so that subsequent calls to
+ * remap_vmalloc_range() are permissible.
  */
 void *vmalloc_32_user(unsigned long size)
 {
-	return __vmalloc(size, GFP_KERNEL | __GFP_ZERO, PAGE_KERNEL);
+	/*
+	 * We'll have to sort out the ZONE_DMA bits for 64-bit,
+	 * but for now this can simply use vmalloc_user() directly.
+	 */
+	return vmalloc_user(size);
 }
 EXPORT_SYMBOL(vmalloc_32_user);
 
@@ -266,7 +295,7 @@ void *vmap(struct page **pages, unsigned int count, unsigned long flags, pgprot_
 }
 EXPORT_SYMBOL(vmap);
 
-void vunmap(void *addr)
+void vunmap(const void *addr)
 {
 	BUG();
 }
@@ -828,6 +857,9 @@ unsigned long do_mmap_pgoff(struct file *file,
 	void *result;
 	int ret;
 
+	if (!(flags & MAP_FIXED))
+		addr = round_hint_to_min(addr);
+
 	/* decide whether we should attempt the mapping, and if so what sort of
 	 * mapping */
 	ret = validate_mmap_request(file, addr, len, prot, flags, pgoff,
@@ -1211,6 +1243,21 @@ int remap_pfn_range(struct vm_area_struct *vma, unsigned long from,
 	return 0;
 }
 EXPORT_SYMBOL(remap_pfn_range);
+
+int remap_vmalloc_range(struct vm_area_struct *vma, void *addr,
+			unsigned long pgoff)
+{
+	unsigned int size = vma->vm_end - vma->vm_start;
+
+	if (!(vma->vm_flags & VM_USERMAP))
+		return -EINVAL;
+
+	vma->vm_start = (unsigned long)(addr + (pgoff << PAGE_SHIFT));
+	vma->vm_end = vma->vm_start + size;
+
+	return 0;
+}
+EXPORT_SYMBOL(remap_vmalloc_range);
 
 void swap_unplug_io_fn(struct backing_dev_info *bdi, struct page *page)
 {

@@ -34,12 +34,13 @@
 #include <linux/init.h>
 #include <linux/moduleparam.h>
 #include <net/pkt_sched.h>
+#include <net/net_namespace.h>
+#include <linux/lockdep.h>
 
 #define TX_TIMEOUT  (2*HZ)
 
 #define TX_Q_LIMIT    32
 struct ifb_private {
-	struct net_device_stats stats;
 	struct tasklet_struct   ifb_tasklet;
 	int     tasklet_pending;
 	/* mostly debug stats leave in for now */
@@ -60,7 +61,6 @@ static int numifbs = 2;
 
 static void ri_tasklet(unsigned long dev);
 static int ifb_xmit(struct sk_buff *skb, struct net_device *dev);
-static struct net_device_stats *ifb_get_stats(struct net_device *dev);
 static int ifb_open(struct net_device *dev);
 static int ifb_close(struct net_device *dev);
 
@@ -69,7 +69,7 @@ static void ri_tasklet(unsigned long dev)
 
 	struct net_device *_dev = (struct net_device *)dev;
 	struct ifb_private *dp = netdev_priv(_dev);
-	struct net_device_stats *stats = &dp->stats;
+	struct net_device_stats *stats = &_dev->stats;
 	struct sk_buff *skb;
 
 	dp->st_task_enter++;
@@ -97,7 +97,7 @@ static void ri_tasklet(unsigned long dev)
 		stats->tx_packets++;
 		stats->tx_bytes +=skb->len;
 
-		skb->dev = __dev_get_by_index(skb->iif);
+		skb->dev = __dev_get_by_index(&init_net, skb->iif);
 		if (!skb->dev) {
 			dev_kfree_skb(skb);
 			stats->tx_dropped++;
@@ -139,7 +139,6 @@ resched:
 static void ifb_setup(struct net_device *dev)
 {
 	/* Initialize the device structure. */
-	dev->get_stats = ifb_get_stats;
 	dev->hard_start_xmit = ifb_xmit;
 	dev->open = &ifb_open;
 	dev->stop = &ifb_close;
@@ -151,14 +150,13 @@ static void ifb_setup(struct net_device *dev)
 	dev->change_mtu = NULL;
 	dev->flags |= IFF_NOARP;
 	dev->flags &= ~IFF_MULTICAST;
-	SET_MODULE_OWNER(dev);
 	random_ether_addr(dev->dev_addr);
 }
 
 static int ifb_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct ifb_private *dp = netdev_priv(dev);
-	struct net_device_stats *stats = &dp->stats;
+	struct net_device_stats *stats = &dev->stats;
 	int ret = 0;
 	u32 from = G_TC_FROM(skb->tc_verd);
 
@@ -183,19 +181,6 @@ static int ifb_xmit(struct sk_buff *skb, struct net_device *dev)
 	}
 
 	return ret;
-}
-
-static struct net_device_stats *ifb_get_stats(struct net_device *dev)
-{
-	struct ifb_private *dp = netdev_priv(dev);
-	struct net_device_stats *stats = &dp->stats;
-
-	pr_debug("tasklets stats %ld:%ld:%ld:%ld:%ld:%ld:%ld:%ld:%ld \n",
-		dp->st_task_enter, dp->st_txq_refl_try, dp->st_rxq_enter,
-		dp->st_rx2tx_tran, dp->st_rxq_notenter, dp->st_rx_frm_egr,
-		dp->st_rx_frm_ing, dp->st_rxq_check, dp->st_rxq_rsch);
-
-	return stats;
 }
 
 static int ifb_close(struct net_device *dev)
@@ -243,6 +228,16 @@ static struct rtnl_link_ops ifb_link_ops __read_mostly = {
 module_param(numifbs, int, 0);
 MODULE_PARM_DESC(numifbs, "Number of ifb devices");
 
+/*
+ * dev_ifb->queue_lock is usually taken after dev->ingress_lock,
+ * reversely to e.g. qdisc_lock_tree(). It should be safe until
+ * ifb doesn't take dev->queue_lock with dev_ifb->ingress_lock.
+ * But lockdep should know that ifb has different locks from dev.
+ */
+static struct lock_class_key ifb_queue_lock_key;
+static struct lock_class_key ifb_ingress_lock_key;
+
+
 static int __init ifb_init_one(int index)
 {
 	struct net_device *dev_ifb;
@@ -262,6 +257,10 @@ static int __init ifb_init_one(int index)
 	err = register_netdevice(dev_ifb);
 	if (err < 0)
 		goto err;
+
+	lockdep_set_class(&dev_ifb->queue_lock, &ifb_queue_lock_key);
+	lockdep_set_class(&dev_ifb->ingress_lock, &ifb_ingress_lock_key);
+
 	return 0;
 
 err:

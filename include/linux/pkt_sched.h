@@ -77,11 +77,13 @@ struct tc_ratespec
 {
 	unsigned char	cell_log;
 	unsigned char	__reserved;
-	unsigned short	feature;
-	short		addend;
+	unsigned short	overhead;
+	short		cell_align;
 	unsigned short	mpu;
 	__u32		rate;
 };
+
+#define TC_RTAB_SIZE	1024
 
 /* FIFO section */
 
@@ -146,6 +148,11 @@ struct tc_sfq_qopt
 	__u32		limit;		/* Maximal packets in queue */
 	unsigned	divisor;	/* Hash divisor  */
 	unsigned	flows;		/* Maximal number of flows  */
+};
+
+struct tc_sfq_xstats
+{
+	__s32		allot;
 };
 
 /*

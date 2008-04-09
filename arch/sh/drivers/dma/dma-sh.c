@@ -24,13 +24,20 @@ static int dmte_irq_map[] = {
 	DMTE1_IRQ,
 	DMTE2_IRQ,
 	DMTE3_IRQ,
-#if defined(CONFIG_CPU_SUBTYPE_SH7751R) ||	\
+#if defined(CONFIG_CPU_SUBTYPE_SH7720)  ||	\
+    defined(CONFIG_CPU_SUBTYPE_SH7721)  ||	\
+    defined(CONFIG_CPU_SUBTYPE_SH7751R) ||	\
     defined(CONFIG_CPU_SUBTYPE_SH7760)  ||	\
+    defined(CONFIG_CPU_SUBTYPE_SH7709)  ||	\
     defined(CONFIG_CPU_SUBTYPE_SH7780)
 	DMTE4_IRQ,
 	DMTE5_IRQ,
+#endif
+#if defined(CONFIG_CPU_SUBTYPE_SH7751R) ||	\
+    defined(CONFIG_CPU_SUBTYPE_SH7760)  ||	\
+    defined(CONFIG_CPU_SUBTYPE_SH7780)
 	DMTE6_IRQ,
-	DMTE7_IRQ,    
+	DMTE7_IRQ,
 #endif
 };
 
@@ -83,7 +90,7 @@ static irqreturn_t dma_tei(int irq, void *dev_id)
 
 static int sh_dmac_request_dma(struct dma_channel *chan)
 {
-	if (unlikely(!chan->flags & DMA_TEI_CAPABLE))
+	if (unlikely(!(chan->flags & DMA_TEI_CAPABLE)))
 		return 0;
 
 	return request_irq(get_dmte_irq(chan->chan), dma_tei,
@@ -196,7 +203,9 @@ static int sh_dmac_get_dma_residue(struct dma_channel *chan)
 	return ctrl_inl(DMATCR[chan->chan]) << calc_xmit_shift(chan);
 }
 
-#ifdef CONFIG_CPU_SUBTYPE_SH7780
+#if defined(CONFIG_CPU_SUBTYPE_SH7720) || \
+    defined(CONFIG_CPU_SUBTYPE_SH7721) || \
+    defined(CONFIG_CPU_SUBTYPE_SH7780)
 #define dmaor_read_reg()	ctrl_inw(DMAOR)
 #define dmaor_write_reg(data)	ctrl_outw(data, DMAOR)
 #else

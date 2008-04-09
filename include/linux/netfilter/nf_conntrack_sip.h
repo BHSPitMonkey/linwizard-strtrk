@@ -21,18 +21,18 @@ enum sip_header_pos {
 	POS_SDP_HEADER,
 };
 
-extern unsigned int (*nf_nat_sip_hook)(struct sk_buff **pskb,
+extern unsigned int (*nf_nat_sip_hook)(struct sk_buff *skb,
 				       enum ip_conntrack_info ctinfo,
 				       struct nf_conn *ct,
 				       const char **dptr);
-extern unsigned int (*nf_nat_sdp_hook)(struct sk_buff **pskb,
+extern unsigned int (*nf_nat_sdp_hook)(struct sk_buff *skb,
 				       enum ip_conntrack_info ctinfo,
 				       struct nf_conntrack_expect *exp,
 				       const char *dptr);
 
-extern int ct_sip_get_info(struct nf_conn *ct, const char *dptr, size_t dlen,
-			   unsigned int *matchoff, unsigned int *matchlen,
-			   enum sip_header_pos pos);
+extern int ct_sip_get_info(const struct nf_conn *ct, const char *dptr,
+                           size_t dlen, unsigned int *matchoff,
+                           unsigned int *matchlen, enum sip_header_pos pos);
 extern int ct_sip_lnlen(const char *line, const char *limit);
 extern const char *ct_sip_search(const char *needle, const char *haystack,
 				 size_t needle_len, size_t haystack_len,

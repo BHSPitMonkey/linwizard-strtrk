@@ -63,7 +63,7 @@
 #define UGETH_MSG_DEFAULT	(NETIF_MSG_IFUP << 1 ) - 1
 
 void uec_set_ethtool_ops(struct net_device *netdev);
-	
+
 static DEFINE_SPINLOCK(ugeth_lock);
 
 static struct {
@@ -154,8 +154,8 @@ static struct ucc_geth_info ugeth_primary_info = {
 	.rxQoSMode = UCC_GETH_QOS_MODE_DEFAULT,
 	.aufc = UPSMR_AUTOMATIC_FLOW_CONTROL_MODE_NONE,
 	.padAndCrc = MACCFG2_PAD_AND_CRC_MODE_PAD_AND_CRC,
-	.numThreadsTx = UCC_GETH_NUM_OF_THREADS_4,
-	.numThreadsRx = UCC_GETH_NUM_OF_THREADS_4,
+	.numThreadsTx = UCC_GETH_NUM_OF_THREADS_1,
+	.numThreadsRx = UCC_GETH_NUM_OF_THREADS_1,
 	.riscTx = QE_RISC_ALLOCATION_RISC1_AND_RISC2,
 	.riscRx = QE_RISC_ALLOCATION_RISC1_AND_RISC2,
 };
@@ -1460,6 +1460,8 @@ static int adjust_enet_interface(struct ucc_geth_private *ugeth)
 	if ((ugeth->phy_interface == PHY_INTERFACE_MODE_RMII) ||
 	    (ugeth->phy_interface == PHY_INTERFACE_MODE_RGMII) ||
 	    (ugeth->phy_interface == PHY_INTERFACE_MODE_RGMII_ID) ||
+	    (ugeth->phy_interface == PHY_INTERFACE_MODE_RGMII_RXID) ||
+	    (ugeth->phy_interface == PHY_INTERFACE_MODE_RGMII_TXID) ||
 	    (ugeth->phy_interface == PHY_INTERFACE_MODE_RTBI)) {
 		upsmr |= UPSMR_RPM;
 		switch (ugeth->max_speed) {
@@ -1557,6 +1559,8 @@ static void adjust_link(struct net_device *dev)
 				if ((ugeth->phy_interface == PHY_INTERFACE_MODE_RMII) ||
 				    (ugeth->phy_interface == PHY_INTERFACE_MODE_RGMII) ||
 				    (ugeth->phy_interface == PHY_INTERFACE_MODE_RGMII_ID) ||
+				    (ugeth->phy_interface == PHY_INTERFACE_MODE_RGMII_RXID) ||
+				    (ugeth->phy_interface == PHY_INTERFACE_MODE_RGMII_TXID) ||
 				    (ugeth->phy_interface == PHY_INTERFACE_MODE_RTBI)) {
 					if (phydev->speed == SPEED_10)
 						upsmr |= UPSMR_R10M;
@@ -2080,8 +2084,10 @@ static void ucc_geth_memclean(struct ucc_geth_private *ugeth)
 	if (!ugeth)
 		return;
 
-	if (ugeth->uccf)
+	if (ugeth->uccf) {
 		ucc_fast_free(ugeth->uccf);
+		ugeth->uccf = NULL;
+	}
 
 	if (ugeth->p_thread_data_tx) {
 		qe_muram_free(ugeth->thread_dat_tx_offset);
@@ -2214,9 +2220,7 @@ static void ucc_geth_set_multi(struct net_device *dev)
 	struct dev_mc_list *dmi;
 	struct ucc_fast *uf_regs;
 	struct ucc_geth_82xx_address_filtering_pram *p_82xx_addr_filt;
-	u8 tempaddr[6];
-	u8 *mcptr, *tdptr;
-	int i, j;
+	int i;
 
 	ugeth = netdev_priv(dev);
 
@@ -2255,19 +2259,10 @@ static void ucc_geth_set_multi(struct net_device *dev)
 				if (!(dmi->dmi_addr[0] & 1))
 					continue;
 
-				/* The address in dmi_addr is LSB first,
-				 * and taddr is MSB first.  We have to
-				 * copy bytes MSB first from dmi_addr.
-				 */
-				mcptr = (u8 *) dmi->dmi_addr + 5;
-				tdptr = (u8 *) tempaddr;
-				for (j = 0; j < 6; j++)
-					*tdptr++ = *mcptr--;
-
 				/* Ask CPM to run CRC and set bit in
 				 * filter mask.
 				 */
-				hw_add_addr_in_hash(ugeth, tempaddr);
+				hw_add_addr_in_hash(ugeth, dmi->dmi_addr);
 			}
 		}
 	}
@@ -2311,10 +2306,6 @@ static int ucc_struct_init(struct ucc_geth_private *ugeth)
 
 	ug_info = ugeth->ug_info;
 	uf_info = &ug_info->uf_info;
-
-	/* Create CQs for hash tables */
-	INIT_LIST_HEAD(&ugeth->group_hash_q);
-	INIT_LIST_HEAD(&ugeth->ind_hash_q);
 
 	if (!((uf_info->bd_mem_part == MEM_PART_SYSTEM) ||
 	      (uf_info->bd_mem_part == MEM_PART_MURAM))) {
@@ -2919,7 +2910,7 @@ static int ucc_geth_startup(struct ucc_geth_private *ugeth)
 	test = in_be16(&ugeth->p_tx_glbl_pram->temoder);
 
 	/* Function code register value to be used later */
-	function_code = QE_BMR_BYTE_ORDER_BO_MOT | UCC_FAST_FUNCTION_CODE_GBL;
+	function_code = UCC_BMR_BO_BE | UCC_BMR_GBL;
 	/* Required for QE */
 
 	/* function code register */
@@ -3350,14 +3341,6 @@ static int ucc_geth_startup(struct ucc_geth_private *ugeth)
 	return 0;
 }
 
-/* returns a net_device_stats structure pointer */
-static struct net_device_stats *ucc_geth_get_stats(struct net_device *dev)
-{
-	struct ucc_geth_private *ugeth = netdev_priv(dev);
-
-	return &(ugeth->stats);
-}
-
 /* ucc_geth_timeout gets called when a packet has not been
  * transmitted after a set amount of time.
  * For now, assume that clearing out all the structures, and
@@ -3368,7 +3351,7 @@ static void ucc_geth_timeout(struct net_device *dev)
 
 	ugeth_vdbg("%s: IN", __FUNCTION__);
 
-	ugeth->stats.tx_errors++;
+	dev->stats.tx_errors++;
 
 	ugeth_dump_regs(ugeth);
 
@@ -3396,7 +3379,7 @@ static int ucc_geth_start_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	spin_lock_irq(&ugeth->lock);
 
-	ugeth->stats.tx_bytes += skb->len;
+	dev->stats.tx_bytes += skb->len;
 
 	/* Start from the next BD that should be filled */
 	bd = ugeth->txBd[txQ];
@@ -3462,8 +3445,11 @@ static int ucc_geth_rx(struct ucc_geth_private *ugeth, u8 rxQ, int rx_work_limit
 	u16 length, howmany = 0;
 	u32 bd_status;
 	u8 *bdBuffer;
+	struct net_device *dev;
 
 	ugeth_vdbg("%s: IN", __FUNCTION__);
+
+	dev = ugeth->dev;
 
 	/* collect received buffers */
 	bd = ugeth->rxBd[rxQ];
@@ -3488,9 +3474,9 @@ static int ucc_geth_rx(struct ucc_geth_private *ugeth, u8 rxQ, int rx_work_limit
 				dev_kfree_skb_any(skb);
 
 			ugeth->rx_skbuff[rxQ][ugeth->skb_currx[rxQ]] = NULL;
-			ugeth->stats.rx_dropped++;
+			dev->stats.rx_dropped++;
 		} else {
-			ugeth->stats.rx_packets++;
+			dev->stats.rx_packets++;
 			howmany++;
 
 			/* Prep the skb for the packet */
@@ -3499,7 +3485,7 @@ static int ucc_geth_rx(struct ucc_geth_private *ugeth, u8 rxQ, int rx_work_limit
 			/* Tell the skb what kind of packet this is */
 			skb->protocol = eth_type_trans(skb, ugeth->dev);
 
-			ugeth->stats.rx_bytes += length;
+			dev->stats.rx_bytes += length;
 			/* Send the packet up the stack */
 #ifdef CONFIG_UGETH_NAPI
 			netif_receive_skb(skb);
@@ -3514,7 +3500,7 @@ static int ucc_geth_rx(struct ucc_geth_private *ugeth, u8 rxQ, int rx_work_limit
 		if (!skb) {
 			if (netif_msg_rx_err(ugeth))
 				ugeth_warn("%s: No Rx Data Buffer", __FUNCTION__);
-			ugeth->stats.rx_dropped++;
+			dev->stats.rx_dropped++;
 			break;
 		}
 
@@ -3556,7 +3542,7 @@ static int ucc_geth_tx(struct net_device *dev, u8 txQ)
 		if ((bd == ugeth->txBd[txQ]) && (netif_queue_stopped(dev) == 0))
 			break;
 
-		ugeth->stats.tx_packets++;
+		dev->stats.tx_packets++;
 
 		/* Free the sk buffer associated with this TxBD */
 		dev_kfree_skb_irq(ugeth->
@@ -3582,47 +3568,37 @@ static int ucc_geth_tx(struct net_device *dev, u8 txQ)
 }
 
 #ifdef CONFIG_UGETH_NAPI
-static int ucc_geth_poll(struct net_device *dev, int *budget)
+static int ucc_geth_poll(struct napi_struct *napi, int budget)
 {
-	struct ucc_geth_private *ugeth = netdev_priv(dev);
+	struct ucc_geth_private *ugeth = container_of(napi, struct ucc_geth_private, napi);
+	struct net_device *dev = ugeth->dev;
 	struct ucc_geth_info *ug_info;
-	struct ucc_fast_private *uccf;
-	int howmany;
-	u8 i;
-	int rx_work_limit;
-	register u32 uccm;
+	int howmany, i;
 
 	ug_info = ugeth->ug_info;
 
-	rx_work_limit = *budget;
-	if (rx_work_limit > dev->quota)
-		rx_work_limit = dev->quota;
-
 	howmany = 0;
+	for (i = 0; i < ug_info->numQueuesRx; i++)
+		howmany += ucc_geth_rx(ugeth, i, budget - howmany);
 
-	for (i = 0; i < ug_info->numQueuesRx; i++) {
-		howmany += ucc_geth_rx(ugeth, i, rx_work_limit);
-	}
+	if (howmany < budget) {
+		struct ucc_fast_private *uccf;
+		u32 uccm;
 
-	dev->quota -= howmany;
-	rx_work_limit -= howmany;
-	*budget -= howmany;
-
-	if (rx_work_limit > 0) {
-		netif_rx_complete(dev);
+		netif_rx_complete(dev, napi);
 		uccf = ugeth->uccf;
 		uccm = in_be32(uccf->p_uccm);
 		uccm |= UCCE_RX_EVENTS;
 		out_be32(uccf->p_uccm, uccm);
 	}
 
-	return (rx_work_limit > 0) ? 0 : 1;
+	return howmany;
 }
 #endif				/* CONFIG_UGETH_NAPI */
 
 static irqreturn_t ucc_geth_irq_handler(int irq, void *info)
 {
-	struct net_device *dev = (struct net_device *)info;
+	struct net_device *dev = info;
 	struct ucc_geth_private *ugeth = netdev_priv(dev);
 	struct ucc_fast_private *uccf;
 	struct ucc_geth_info *ug_info;
@@ -3636,9 +3612,6 @@ static irqreturn_t ucc_geth_irq_handler(int irq, void *info)
 
 	ugeth_vdbg("%s: IN", __FUNCTION__);
 
-	if (!ugeth)
-		return IRQ_NONE;
-
 	uccf = ugeth->uccf;
 	ug_info = ugeth->ug_info;
 
@@ -3651,10 +3624,10 @@ static irqreturn_t ucc_geth_irq_handler(int irq, void *info)
 	/* check for receive events that require processing */
 	if (ucce & UCCE_RX_EVENTS) {
 #ifdef CONFIG_UGETH_NAPI
-		if (netif_rx_schedule_prep(dev)) {
-		uccm &= ~UCCE_RX_EVENTS;
+		if (netif_rx_schedule_prep(dev, &ugeth->napi)) {
+			uccm &= ~UCCE_RX_EVENTS;
 			out_be32(uccf->p_uccm, uccm);
-			__netif_rx_schedule(dev);
+			__netif_rx_schedule(dev, &ugeth->napi);
 		}
 #else
 		rx_mask = UCCE_RXBF_SINGLE_MASK;
@@ -3683,15 +3656,32 @@ static irqreturn_t ucc_geth_irq_handler(int irq, void *info)
 	/* Errors and other events */
 	if (ucce & UCCE_OTHER) {
 		if (ucce & UCCE_BSY) {
-			ugeth->stats.rx_errors++;
+			dev->stats.rx_errors++;
 		}
 		if (ucce & UCCE_TXE) {
-			ugeth->stats.tx_errors++;
+			dev->stats.tx_errors++;
 		}
 	}
 
 	return IRQ_HANDLED;
 }
+
+#ifdef CONFIG_NET_POLL_CONTROLLER
+/*
+ * Polling 'interrupt' - used by things like netconsole to send skbs
+ * without having to re-enable interrupts. It's not called while
+ * the interrupt routine is executing.
+ */
+static void ucc_netpoll(struct net_device *dev)
+{
+	struct ucc_geth_private *ugeth = netdev_priv(dev);
+	int irq = ugeth->ug_info->uf_info.irq;
+
+	disable_irq(irq);
+	ucc_geth_irq_handler(irq, dev);
+	enable_irq(irq);
+}
+#endif /* CONFIG_NET_POLL_CONTROLLER */
 
 /* Called when something needs to use the ethernet device */
 /* Returns 0 for success. */
@@ -3717,12 +3707,15 @@ static int ucc_geth_open(struct net_device *dev)
 		return err;
 	}
 
+#ifdef CONFIG_UGETH_NAPI
+	napi_enable(&ugeth->napi);
+#endif
 	err = ucc_geth_startup(ugeth);
 	if (err) {
 		if (netif_msg_ifup(ugeth))
 			ugeth_err("%s: Cannot configure net device, aborting.",
 				  dev->name);
-		return err;
+		goto out_err;
 	}
 
 	err = adjust_enet_interface(ugeth);
@@ -3730,7 +3723,7 @@ static int ucc_geth_open(struct net_device *dev)
 		if (netif_msg_ifup(ugeth))
 			ugeth_err("%s: Cannot configure net device, aborting.",
 				  dev->name);
-		return err;
+		goto out_err;
 	}
 
 	/*       Set MACSTNADDR1, MACSTNADDR2                */
@@ -3748,7 +3741,7 @@ static int ucc_geth_open(struct net_device *dev)
 	if (err) {
 		if (netif_msg_ifup(ugeth))
 			ugeth_err("%s: Cannot initialize PHY, aborting.", dev->name);
-		return err;
+		goto out_err;
 	}
 
 	phy_start(ugeth->phydev);
@@ -3761,7 +3754,7 @@ static int ucc_geth_open(struct net_device *dev)
 			ugeth_err("%s: Cannot get IRQ for net device, aborting.",
 				  dev->name);
 		ucc_geth_stop(ugeth);
-		return err;
+		goto out_err;
 	}
 
 	err = ugeth_enable(ugeth, COMM_DIR_RX_AND_TX);
@@ -3769,11 +3762,17 @@ static int ucc_geth_open(struct net_device *dev)
 		if (netif_msg_ifup(ugeth))
 			ugeth_err("%s: Cannot enable net device, aborting.", dev->name);
 		ucc_geth_stop(ugeth);
-		return err;
+		goto out_err;
 	}
 
 	netif_start_queue(dev);
 
+	return err;
+
+out_err:
+#ifdef CONFIG_UGETH_NAPI
+	napi_disable(&ugeth->napi);
+#endif
 	return err;
 }
 
@@ -3783,6 +3782,10 @@ static int ucc_geth_close(struct net_device *dev)
 	struct ucc_geth_private *ugeth = netdev_priv(dev);
 
 	ugeth_vdbg("%s: IN", __FUNCTION__);
+
+#ifdef CONFIG_UGETH_NAPI
+	napi_disable(&ugeth->napi);
+#endif
 
 	ucc_geth_stop(ugeth);
 
@@ -3808,6 +3811,10 @@ static phy_interface_t to_phy_interface(const char *phy_connection_type)
 		return PHY_INTERFACE_MODE_RGMII;
 	if (strcasecmp(phy_connection_type, "rgmii-id") == 0)
 		return PHY_INTERFACE_MODE_RGMII_ID;
+	if (strcasecmp(phy_connection_type, "rgmii-txid") == 0)
+		return PHY_INTERFACE_MODE_RGMII_TXID;
+	if (strcasecmp(phy_connection_type, "rgmii-rxid") == 0)
+		return PHY_INTERFACE_MODE_RGMII_RXID;
 	if (strcasecmp(phy_connection_type, "rtbi") == 0)
 		return PHY_INTERFACE_MODE_RTBI;
 
@@ -3827,6 +3834,7 @@ static int ucc_geth_probe(struct of_device* ofdev, const struct of_device_id *ma
 	int err, ucc_num, max_speed = 0;
 	const phandle *ph;
 	const unsigned int *prop;
+	const char *sprop;
 	const void *mac_addr;
 	phy_interface_t phy_interface;
 	static const int enet_to_speed[] = {
@@ -3859,10 +3867,56 @@ static int ucc_geth_probe(struct of_device* ofdev, const struct of_device_id *ma
 
 	ug_info->uf_info.ucc_num = ucc_num;
 
-	prop = of_get_property(np, "rx-clock", NULL);
-	ug_info->uf_info.rx_clock = *prop;
-	prop = of_get_property(np, "tx-clock", NULL);
-	ug_info->uf_info.tx_clock = *prop;
+	sprop = of_get_property(np, "rx-clock-name", NULL);
+	if (sprop) {
+		ug_info->uf_info.rx_clock = qe_clock_source(sprop);
+		if ((ug_info->uf_info.rx_clock < QE_CLK_NONE) ||
+		    (ug_info->uf_info.rx_clock > QE_CLK24)) {
+			printk(KERN_ERR
+				"ucc_geth: invalid rx-clock-name property\n");
+			return -EINVAL;
+		}
+	} else {
+		prop = of_get_property(np, "rx-clock", NULL);
+		if (!prop) {
+			/* If both rx-clock-name and rx-clock are missing,
+			   we want to tell people to use rx-clock-name. */
+			printk(KERN_ERR
+				"ucc_geth: missing rx-clock-name property\n");
+			return -EINVAL;
+		}
+		if ((*prop < QE_CLK_NONE) || (*prop > QE_CLK24)) {
+			printk(KERN_ERR
+				"ucc_geth: invalid rx-clock propperty\n");
+			return -EINVAL;
+		}
+		ug_info->uf_info.rx_clock = *prop;
+	}
+
+	sprop = of_get_property(np, "tx-clock-name", NULL);
+	if (sprop) {
+		ug_info->uf_info.tx_clock = qe_clock_source(sprop);
+		if ((ug_info->uf_info.tx_clock < QE_CLK_NONE) ||
+		    (ug_info->uf_info.tx_clock > QE_CLK24)) {
+			printk(KERN_ERR
+				"ucc_geth: invalid tx-clock-name property\n");
+			return -EINVAL;
+		}
+	} else {
+		prop = of_get_property(np, "rx-clock", NULL);
+		if (!prop) {
+			printk(KERN_ERR
+				"ucc_geth: mising tx-clock-name property\n");
+			return -EINVAL;
+		}
+		if ((*prop < QE_CLK_NONE) || (*prop > QE_CLK24)) {
+			printk(KERN_ERR
+				"ucc_geth: invalid tx-clock property\n");
+			return -EINVAL;
+		}
+		ug_info->uf_info.tx_clock = *prop;
+	}
+
 	err = of_address_to_resource(np, 0, &res);
 	if (err)
 		return -EINVAL;
@@ -3902,6 +3956,8 @@ static int ucc_geth_probe(struct of_device* ofdev, const struct of_device_id *ma
 		case PHY_INTERFACE_MODE_GMII:
 		case PHY_INTERFACE_MODE_RGMII:
 		case PHY_INTERFACE_MODE_RGMII_ID:
+		case PHY_INTERFACE_MODE_RGMII_RXID:
+		case PHY_INTERFACE_MODE_RGMII_TXID:
 		case PHY_INTERFACE_MODE_TBI:
 		case PHY_INTERFACE_MODE_RTBI:
 			max_speed = SPEED_1000;
@@ -3919,6 +3975,8 @@ static int ucc_geth_probe(struct of_device* ofdev, const struct of_device_id *ma
 		ug_info->uf_info.utfs = UCC_GETH_UTFS_GIGA_INIT;
 		ug_info->uf_info.utfet = UCC_GETH_UTFET_GIGA_INIT;
 		ug_info->uf_info.utftt = UCC_GETH_UTFTT_GIGA_INIT;
+		ug_info->numThreadsTx = UCC_GETH_NUM_OF_THREADS_4;
+		ug_info->numThreadsRx = UCC_GETH_NUM_OF_THREADS_4;
 	}
 
 	/* Set the bus id */
@@ -3949,12 +4007,15 @@ static int ucc_geth_probe(struct of_device* ofdev, const struct of_device_id *ma
 	ugeth = netdev_priv(dev);
 	spin_lock_init(&ugeth->lock);
 
+	/* Create CQs for hash tables */
+	INIT_LIST_HEAD(&ugeth->group_hash_q);
+	INIT_LIST_HEAD(&ugeth->ind_hash_q);
+
 	dev_set_drvdata(device, dev);
 
 	/* Set the dev->base_addr to the gfar reg region */
 	dev->base_addr = (unsigned long)(ug_info->uf_info.regs);
 
-	SET_MODULE_OWNER(dev);
 	SET_NETDEV_DEV(dev, device);
 
 	/* Fill in the dev structure */
@@ -3964,11 +4025,12 @@ static int ucc_geth_probe(struct of_device* ofdev, const struct of_device_id *ma
 	dev->tx_timeout = ucc_geth_timeout;
 	dev->watchdog_timeo = TX_TIMEOUT;
 #ifdef CONFIG_UGETH_NAPI
-	dev->poll = ucc_geth_poll;
-	dev->weight = UCC_GETH_DEV_WEIGHT;
+	netif_napi_add(dev, &ugeth->napi, ucc_geth_poll, UCC_GETH_DEV_WEIGHT);
 #endif				/* CONFIG_UGETH_NAPI */
+#ifdef CONFIG_NET_POLL_CONTROLLER
+	dev->poll_controller = ucc_netpoll;
+#endif
 	dev->stop = ucc_geth_close;
-	dev->get_stats = ucc_geth_get_stats;
 //    dev->change_mtu = ucc_geth_change_mtu;
 	dev->mtu = 1500;
 	dev->set_multicast_list = ucc_geth_set_multi;
@@ -4002,9 +4064,10 @@ static int ucc_geth_remove(struct of_device* ofdev)
 	struct net_device *dev = dev_get_drvdata(device);
 	struct ucc_geth_private *ugeth = netdev_priv(dev);
 
-	dev_set_drvdata(device, NULL);
-	ucc_geth_memclean(ugeth);
+	unregister_netdev(dev);
 	free_netdev(dev);
+	ucc_geth_memclean(ugeth);
+	dev_set_drvdata(device, NULL);
 
 	return 0;
 }

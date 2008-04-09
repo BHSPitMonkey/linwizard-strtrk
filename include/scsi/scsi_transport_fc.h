@@ -176,7 +176,7 @@ struct class_device_attribute class_device_attr_vport_##_name = 	\
  * ports has a unique presense on the SAN, and may be instantiated via
  * NPIV, Virtual Fabrics, or via additional ALPAs. As the vport is a
  * unique presense, each vport has it's own view of the fabric,
- * authentication priviledge, and priorities.
+ * authentication privilege, and priorities.
  *
  * A virtual port may support 1 or more FC4 roles. Typically it is a
  * FCP Initiator. It could be a FCP Target, or exist sole for an IP over FC
@@ -589,6 +589,10 @@ struct fc_function_template {
 	int	(*vport_disable)(struct fc_vport *, bool);
 	int  	(*vport_delete)(struct fc_vport *);
 
+	/* target-mode drivers' functions */
+	int     (* tsk_mgmt_response)(struct Scsi_Host *, u64, u64, int);
+	int     (* it_nexus_response)(struct Scsi_Host *, u64, int);
+
 	/* allocation lengths for host-specific data */
 	u32	 			dd_fcrport_size;
 	u32	 			dd_fcvport_size;
@@ -632,6 +636,8 @@ struct fc_function_template {
 	unsigned long	show_host_fabric_name:1;
 	unsigned long	show_host_symbolic_name:1;
 	unsigned long	show_host_system_hostname:1;
+
+	unsigned long	disable_target_scan:1;
 };
 
 

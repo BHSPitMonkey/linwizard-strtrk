@@ -1,7 +1,7 @@
 /*
  *   ALSA driver for Intel ICH (i8x0) chipsets
  *
- *	Copyright (c) 2000 Jaroslav Kysela <perex@suse.cz>
+ *	Copyright (c) 2000 Jaroslav Kysela <perex@perex.cz>
  *
  *
  *   This code also contains alpha support for SiS 735 chipsets provided
@@ -26,7 +26,6 @@
  *
  */      
 
-#include <sound/driver.h>
 #include <asm/io.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
@@ -43,7 +42,7 @@
 #include <asm/pgtable.h>
 #include <asm/cacheflush.h>
 
-MODULE_AUTHOR("Jaroslav Kysela <perex@suse.cz>");
+MODULE_AUTHOR("Jaroslav Kysela <perex@perex.cz>");
 MODULE_DESCRIPTION("Intel 82801AA,82901AB,i810,i820,i830,i840,i845,MX440; SiS 7012; Ali 5455");
 MODULE_LICENSE("GPL");
 MODULE_SUPPORTED_DEVICE("{{Intel,82801AA-ICH},"
@@ -711,11 +710,13 @@ static void snd_intel8x0_setup_periods(struct intel8x0 *chip, struct ichdev *ich
 static void fill_nocache(void *buf, int size, int nocache)
 {
 	size = (size + PAGE_SIZE - 1) >> PAGE_SHIFT;
-	change_page_attr(virt_to_page(buf), size, nocache ? PAGE_KERNEL_NOCACHE : PAGE_KERNEL);
-	global_flush_tlb();
+	if (nocache)
+		set_pages_uc(virt_to_page(buf), size);
+	else
+		set_pages_wb(virt_to_page(buf), size);
 }
 #else
-#define fill_nocache(buf,size,nocache)
+#define fill_nocache(buf, size, nocache) do { ; } while (0)
 #endif
 
 /*
@@ -1707,6 +1708,12 @@ static struct ac97_pcm ac97_pcm_defs[] __devinitdata = {
 };
 
 static struct ac97_quirk ac97_quirks[] __devinitdata = {
+        {
+		.subvendor = 0x0e11,
+		.subdevice = 0x000e,
+		.name = "Compaq Deskpro EN",	/* AD1885 */
+		.type = AC97_TUNE_HP_ONLY
+        },
 	{
 		.subvendor = 0x0e11,
 		.subdevice = 0x008a,
@@ -1735,6 +1742,12 @@ static struct ac97_quirk ac97_quirks[] __devinitdata = {
 		.subvendor = 0x1014,
 		.subdevice = 0x0267,
 		.name = "IBM NetVista A30p",	/* AD1981B */
+		.type = AC97_TUNE_HP_ONLY
+	},
+	{
+		.subvendor = 0x1025,
+		.subdevice = 0x0082,
+		.name = "Acer Travelmate 2310",
 		.type = AC97_TUNE_HP_ONLY
 	},
 	{
@@ -2144,7 +2157,6 @@ static int __devinit snd_intel8x0_mixer(struct intel8x0 *chip, int ac97_clock,
 				snd_printk(KERN_ERR "Unable to initialize codec #%d\n", i);
 			if (i == 0)
 				goto __err;
-			continue;
 		}
 	}
 	/* tune up the primary codec */

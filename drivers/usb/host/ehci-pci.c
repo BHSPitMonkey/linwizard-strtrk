@@ -58,8 +58,6 @@ static int ehci_pci_reinit(struct ehci_hcd *ehci, struct pci_dev *pdev)
 	if (!retval)
 		ehci_dbg(ehci, "MWI active\n");
 
-	ehci_port_power(ehci, 0);
-
 	return 0;
 }
 
@@ -154,10 +152,23 @@ static int ehci_pci_setup(struct usb_hcd *hcd)
 			break;
 		}
 		break;
+	case PCI_VENDOR_ID_VIA:
+		if (pdev->device == 0x3104 && (pdev->revision & 0xf0) == 0x60) {
+			u8 tmp;
+
+			/* The VT6212 defaults to a 1 usec EHCI sleep time which
+			 * hogs the PCI bus *badly*. Setting bit 5 of 0x4B makes
+			 * that sleep time use the conventional 10 usec.
+			 */
+			pci_read_config_byte(pdev, 0x4b, &tmp);
+			if (tmp & 0x20)
+				break;
+			pci_write_config_byte(pdev, 0x4b, tmp | 0x20);
+		}
+		break;
 	}
 
-	if (ehci_is_TDI(ehci))
-		ehci_reset(ehci);
+	ehci_reset(ehci);
 
 	/* at least the Genesys GL880S needs fixup here */
 	temp = HCS_N_CC(ehci->hcs_params) * HCS_N_PCC(ehci->hcs_params);
@@ -308,7 +319,7 @@ static int ehci_pci_resume(struct usb_hcd *hcd)
 	/* emptying the schedule aborts any urbs */
 	spin_lock_irq(&ehci->lock);
 	if (ehci->reclaim)
-		ehci->reclaim_ready = 1;
+		end_unlink_async(ehci);
 	ehci_work(ehci);
 	spin_unlock_irq(&ehci->lock);
 
@@ -367,6 +378,7 @@ static const struct hc_driver ehci_pci_hc_driver = {
 	.hub_control =		ehci_hub_control,
 	.bus_suspend =		ehci_bus_suspend,
 	.bus_resume =		ehci_bus_resume,
+	.relinquish_port = 	ehci_relinquish_port,
 };
 
 /*-------------------------------------------------------------------------*/

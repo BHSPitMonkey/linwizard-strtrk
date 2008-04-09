@@ -315,8 +315,8 @@ uint32_t aic79xx_slowcrc;
  */
 static char *aic79xx = NULL;
 
-MODULE_AUTHOR("Maintainer: Justin T. Gibbs <gibbs@scsiguy.com>");
-MODULE_DESCRIPTION("Adaptec Aic790X U320 SCSI Host Bus Adapter driver");
+MODULE_AUTHOR("Maintainer: Hannes Reinecke <hare@suse.de>");
+MODULE_DESCRIPTION("Adaptec AIC790X U320 SCSI Host Bus Adapter driver");
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_VERSION(AIC79XX_DRIVER_VERSION);
 module_param(aic79xx, charp, 0444);
@@ -325,7 +325,7 @@ MODULE_PARM_DESC(aic79xx,
 "	verbose			Enable verbose/diagnostic logging\n"
 "	allow_memio		Allow device registers to be memory mapped\n"
 "	debug			Bitmask of debug values to enable\n"
-"	no_reset		Supress initial bus resets\n"
+"	no_reset		Suppress initial bus resets\n"
 "	extended		Enable extended geometry on all controllers\n"
 "	periodic_otag		Send an ordered tagged transaction\n"
 "				periodically to prevent tag starvation.\n"
@@ -1783,7 +1783,7 @@ ahd_linux_handle_scsi_status(struct ahd_softc *ahd,
 			if (scb->flags & SCB_SENSE) {
 				sense_size = min(sizeof(struct scsi_sense_data)
 					       - ahd_get_sense_residual(scb),
-						 (u_long)sizeof(cmd->sense_buffer));
+						 (u_long)SCSI_SENSE_BUFFERSIZE);
 				sense_offset = 0;
 			} else {
 				/*
@@ -1794,11 +1794,11 @@ ahd_linux_handle_scsi_status(struct ahd_softc *ahd,
 				    scb->sense_data;
 				sense_size = min_t(size_t,
 						scsi_4btoul(siu->sense_length),
-						sizeof(cmd->sense_buffer));
+						SCSI_SENSE_BUFFERSIZE);
 				sense_offset = SIU_SENSE_OFFSET(siu);
 			}
 
-			memset(cmd->sense_buffer, 0, sizeof(cmd->sense_buffer));
+			memset(cmd->sense_buffer, 0, SCSI_SENSE_BUFFERSIZE);
 			memcpy(cmd->sense_buffer,
 			       ahd_get_sense_buf(ahd, scb)
 			       + sense_offset, sense_size);
@@ -1921,7 +1921,7 @@ ahd_linux_queue_cmd_complete(struct ahd_softc *ahd, struct scsi_cmnd *cmd)
 				struct scsi_sense_data *sense;
 				
 				sense = (struct scsi_sense_data *)
-					&cmd->sense_buffer;
+					cmd->sense_buffer;
 				if (sense->extra_len >= 5 &&
 				    (sense->add_sense_code == 0x47
 				     || sense->add_sense_code == 0x48))

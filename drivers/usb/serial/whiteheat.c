@@ -610,8 +610,7 @@ static int whiteheat_open (struct usb_serial_port *port, struct file *filp)
 	if (retval)
 		goto exit;
 
-	if (port->tty)
-		port->tty->low_latency = 1;
+	port->tty->low_latency = 1;
 
 	/* send an open port command */
 	retval = firm_open(port);
@@ -659,11 +658,14 @@ static void whiteheat_close(struct usb_serial_port *port, struct file * filp)
 	struct list_head *tmp2;
 
 	dbg("%s - port %d", __FUNCTION__, port->number);
-	
+
+	mutex_lock(&port->serial->disc_mutex);
 	/* filp is NULL when called from usb_serial_disconnect */
-	if (filp && (tty_hung_up_p(filp))) {
+	if ((filp && (tty_hung_up_p(filp))) || port->serial->disconnected) {
+		mutex_unlock(&port->serial->disc_mutex);
 		return;
 	}
+	mutex_unlock(&port->serial->disc_mutex);
 
 	port->tty->closing = 1;
 
@@ -885,16 +887,7 @@ static int whiteheat_ioctl (struct usb_serial_port *port, struct file * file, un
 static void whiteheat_set_termios(struct usb_serial_port *port, struct ktermios *old_termios)
 {
 	dbg("%s -port %d", __FUNCTION__, port->number);
-
-	if ((!port->tty) || (!port->tty->termios)) {
-		dbg("%s - no tty structures", __FUNCTION__);
-		goto exit;
-	}
-	
 	firm_setup_port(port);
-
-exit:
-	return;
 }
 
 
@@ -1244,6 +1237,8 @@ static int firm_setup_port(struct usb_serial_port *port) {
 	port_settings.baud = tty_get_baud_rate(port->tty);
 	dbg("%s - baud rate = %d", __FUNCTION__, port_settings.baud);
 
+	/* fixme: should set validated settings */
+	tty_encode_baud_rate(port->tty, port_settings.baud, port_settings.baud);
 	/* handle any settings that aren't specified in the tty structure */
 	port_settings.lloop = 0;
 	

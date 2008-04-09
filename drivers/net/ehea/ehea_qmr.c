@@ -33,9 +33,6 @@
 
 
 struct ehea_busmap ehea_bmap = { 0, 0, NULL };
-extern u64 ehea_driver_flags;
-extern struct workqueue_struct *ehea_driver_wq;
-extern struct work_struct ehea_rereg_mr_task;
 
 
 static void *hw_qpageit_get_inc(struct hw_queue *queue)
@@ -66,7 +63,7 @@ static int hw_queue_ctor(struct hw_queue *queue, const u32 nr_of_pages,
 	}
 
 	queue->queue_length = nr_of_pages * pagesize;
-	queue->queue_pages = kmalloc(nr_of_pages * sizeof(void*), GFP_KERNEL);
+	queue->queue_pages = kmalloc(nr_of_pages * sizeof(void *), GFP_KERNEL);
 	if (!queue->queue_pages) {
 		ehea_error("no mem for queue_pages");
 		return -ENOMEM;
@@ -79,11 +76,11 @@ static int hw_queue_ctor(struct hw_queue *queue, const u32 nr_of_pages,
 	 */
 	i = 0;
 	while (i < nr_of_pages) {
-		u8 *kpage = (u8*)get_zeroed_page(GFP_KERNEL);
+		u8 *kpage = (u8 *)get_zeroed_page(GFP_KERNEL);
 		if (!kpage)
 			goto out_nomem;
 		for (k = 0; k < pages_per_kpage && i < nr_of_pages; k++) {
-			(queue->queue_pages)[i] = (struct ehea_page*)kpage;
+			(queue->queue_pages)[i] = (struct ehea_page *)kpage;
 			kpage += pagesize;
 			i++;
 		}
@@ -236,8 +233,8 @@ int ehea_destroy_cq(struct ehea_cq *cq)
 		return 0;
 
 	hcp_epas_dtor(&cq->epas);
-
-	if ((hret = ehea_destroy_cq_res(cq, NORMAL_FREE)) == H_R_STATE) {
+	hret = ehea_destroy_cq_res(cq, NORMAL_FREE);
+	if (hret == H_R_STATE) {
 		ehea_error_data(cq->adapter, cq->fw_handle);
 		hret = ehea_destroy_cq_res(cq, FORCE_FREE);
 	}
@@ -302,13 +299,13 @@ struct ehea_eq *ehea_create_eq(struct ehea_adapter *adapter,
 		if (i == (eq->attr.nr_pages - 1)) {
 			/* last page */
 			vpage = hw_qpageit_get_inc(&eq->hw_queue);
-			if ((hret != H_SUCCESS) || (vpage)) {
+			if ((hret != H_SUCCESS) || (vpage))
 				goto out_kill_hwq;
-			}
+
 		} else {
-			if ((hret != H_PAGE_REGISTERED) || (!vpage)) {
+			if ((hret != H_PAGE_REGISTERED) || (!vpage))
 				goto out_kill_hwq;
-			}
+
 		}
 	}
 
@@ -332,7 +329,7 @@ struct ehea_eqe *ehea_poll_eq(struct ehea_eq *eq)
 	unsigned long flags;
 
 	spin_lock_irqsave(&eq->spinlock, flags);
-	eqe = (struct ehea_eqe*)hw_eqit_eq_get_inc_valid(&eq->hw_queue);
+	eqe = (struct ehea_eqe *)hw_eqit_eq_get_inc_valid(&eq->hw_queue);
 	spin_unlock_irqrestore(&eq->spinlock, flags);
 
 	return eqe;
@@ -365,7 +362,8 @@ int ehea_destroy_eq(struct ehea_eq *eq)
 
 	hcp_epas_dtor(&eq->epas);
 
-	if ((hret = ehea_destroy_eq_res(eq, NORMAL_FREE)) == H_R_STATE) {
+	hret = ehea_destroy_eq_res(eq, NORMAL_FREE);
+	if (hret == H_R_STATE) {
 		ehea_error_data(eq->adapter, eq->fw_handle);
 		hret = ehea_destroy_eq_res(eq, FORCE_FREE);
 	}
@@ -547,7 +545,8 @@ int ehea_destroy_qp(struct ehea_qp *qp)
 
 	hcp_epas_dtor(&qp->epas);
 
-	if ((hret = ehea_destroy_qp_res(qp, NORMAL_FREE)) == H_R_STATE) {
+	hret = ehea_destroy_qp_res(qp, NORMAL_FREE);
+	if (hret == H_R_STATE) {
 		ehea_error_data(qp->adapter, qp->fw_handle);
 		hret = ehea_destroy_qp_res(qp, FORCE_FREE);
 	}
@@ -560,11 +559,10 @@ int ehea_destroy_qp(struct ehea_qp *qp)
 	return 0;
 }
 
-int ehea_create_busmap( void )
+int ehea_create_busmap(void)
 {
 	u64 vaddr = EHEA_BUSMAP_START;
-	unsigned long abs_max_pfn = 0;
-	unsigned long sec_max_pfn;
+	unsigned long high_section_index = 0;
 	int i;
 
 	/*
@@ -574,14 +572,10 @@ int ehea_create_busmap( void )
 	ehea_bmap.valid_sections = 0;
 
 	for (i = 0; i < NR_MEM_SECTIONS; i++)
-		if (valid_section_nr(i)) {
-			sec_max_pfn = section_nr_to_pfn(i);
-			if (sec_max_pfn > abs_max_pfn)
-				abs_max_pfn = sec_max_pfn;
-			ehea_bmap.valid_sections++;
-		}
+		if (valid_section_nr(i))
+			high_section_index = i;
 
-	ehea_bmap.entries = abs_max_pfn / EHEA_PAGES_PER_SECTION + 1;
+	ehea_bmap.entries = high_section_index + 1;
 	ehea_bmap.vaddr = vmalloc(ehea_bmap.entries * sizeof(*ehea_bmap.vaddr));
 
 	if (!ehea_bmap.vaddr)
@@ -593,6 +587,7 @@ int ehea_create_busmap( void )
 		if (pfn_valid(pfn)) {
 			ehea_bmap.vaddr[i] = vaddr;
 			vaddr += EHEA_SECTSIZE;
+			ehea_bmap.valid_sections++;
 		} else
 			ehea_bmap.vaddr[i] = 0;
 	}
@@ -600,7 +595,7 @@ int ehea_create_busmap( void )
 	return 0;
 }
 
-void ehea_destroy_busmap( void )
+void ehea_destroy_busmap(void)
 {
 	vfree(ehea_bmap.vaddr);
 }
@@ -622,7 +617,7 @@ u64 ehea_map_vaddr(void *caddr)
 
 	if (unlikely(mapped_addr == -1))
 		if (!test_and_set_bit(__EHEA_STOP_XFER, &ehea_driver_flags))
-			queue_work(ehea_driver_wq, &ehea_rereg_mr_task);
+			schedule_work(&ehea_rereg_mr_task);
 
 	return mapped_addr;
 }
@@ -637,7 +632,7 @@ int ehea_reg_kernel_mr(struct ehea_adapter *adapter, struct ehea_mr *mr)
 
 	mr_len = ehea_bmap.valid_sections * EHEA_SECTSIZE;
 
-	pt =  kzalloc(EHEA_MAX_RPAGE * sizeof(u64), GFP_KERNEL);
+	pt =  kzalloc(PAGE_SIZE, GFP_KERNEL);
 	if (!pt) {
 		ehea_error("no mem");
 		ret = -ENOMEM;
@@ -660,8 +655,8 @@ int ehea_reg_kernel_mr(struct ehea_adapter *adapter, struct ehea_mr *mr)
 			void *sectbase = __va(i << SECTION_SIZE_BITS);
 			unsigned long k = 0;
 
-			for (j = 0; j < (PAGES_PER_SECTION / EHEA_MAX_RPAGE);
-			      j++) {
+			for (j = 0; j < (EHEA_PAGES_PER_SECTION /
+					 EHEA_MAX_RPAGE); j++) {
 
 				for (m = 0; m < EHEA_MAX_RPAGE; m++) {
 					pg = sectbase + ((k++) * EHEA_PAGESIZE);

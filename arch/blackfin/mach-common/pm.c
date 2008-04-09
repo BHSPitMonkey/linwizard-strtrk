@@ -4,7 +4,7 @@
  * Author:       Cliff Brake <cbrake@accelent.com> Copyright (c) 2001
  *
  * Created:      2001
- * Description:  Power management for the bfin
+ * Description:  Blackfin power management
  *
  * Modified:     Nicolas Pitre - PXA250 support
  *                Copyright (c) 2002 Monta Vista Software, Inc.
@@ -12,7 +12,7 @@
  *                Copyright (c) 2002 Monta Vista Software, Inc.
  *               Dirk Behme <dirk.behme@de.bosch.com> - OMAP1510/1610
  *                Copyright 2004
- *               Copyright 2004-2006 Analog Devices Inc.
+ *               Copyright 2004-2008 Analog Devices Inc.
  *
  * Bugs:         Enter bugs at http://blackfin.uclinux.org/
  *
@@ -32,7 +32,7 @@
  * 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
-#include <linux/pm.h>
+#include <linux/suspend.h>
 #include <linux/sched.h>
 #include <linux/proc_fs.h>
 #include <linux/io.h>
@@ -67,50 +67,41 @@ void bfin_pm_suspend_standby_enter(void)
 	gpio_pm_wakeup_request(CONFIG_PM_WAKEUP_GPIO_NUMBER, WAKEUP_TYPE);
 #endif
 
-#if defined(CONFIG_PM_WAKEUP_BY_GPIO) || defined(CONFIG_PM_WAKEUP_GPIO_API)
-	{
-		u32 flags;
+	u32 flags;
 
-		local_irq_save(flags);
+	local_irq_save(flags);
+	bfin_pm_setup();
 
-		sleep_deeper(gpio_pm_setup()); /*Goto Sleep*/
-
-		gpio_pm_restore();
-
-		bfin_write_SIC_IWR(IWR_ENABLE_ALL);
-
-		local_irq_restore(flags);
-	}
+#ifdef CONFIG_PM_BFIN_SLEEP_DEEPER
+	sleep_deeper(bfin_sic_iwr[0], bfin_sic_iwr[1], bfin_sic_iwr[2]);
+#else
+	sleep_mode(bfin_sic_iwr[0], bfin_sic_iwr[1], bfin_sic_iwr[2]);
 #endif
 
-#if defined(CONFIG_PM_WAKEUP_GPIO_BY_SIC_IWR)
-	sleep_deeper(CONFIG_PM_WAKEUP_SIC_IWR);
+	bfin_pm_restore();
+
+#if defined(CONFIG_BF54x) || defined(CONFIG_BF52x)  || defined(CONFIG_BF561)
+	bfin_write_SIC_IWR0(IWR_ENABLE_ALL);
+	bfin_write_SIC_IWR1(IWR_ENABLE_ALL);
+# ifdef CONFIG_BF54x
+	bfin_write_SIC_IWR2(IWR_ENABLE_ALL);
+# endif
+#else
 	bfin_write_SIC_IWR(IWR_ENABLE_ALL);
-#endif				/* CONFIG_PM_WAKEUP_GPIO_BY_SIC_IWR */
+#endif
+
+	local_irq_restore(flags);
 }
 
-
 /*
- *	bfin_pm_prepare - Do preliminary suspend work.
- *	@state:		suspend state we're entering.
+ *	bfin_pm_valid - Tell the PM core that we only support the standby sleep
+ *			state
+ *	@state:		suspend state we're checking.
  *
  */
-static int bfin_pm_prepare(suspend_state_t state)
+static int bfin_pm_valid(suspend_state_t state)
 {
-	int error = 0;
-
-	switch (state) {
-	case PM_SUSPEND_STANDBY:
-		break;
-
-	case PM_SUSPEND_MEM:
-		return -ENOTSUPP;
-
-	default:
-		return -EINVAL;
-	}
-
-	return error;
+	return (state == PM_SUSPEND_STANDBY);
 }
 
 /*
@@ -135,44 +126,14 @@ static int bfin_pm_enter(suspend_state_t state)
 	return 0;
 }
 
-/*
- *	bfin_pm_finish - Finish up suspend sequence.
- *	@state:		State we're coming out of.
- *
- *	This is called after we wake back up (or if entering the sleep state
- *	failed).
- */
-static int bfin_pm_finish(suspend_state_t state)
-{
-	switch (state) {
-	case PM_SUSPEND_STANDBY:
-		break;
-
-	case PM_SUSPEND_MEM:
-		return -ENOTSUPP;
-
-	default:
-		return -EINVAL;
-	}
-
-	return 0;
-}
-
-static int bfin_pm_valid(suspend_state_t state)
-{
-	return (state == PM_SUSPEND_STANDBY);
-}
-
-struct pm_ops bfin_pm_ops = {
-	.prepare = bfin_pm_prepare,
+struct platform_suspend_ops bfin_pm_ops = {
 	.enter = bfin_pm_enter,
-	.finish = bfin_pm_finish,
 	.valid	= bfin_pm_valid,
 };
 
 static int __init bfin_pm_init(void)
 {
-	pm_set_ops(&bfin_pm_ops);
+	suspend_set_ops(&bfin_pm_ops);
 	return 0;
 }
 

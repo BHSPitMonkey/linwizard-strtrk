@@ -429,9 +429,6 @@ static __devinit int via_ircc_open(int i, chipio_t * info, unsigned int id)
 	self->tx_fifo.len = self->tx_fifo.ptr = self->tx_fifo.free = 0;
 	self->tx_fifo.tail = self->tx_buff.head;
 
-	/* Keep track of module usage */
-	SET_MODULE_OWNER(dev);
-
 	/* Override the network functions we need to use */
 	dev->hard_start_xmit = via_ircc_hard_xmit_sir;
 	dev->open = via_ircc_net_open;
@@ -1349,19 +1346,13 @@ static int RxTimerHandler(struct via_ircc_cb *self, int iobase)
  *    An interrupt from the chip has arrived. Time to do some work
  *
  */
-static irqreturn_t via_ircc_interrupt(int irq, void *dev_id)
+static irqreturn_t via_ircc_interrupt(int dummy, void *dev_id)
 {
-	struct net_device *dev = (struct net_device *) dev_id;
-	struct via_ircc_cb *self;
+	struct net_device *dev = dev_id;
+	struct via_ircc_cb *self = dev->priv;
 	int iobase;
 	u8 iHostIntType, iRxIntType, iTxIntType;
 
-	if (!dev) {
-		IRDA_WARNING("%s: irq %d for unknown device.\n", driver_name,
-			     irq);
-		return IRQ_NONE;
-	}
-	self = (struct via_ircc_cb *) dev->priv;
 	iobase = self->io.fir_base;
 	spin_lock(&self->lock);
 	iHostIntType = GetHostStatus(iobase);

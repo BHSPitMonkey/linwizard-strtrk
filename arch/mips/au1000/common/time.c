@@ -64,50 +64,10 @@ static unsigned long last_pc0, last_match20;
 
 static DEFINE_SPINLOCK(time_lock);
 
-static inline void ack_r4ktimer(unsigned long newval)
-{
-	write_c0_compare(newval);
-}
-
-/*
- * There are a lot of conceptually broken versions of the MIPS timer interrupt
- * handler floating around.  This one is rather different, but the algorithm
- * is provably more robust.
- */
 unsigned long wtimer;
 
-void mips_timer_interrupt(void)
-{
-	int irq = 63;
-
-	irq_enter();
-	kstat_this_cpu.irqs[irq]++;
-
-	if (r4k_offset == 0)
-		goto null;
-
-	do {
-		kstat_this_cpu.irqs[irq]++;
-		do_timer(1);
-#ifndef CONFIG_SMP
-		update_process_times(user_mode(get_irq_regs()));
-#endif
-		r4k_cur += r4k_offset;
-		ack_r4ktimer(r4k_cur);
-
-	} while (((unsigned long)read_c0_count()
-	         - r4k_cur) < 0x7fffffff);
-
-	irq_exit();
-	return;
-
-null:
-	ack_r4ktimer(0);
-	irq_exit();
-}
-
 #ifdef CONFIG_PM
-irqreturn_t counter0_irq(int irq, void *dev_id)
+static irqreturn_t counter0_irq(int irq, void *dev_id)
 {
 	unsigned long pc0;
 	int time_elapsed;
@@ -156,6 +116,13 @@ irqreturn_t counter0_irq(int irq, void *dev_id)
 
 	return IRQ_HANDLED;
 }
+
+struct irqaction counter0_action = {
+	.handler	= counter0_irq,
+	.flags		= IRQF_DISABLED,
+	.name		= "alchemy-toy",
+	.dev_id		= NULL,
+};
 
 /* When we wakeup from sleep, we have to "catch up" on all of the
  * timer ticks we have missed.
@@ -240,20 +207,24 @@ unsigned long cal_r4koff(void)
 		while (au_readl(SYS_COUNTER_CNTRL) & SYS_CNTRL_T1S);
 
 		while (au_readl(SYS_COUNTER_CNTRL) & SYS_CNTRL_C1S);
-		au_writel (0, SYS_TOYWRITE);
+		au_writel(0, SYS_TOYWRITE);
 		while (au_readl(SYS_COUNTER_CNTRL) & SYS_CNTRL_C1S);
-
-		cpu_speed = (au_readl(SYS_CPUPLL) & 0x0000003f) *
-			AU1000_SRC_CLK;
-	}
-	else {
-		/* The 32KHz oscillator isn't running, so assume there
-		 * isn't one and grab the processor speed from the PLL.
-		 * NOTE: some old silicon doesn't allow reading the PLL.
-		 */
-		cpu_speed = (au_readl(SYS_CPUPLL) & 0x0000003f) * AU1000_SRC_CLK;
+	} else
 		no_au1xxx_32khz = 1;
-	}
+
+	/*
+	 * On early Au1000, sys_cpupll was write-only. Since these
+	 * silicon versions of Au1000 are not sold by AMD, we don't bend
+	 * over backwards trying to determine the frequency.
+	 */
+	if (cur_cpu_spec[0]->cpu_pll_wo)
+#ifdef CONFIG_SOC_AU1000_FREQUENCY
+		cpu_speed = CONFIG_SOC_AU1000_FREQUENCY;
+#else
+		cpu_speed = 396000000;
+#endif
+	else
+		cpu_speed = (au_readl(SYS_CPUPLL) & 0x0000003f) * AU1000_SRC_CLK;
 	mips_hpt_frequency = cpu_speed;
 	// Equation: Baudrate = CPU / (SD * 2 * CLKDIV * 16)
 	set_au1x00_uart_baud_base(cpu_speed / (2 * ((int)(au_readl(SYS_POWERCTRL)&0x03) + 2) * 16));
@@ -261,7 +232,7 @@ unsigned long cal_r4koff(void)
 	return (cpu_speed / HZ);
 }
 
-void __init plat_timer_setup(struct irqaction *irq)
+void __init plat_time_init(void)
 {
 	unsigned int est_freq;
 
@@ -295,15 +266,10 @@ void __init plat_timer_setup(struct irqaction *irq)
 	 * we do this.
 	 */
 	if (no_au1xxx_32khz) {
-		unsigned int c0_status;
-
 		printk("WARNING: no 32KHz clock found.\n");
 
-		/* Ensure we get CPO_COUNTER interrupts.
-		*/
-		c0_status = read_c0_status();
-		c0_status |= IE_IRQ5;
-		write_c0_status(c0_status);
+		/* Ensure we get CPO_COUNTER interrupts.  */
+		set_c0_status(IE_IRQ5);
 	}
 	else {
 		while (au_readl(SYS_COUNTER_CNTRL) & SYS_CNTRL_C0S);
@@ -320,7 +286,7 @@ void __init plat_timer_setup(struct irqaction *irq)
 		au_writel(last_match20 + MATCH20_INC, SYS_TOYMATCH2);
 		au_sync();
 		while (au_readl(SYS_COUNTER_CNTRL) & SYS_CNTRL_M20);
-		startup_match20_interrupt(counter0_irq);
+		setup_irq(AU1000_TOY_MATCH2_INT, &counter0_action);
 
 		/* We can use the real 'wait' instruction.
 		*/
@@ -328,8 +294,4 @@ void __init plat_timer_setup(struct irqaction *irq)
 	}
 
 #endif
-}
-
-void __init au1xxx_time_init(void)
-{
 }

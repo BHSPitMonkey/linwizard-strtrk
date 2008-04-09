@@ -300,7 +300,7 @@ static struct pci_device_id pci_id_table_g[] =  {
 MODULE_DEVICE_TABLE(pci, pci_id_table_g);
 
 
-static struct pci_driver megaraid_pci_driver_g = {
+static struct pci_driver megaraid_pci_driver = {
 	.name		= "megaraid",
 	.id_table	= pci_id_table_g,
 	.probe		= megaraid_probe_one,
@@ -393,7 +393,7 @@ megaraid_init(void)
 
 
 	// register as a PCI hot-plug driver module
-	rval = pci_register_driver(&megaraid_pci_driver_g);
+	rval = pci_register_driver(&megaraid_pci_driver);
 	if (rval < 0) {
 		con_log(CL_ANN, (KERN_WARNING
 			"megaraid: could not register hotplug support.\n"));
@@ -414,7 +414,7 @@ megaraid_exit(void)
 	con_log(CL_DLEVEL1, (KERN_NOTICE "megaraid: unloading framework\n"));
 
 	// unregister as PCI hotplug driver
-	pci_unregister_driver(&megaraid_pci_driver_g);
+	pci_unregister_driver(&megaraid_pci_driver);
 
 	return;
 }
@@ -426,7 +426,7 @@ megaraid_exit(void)
  * @id		: pci device id of the class of controllers
  *
  * This routine should be called whenever a new adapter is detected by the
- * PCI hotplug susbsytem.
+ * PCI hotplug susbsystem.
  */
 static int __devinit
 megaraid_probe_one(struct pci_dev *pdev, const struct pci_device_id *id)
@@ -1583,10 +1583,8 @@ megaraid_mbox_build_cmd(adapter_t *adapter, struct scsi_cmnd *scp, int *busy)
 			caddr_t			vaddr;
 
 			sgl = scsi_sglist(scp);
-			if (sgl->page) {
-				vaddr = (caddr_t)
-					(page_address((&sgl[0])->page)
-					 + (&sgl[0])->offset);
+			if (sg_page(sgl)) {
+				vaddr = (caddr_t) sg_virt(&sgl[0]);
 
 				memset(vaddr, 0, scp->cmnd[4]);
 			}
@@ -2327,10 +2325,8 @@ megaraid_mbox_dpc(unsigned long devp)
 				&& IS_RAID_CH(raid_dev, scb->dev_channel)) {
 
 			sgl = scsi_sglist(scp);
-			if (sgl->page) {
-				c = *(unsigned char *)
-					(page_address((&sgl[0])->page) +
-					 (&sgl[0])->offset);
+			if (sg_page(sgl)) {
+				c = *(unsigned char *) sg_virt(&sgl[0]);
 			} else {
 				con_log(CL_ANN, (KERN_WARNING
 						 "megaraid mailbox: invalid sg:%d\n",
@@ -3468,12 +3464,12 @@ megaraid_mbox_setup_device_map(adapter_t *adapter)
 /*
  * START: Interface for the common management module
  *
- * This is the module, which interfaces with the common mangement module to
+ * This is the module, which interfaces with the common management module to
  * provide support for ioctl and sysfs
  */
 
 /**
- * megaraid_cmm_register - register with the mangement module
+ * megaraid_cmm_register - register with the management module
  * @adapter		: HBA soft state
  *
  * Register with the management module, which allows applications to issue
@@ -3561,7 +3557,7 @@ megaraid_cmm_register(adapter_t *adapter)
 
 
 /**
- * megaraid_cmm_unregister - un-register with the mangement module
+ * megaraid_cmm_unregister - un-register with the management module
  * @adapter		: HBA soft state
  *
  * Un-register with the management module.
@@ -3583,7 +3579,7 @@ megaraid_cmm_unregister(adapter_t *adapter)
  * @kioc		: CMM interface packet
  * @action		: command action
  *
- * This routine is invoked whenever the Common Mangement Module (CMM) has a
+ * This routine is invoked whenever the Common Management Module (CMM) has a
  * command for us. The 'action' parameter specifies if this is a new command
  * or otherwise.
  */
@@ -3948,7 +3944,7 @@ megaraid_sysfs_get_ldmap_timeout(unsigned long data)
  *
  * This routine will be called whenever user reads the logical drive
  * attributes, go get the current logical drive mapping table from the
- * firmware. We use the managment API's to issue commands to the controller.
+ * firmware. We use the management API's to issue commands to the controller.
  *
  * NOTE: The commands issuance functionality is not generalized and
  * implemented in context of "get ld map" command only. If required, the

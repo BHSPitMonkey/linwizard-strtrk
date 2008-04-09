@@ -1,5 +1,6 @@
 #include <linux/serial.h>
 #include <asm/dma.h>
+#include <asm/portmux.h>
 
 #define NR_PORTS		4
 
@@ -23,6 +24,8 @@
 #define UART_GET_LCR(uart)      bfin_read16(((uart)->port.membase + OFFSET_LCR))
 #define UART_GET_LSR(uart)      bfin_read16(((uart)->port.membase + OFFSET_LSR))
 #define UART_GET_GCTL(uart)     bfin_read16(((uart)->port.membase + OFFSET_GCTL))
+#define UART_GET_MSR(uart)      bfin_read16(((uart)->port.membase + OFFSET_MSR))
+#define UART_GET_MCR(uart)      bfin_read16(((uart)->port.membase + OFFSET_MCR))
 
 #define UART_PUT_CHAR(uart,v)   bfin_write16(((uart)->port.membase + OFFSET_THR),v)
 #define UART_PUT_DLL(uart,v)    bfin_write16(((uart)->port.membase + OFFSET_DLL),v)
@@ -31,7 +34,9 @@
 #define UART_PUT_DLH(uart,v)    bfin_write16(((uart)->port.membase + OFFSET_DLH),v)
 #define UART_PUT_LSR(uart,v)	bfin_write16(((uart)->port.membase + OFFSET_LSR),v)
 #define UART_PUT_LCR(uart,v)    bfin_write16(((uart)->port.membase + OFFSET_LCR),v)
+#define UART_CLEAR_LSR(uart)    bfin_write16(((uart)->port.membase + OFFSET_LSR), -1)
 #define UART_PUT_GCTL(uart,v)   bfin_write16(((uart)->port.membase + OFFSET_GCTL),v)
+#define UART_PUT_MCR(uart,v)    bfin_write16(((uart)->port.membase + OFFSET_MCR),v)
 
 #if defined(CONFIG_BFIN_UART0_CTSRTS) || defined(CONFIG_BFIN_UART1_CTSRTS)
 # define CONFIG_SERIAL_BFIN_CTSRTS
@@ -67,10 +72,9 @@ struct bfin_serial_port {
 	unsigned int		tx_dma_channel;
 	unsigned int		rx_dma_channel;
 	struct work_struct	tx_dma_workqueue;
-#else
-	struct work_struct 	cts_workqueue;
 #endif
 #ifdef CONFIG_SERIAL_BFIN_CTSRTS
+	struct work_struct 	cts_workqueue;
 	int		cts_pin;
 	int 		rts_pin;
 #endif
@@ -143,51 +147,49 @@ struct bfin_serial_res bfin_serial_resource[] = {
 
 int nr_ports = ARRAY_SIZE(bfin_serial_resource);
 
+#define DRIVER_NAME "bfin-uart"
+
 static void bfin_serial_hw_init(struct bfin_serial_port *uart)
 {
 #ifdef CONFIG_SERIAL_BFIN_UART0
-	/* Enable UART0 RX and TX on pin 7 & 8 of PORT E */
-	bfin_write_PORTE_FER(0x180 | bfin_read_PORTE_FER());
-	bfin_write_PORTE_MUX(0x3C000 | bfin_read_PORTE_MUX());
+	peripheral_request(P_UART0_TX, DRIVER_NAME);
+	peripheral_request(P_UART0_RX, DRIVER_NAME);
 #endif
 
 #ifdef CONFIG_SERIAL_BFIN_UART1
-	/* Enable UART1 RX and TX on pin 0 & 1 of PORT H */
-	bfin_write_PORTH_FER(0x3 | bfin_read_PORTH_FER());
-	bfin_write_PORTH_MUX(~0xF & bfin_read_PORTH_MUX());
+	peripheral_request(P_UART1_TX, DRIVER_NAME);
+	peripheral_request(P_UART1_RX, DRIVER_NAME);
+
 #ifdef CONFIG_BFIN_UART1_CTSRTS
-	/* Enable UART1 RTS and CTS on pin 9 & 10 of PORT E */
-	bfin_write_PORTE_FER(0x600 | bfin_read_PORTE_FER());
-	bfin_write_PORTE_MUX(~0x3C0000 & bfin_read_PORTE_MUX());
+	peripheral_request(P_UART1_RTS, DRIVER_NAME);
+	peripheral_request(P_UART1_CTS DRIVER_NAME);
 #endif
 #endif
 
 #ifdef CONFIG_SERIAL_BFIN_UART2
-	/* Enable UART2 RX and TX on pin 4 & 5 of PORT B */
-	bfin_write_PORTB_FER(0x30 | bfin_read_PORTB_FER());
-	bfin_write_PORTB_MUX(~0xF00 & bfin_read_PORTB_MUX());
+	peripheral_request(P_UART2_TX, DRIVER_NAME);
+	peripheral_request(P_UART2_RX, DRIVER_NAME);
 #endif
 
 #ifdef CONFIG_SERIAL_BFIN_UART3
-	/* Enable UART3 RX and TX on pin 6 & 7 of PORT B */
-	bfin_write_PORTB_FER(0xC0 | bfin_read_PORTB_FER());
-	bfin_write_PORTB_MUX(~0xF000 | bfin_read_PORTB_MUX());
+	peripheral_request(P_UART3_TX, DRIVER_NAME);
+	peripheral_request(P_UART3_RX, DRIVER_NAME);
+
 #ifdef CONFIG_BFIN_UART3_CTSRTS
-	/* Enable UART3 RTS and CTS on pin 2 & 3 of PORT B */
-	bfin_write_PORTB_FER(0xC | bfin_read_PORTB_FER());
-	bfin_write_PORTB_MUX(~0xF0 | bfin_read_PORTB_MUX());
+	peripheral_request(P_UART3_RTS, DRIVER_NAME);
+	peripheral_request(P_UART3_CTS DRIVER_NAME);
 #endif
 #endif
 	SSYNC();
 #ifdef CONFIG_SERIAL_BFIN_CTSRTS
 	if (uart->cts_pin >= 0) {
-		gpio_request(uart->cts_pin, NULL);
+		gpio_request(uart->cts_pin, DRIVER_NAME);
 		gpio_direction_input(uart->cts_pin);
 	}
 
 	if (uart->rts_pin >= 0) {
-		gpio_request(uart->rts_pin, NULL);
-		gpio_direction_output(uart->rts_pin);
+		gpio_request(uart->rts_pin, DRIVER_NAME);
+		gpio_direction_output(uart->rts_pin, 0);
 	}
 #endif
 }

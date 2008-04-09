@@ -24,6 +24,7 @@
 #include <net/flow.h>
 #include <net/sock.h>
 #include <net/request_sock.h>
+#include <net/route.h>
 
 /** struct ip_options - IP Options
  *
@@ -174,7 +175,8 @@ extern void build_ehash_secret(void);
 static inline unsigned int inet_ehashfn(const __be32 laddr, const __u16 lport,
 					const __be32 faddr, const __be16 fport)
 {
-	return jhash_2words((__force __u32) laddr ^ (__force __u32) faddr,
+	return jhash_3words((__force __u32) laddr,
+			    (__force __u32) faddr,
 			    ((__u32) lport) << 16 | (__force __u32)fport,
 			    inet_ehash_secret);
 }
@@ -188,6 +190,12 @@ static inline int inet_sk_ehashfn(const struct sock *sk)
 	const __be16 fport = inet->dport;
 
 	return inet_ehashfn(laddr, lport, faddr, fport);
+}
+
+
+static inline int inet_iif(const struct sk_buff *skb)
+{
+	return ((struct rtable *)skb->dst)->rt_iif;
 }
 
 #endif	/* _INET_SOCK_H */

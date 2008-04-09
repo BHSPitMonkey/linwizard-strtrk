@@ -61,11 +61,11 @@ struct thread_info *secondary_ti;
 
 cpumask_t cpu_possible_map = CPU_MASK_NONE;
 cpumask_t cpu_online_map = CPU_MASK_NONE;
-cpumask_t cpu_sibling_map[NR_CPUS] = { [0 ... NR_CPUS-1] = CPU_MASK_NONE };
+DEFINE_PER_CPU(cpumask_t, cpu_sibling_map) = CPU_MASK_NONE;
 
 EXPORT_SYMBOL(cpu_online_map);
 EXPORT_SYMBOL(cpu_possible_map);
-EXPORT_SYMBOL(cpu_sibling_map);
+EXPORT_PER_CPU_SYMBOL(cpu_sibling_map);
 
 /* SMP operations for this machine */
 struct smp_ops_t *smp_ops;
@@ -75,6 +75,8 @@ static volatile unsigned int cpu_callin_map[NR_CPUS];
 void smp_call_function_interrupt(void);
 
 int smt_enabled_at_boot = 1;
+
+static int ipi_fail_ok;
 
 static void (*crash_ipi_function_ptr)(struct pt_regs *) = NULL;
 
@@ -152,11 +154,6 @@ static void stop_this_cpu(void *dummy)
 		;
 }
 
-void smp_send_stop(void)
-{
-	smp_call_function(stop_this_cpu, NULL, 1, 0);
-}
-
 /*
  * Structure and data for smp_call_function(). This is designed to minimise
  * static memory requirements. It also looks cleaner.
@@ -186,20 +183,18 @@ static struct call_data_struct {
  * <wait> If true, wait (atomically) until function has completed on other CPUs.
  * [RETURNS] 0 on success, else a negative status code. Does not return until
  * remote CPUs are nearly ready to execute <<func>> or are or have executed.
+ * <map> is a cpu map of the cpus to send IPI to.
  *
  * You must not call this function with disabled interrupts or from a
  * hardware interrupt handler or from a bottom half handler.
  */
-int smp_call_function_map(void (*func) (void *info), void *info, int nonatomic,
-			int wait, cpumask_t map)
+static int __smp_call_function_map(void (*func) (void *info), void *info,
+				   int nonatomic, int wait, cpumask_t map)
 {
 	struct call_data_struct data;
 	int ret = -1, num_cpus;
 	int cpu;
 	u64 timeout;
-
-	/* Can deadlock when called with interrupts disabled */
-	WARN_ON(irqs_disabled());
 
 	if (unlikely(smp_ops == NULL))
 		return ret;
@@ -210,8 +205,6 @@ int smp_call_function_map(void (*func) (void *info), void *info, int nonatomic,
 	data.wait = wait;
 	if (wait)
 		atomic_set(&data.finished, 0);
-
-	spin_lock(&call_lock);
 
 	/* remove 'self' from the map */
 	if (cpu_isset(smp_processor_id(), map))
@@ -239,7 +232,8 @@ int smp_call_function_map(void (*func) (void *info), void *info, int nonatomic,
 			printk("smp_call_function on cpu %d: other cpus not "
 				"responding (%d)\n", smp_processor_id(),
 				atomic_read(&data.started));
-			debugger(NULL);
+			if (!ipi_fail_ok)
+				debugger(NULL);
 			goto out;
 		}
 	}
@@ -266,6 +260,16 @@ int smp_call_function_map(void (*func) (void *info), void *info, int nonatomic,
  out:
 	call_data = NULL;
 	HMT_medium();
+	return ret;
+}
+
+static int __smp_call_function(void (*func)(void *info), void *info,
+			       int nonatomic, int wait)
+{
+	int ret;
+	spin_lock(&call_lock);
+	ret =__smp_call_function_map(func, info, nonatomic, wait,
+				       cpu_online_map);
 	spin_unlock(&call_lock);
 	return ret;
 }
@@ -273,23 +277,31 @@ int smp_call_function_map(void (*func) (void *info), void *info, int nonatomic,
 int smp_call_function(void (*func) (void *info), void *info, int nonatomic,
 			int wait)
 {
-	return smp_call_function_map(func,info,nonatomic,wait,cpu_online_map);
+	/* Can deadlock when called with interrupts disabled */
+	WARN_ON(irqs_disabled());
+
+	return __smp_call_function(func, info, nonatomic, wait);
 }
 EXPORT_SYMBOL(smp_call_function);
 
-int smp_call_function_single(int cpu, void (*func) (void *info), void *info, int nonatomic,
-			int wait)
+int smp_call_function_single(int cpu, void (*func) (void *info), void *info,
+			     int nonatomic, int wait)
 {
 	cpumask_t map = CPU_MASK_NONE;
 	int ret = 0;
+
+	/* Can deadlock when called with interrupts disabled */
+	WARN_ON(irqs_disabled());
 
 	if (!cpu_online(cpu))
 		return -EINVAL;
 
 	cpu_set(cpu, map);
-	if (cpu != get_cpu())
-		ret = smp_call_function_map(func,info,nonatomic,wait,map);
-	else {
+	if (cpu != get_cpu()) {
+		spin_lock(&call_lock);
+		ret = __smp_call_function_map(func, info, nonatomic, wait, map);
+		spin_unlock(&call_lock);
+	} else {
 		local_irq_disable();
 		func(info);
 		local_irq_enable();
@@ -298,6 +310,26 @@ int smp_call_function_single(int cpu, void (*func) (void *info), void *info, int
 	return ret;
 }
 EXPORT_SYMBOL(smp_call_function_single);
+
+void smp_send_stop(void)
+{
+	int nolock;
+
+	/* It's OK to fail sending the IPI, since the alternative is to
+	 * be stuck forever waiting on the other CPU to take the interrupt.
+	 *
+	 * It's better to at least continue and go through reboot, since this
+	 * function is usually called at panic or reboot time in the first
+	 * place.
+	 */
+	ipi_fail_ok = 1;
+
+	/* Don't deadlock in case we got called through panic */
+	nolock = !spin_trylock(&call_lock);
+	__smp_call_function_map(stop_this_cpu, NULL, 1, 0, cpu_online_map);
+	if (!nolock)
+		spin_unlock(&call_lock);
+}
 
 void smp_call_function_interrupt(void)
 {
@@ -559,6 +591,8 @@ int __devinit start_secondary(void *unused)
 
 	if (system_state > SYSTEM_BOOTING)
 		snapshot_timebase();
+
+	secondary_cpu_time_init();
 
 	spin_lock(&call_lock);
 	cpu_set(cpu, cpu_online_map);

@@ -208,6 +208,7 @@ static int hci_uart_close(struct hci_dev *hdev)
 		return 0;
 
 	hci_uart_flush(hdev);
+	hdev->flush = NULL;
 	return 0;
 }
 
@@ -549,7 +550,10 @@ static int __init hci_uart_init(void)
 #ifdef CONFIG_BT_HCIUART_BCSP
 	bcsp_init();
 #endif
-	
+#ifdef CONFIG_BT_HCIUART_LL
+	ll_init();
+#endif
+
 	return 0;
 }
 
@@ -562,6 +566,9 @@ static void __exit hci_uart_exit(void)
 #endif
 #ifdef CONFIG_BT_HCIUART_BCSP
 	bcsp_deinit();
+#endif
+#ifdef CONFIG_BT_HCIUART_LL
+	ll_deinit();
 #endif
 
 	/* Release tty registration of line discipline */

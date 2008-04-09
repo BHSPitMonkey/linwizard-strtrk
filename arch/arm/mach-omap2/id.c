@@ -18,11 +18,11 @@
 #include <asm/io.h>
 
 #if defined(CONFIG_ARCH_OMAP2420)
-#define TAP_BASE	io_p2v(0x48014000)
-#elif defined(CONFIG_ARCH_OMAP2430)
-#define TAP_BASE	io_p2v(0x4900A000)
-#elif defined(CONFIG_ARCH_OMAP34XX)
-#define TAP_BASE	io_p2v(0x54004000)
+#define OMAP24XX_TAP_BASE	io_p2v(0x48014000)
+#endif
+
+#if defined(CONFIG_ARCH_OMAP2430)
+#define OMAP24XX_TAP_BASE	io_p2v(0x4900A000)
 #endif
 
 #define OMAP_TAP_IDCODE		0x0204

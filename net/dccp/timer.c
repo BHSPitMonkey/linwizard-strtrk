@@ -280,9 +280,8 @@ static void dccp_init_write_xmit_timer(struct sock *sk)
 {
 	struct dccp_sock *dp = dccp_sk(sk);
 
-	init_timer(&dp->dccps_xmit_timer);
-	dp->dccps_xmit_timer.data = (unsigned long)sk;
-	dp->dccps_xmit_timer.function = dccp_write_xmit_timer;
+	setup_timer(&dp->dccps_xmit_timer, dccp_write_xmit_timer,
+			(unsigned long)sk);
 }
 
 void dccp_init_xmit_timers(struct sock *sk)
@@ -290,4 +289,25 @@ void dccp_init_xmit_timers(struct sock *sk)
 	dccp_init_write_xmit_timer(sk);
 	inet_csk_init_xmit_timers(sk, &dccp_write_timer, &dccp_delack_timer,
 				  &dccp_keepalive_timer);
+}
+
+static ktime_t dccp_timestamp_seed;
+/**
+ * dccp_timestamp  -  10s of microseconds time source
+ * Returns the number of 10s of microseconds since loading DCCP. This is native
+ * DCCP time difference format (RFC 4340, sec. 13).
+ * Please note: This will wrap around about circa every 11.9 hours.
+ */
+u32 dccp_timestamp(void)
+{
+	s64 delta = ktime_us_delta(ktime_get_real(), dccp_timestamp_seed);
+
+	do_div(delta, 10);
+	return delta;
+}
+EXPORT_SYMBOL_GPL(dccp_timestamp);
+
+void __init dccp_timestamping_init(void)
+{
+	dccp_timestamp_seed = ktime_get_real();
 }

@@ -10,7 +10,7 @@
  * Original driver:
  * Copyright (C) 2005 Nokia Corporation
  * Author: Paul Mundt <paul.mundt@nokia.com>
- *         Juha Yrjölä <juha.yrjola@nokia.com>
+ *         Juha YrjÃ¶lÃ¤ <juha.yrjola@nokia.com>
  * OMAP Dual-mode timer framework support by Timo Teras
  *
  * Some parts based off of TI's 24xx code:
@@ -41,12 +41,9 @@ static struct clock_event_device clockevent_gpt;
 
 static irqreturn_t omap2_gp_timer_interrupt(int irq, void *dev_id)
 {
-	struct omap_dm_timer *gpt = (struct omap_dm_timer *)dev_id;
-	struct clock_event_device *evt = &clockevent_gpt;
+	omap_dm_timer_write_status(gptimer, OMAP_TIMER_INT_OVERFLOW);
+	timer_tick();
 
-	omap_dm_timer_write_status(gpt, OMAP_TIMER_INT_OVERFLOW);
-
-	evt->event_handler(evt);
 	return IRQ_HANDLED;
 }
 

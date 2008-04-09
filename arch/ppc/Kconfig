@@ -4,6 +4,10 @@
 
 mainmenu "Linux/PowerPC Kernel Configuration"
 
+config WORD_SIZE
+	int
+	default 32
+
 config MMU
 	bool
 	default y
@@ -38,6 +42,9 @@ config GENERIC_CALIBRATE_DELAY
 config PPC
 	bool
 	default y
+	select HAVE_IDE
+	select HAVE_OPROFILE
+	select HAVE_KPROBES
 
 config PPC32
 	bool
@@ -74,18 +81,18 @@ choice
 	default 6xx
 
 config 6xx
-	bool "6xx/7xx/74xx/52xx/82xx/83xx"
+	bool "6xx/7xx/74xx/52xx/82xx"
 	select PPC_FPU
 	help
 	  There are four types of PowerPC chips supported.  The more common
 	  types (601, 603, 604, 740, 750, 7400), the older Freescale
 	  (formerly Motorola) embedded versions (821, 823, 850, 855, 860,
-	  52xx, 82xx, 83xx), the IBM embedded versions (403 and 405) and
+	  52xx, 82xx), the IBM embedded versions (403 and 405) and
 	  the Book E embedded processors from IBM (44x) and Freescale (85xx).
 	  For support for 64-bit processors, set ARCH=powerpc.
 	  Unless you are building a kernel for one of the embedded processor
 	  systems, choose 6xx.
-	  Also note that because the 52xx, 82xx, & 83xx family have a 603e
+	  Also note that because the 52xx, 82xx family have a 603e
 	  core, specific support for that chipset is asked later on.
 
 config 40x
@@ -98,12 +105,7 @@ config 44x
 
 config 8xx
 	bool "8xx"
-
-config E200
-	bool "e200"
-
-config E500
-	bool "e500"
+	select PPC_LIB_RHEAP
 
 endchoice
 
@@ -119,25 +121,14 @@ config PPC_DCR
 	depends on PPC_DCR_NATIVE
 	default y
 
-config BOOKE
-	bool
-	depends on E200 || E500
-	default y
-
-config FSL_BOOKE
-	bool
-	depends on E200 || E500
-	default y
-
 config PTE_64BIT
 	bool
-	depends on 44x || E500
+	depends on 44x
 	default y if 44x
-	default y if E500 && PHYS_64BIT
 
 config PHYS_64BIT
-	bool 'Large physical address support' if E500
-	depends on 44x || E500
+	bool
+	depends on 44x
 	default y if 44x
 	---help---
 	  This option enables kernel support for larger than 32-bit physical
@@ -148,7 +139,7 @@ config PHYS_64BIT
 config ALTIVEC
 	bool "AltiVec Support"
 	depends on 6xx
-	depends on !8260 && !83xx
+	depends on !8260
 	---help---
 	  This option enables kernel support for the Altivec extensions to the
 	  PowerPC processor. The kernel currently supports saving and restoring
@@ -162,24 +153,9 @@ config ALTIVEC
 
 	  If in doubt, say Y here.
 
-config SPE
-	bool "SPE Support"
-	depends on E200 || E500
-	---help---
-	  This option enables kernel support for the Signal Processing
-	  Extensions (SPE) to the PowerPC processor. The kernel currently
-	  supports saving and restoring SPE registers, and turning on the
-	  'spe enable' bit so user processes can execute SPE instructions.
-
-	  This option is only useful if you have a processor that supports
-	  SPE (e500, otherwise known as 85xx series), but does not have any
-	  effect on a non-spe cpu (it does, however add code to the kernel).
-
-	  If in doubt, say Y here.
-
 config TAU
 	bool "Thermal Management Support"
-	depends on 6xx && !8260 && !83xx
+	depends on 6xx && !8260
 	help
 	  G3 and G4 processors have an on-chip temperature sensor called the
 	  'Thermal Assist Unit (TAU)', which, in theory, can measure the on-die
@@ -223,7 +199,7 @@ config TAU_AVERAGE
 
 config MATH_EMULATION
 	bool "Math emulation"
-	depends on 4xx || 8xx || E200 || E500
+	depends on 4xx || 8xx
 	---help---
 	  Some PowerPC chips designed for embedded applications do not have
 	  a floating-point unit and therefore do not implement the
@@ -274,7 +250,6 @@ config PPC601_SYNC_FIX
 	  If in doubt, say Y here.
 
 source arch/ppc/platforms/4xx/Kconfig
-source arch/ppc/platforms/85xx/Kconfig
 
 config PPC_STD_MMU
 	bool
@@ -283,7 +258,7 @@ config PPC_STD_MMU
 
 config NOT_COHERENT_CACHE
 	bool
-	depends on 4xx || 8xx || E200
+	depends on 4xx || 8xx
 	default y
 
 endmenu
@@ -573,23 +548,8 @@ choice
 
 	  Select PReP if configuring for a PReP machine.
 
-	  Select Gemini if configuring for a Synergy Microsystems' Gemini
-	  series Single Board Computer.  More information is available at:
-	  <http://www.synergymicro.com/PressRel/97_10_15.html>.
-
-	  Select APUS if configuring for a PowerUP Amiga.  More information is
-	  available at: <http://linux-apus.sourceforge.net/>.
-
 config PPC_PREP
 	bool "PReP"
-
-config APUS
-	bool "Amiga-APUS"
-	depends on BROKEN
-	help
-	  Select APUS if configuring for a PowerUP Amiga.
-	  More information is available at:
-	  <http://linux-apus.sourceforge.net/>.
 
 config KATANA
 	bool "Artesyn-Katana"
@@ -731,16 +691,6 @@ config LITE5200B
 	  Support for the LITE5200B dev board for the MPC5200 from Freescale.
 	  This is the new board with 2 PCI slots.
 
-config MPC834x_SYS
-	bool "Freescale MPC834x SYS"
-	help
-	  This option enables support for the MPC 834x SYS evaluation board.
-
-	  Be aware that PCI buses can only function when SYS board is plugged
-	  into the PIB (Platform IO Board) board from Freescale which provide
-	  3 PCI slots.  The PIBs PCI initialization is the bootloader's
-	  responsibility.
-
 config EV64360
 	bool "Marvell-EV64360BP"
 	help
@@ -784,18 +734,6 @@ config 8272
 	  The MPC8272 CPM has a different internal dpram setup than other CPM2
 	  devices
 
-config 83xx
-	bool
-	default y if MPC834x_SYS
-
-config MPC834x
-	bool
-	default y if MPC834x_SYS
-
-config PPC_83xx
-	bool
-	default y if 83xx
-
 config CPM1
 	bool
 	depends on 8xx
@@ -809,6 +747,7 @@ config CPM1
 config CPM2
 	bool
 	depends on 8260 || MPC8560 || MPC8555
+	select PPC_LIB_RHEAP
 	default y
 	help
 	  The CPM2 (Communications Processor Module) is a coprocessor on
@@ -820,8 +759,7 @@ config PPC_GEN550
 	bool
 	depends on SANDPOINT || SPRUCE || PPLUS || \
 		PRPMC750 || PRPMC800 || LOPEC || \
-		(EV64260 && !SERIAL_MPSC) || CHESTNUT || RADSTONE_PPC7D || \
-		83xx
+		(EV64260 && !SERIAL_MPSC) || CHESTNUT || RADSTONE_PPC7D
 	default y
 
 config FORCE
@@ -1027,133 +965,7 @@ config CMDLINE
 	  some command-line options at build time by entering them here.  In
 	  most cases you will need to specify the root device here.
 
-config AMIGA
-	bool
-	depends on APUS
-	default y
-	help
-	  This option enables support for the Amiga series of computers.
-
-config ZORRO
-	bool
-	depends on APUS
-	default y
-	help
-	  This enables support for the Zorro bus in the Amiga. If you have
-	  expansion cards in your Amiga that conform to the Amiga
-	  AutoConfig(tm) specification, say Y, otherwise N. Note that even
-	  expansion cards that do not fit in the Zorro slots but fit in e.g.
-	  the CPU slot may fall in this category, so you have to say Y to let
-	  Linux use these.
-
-config ABSTRACT_CONSOLE
-	bool
-	depends on APUS
-	default y
-
-config APUS_FAST_EXCEPT
-	bool
-	depends on APUS
-	default y
-
-config AMIGA_PCMCIA
-	bool "Amiga 1200/600 PCMCIA support"
-	depends on APUS && EXPERIMENTAL
-	help
-	  Include support in the kernel for pcmcia on Amiga 1200 and Amiga
-	  600. If you intend to use pcmcia cards say Y; otherwise say N.
-
-config AMIGA_BUILTIN_SERIAL
-	tristate "Amiga builtin serial support"
-	depends on APUS
-	help
-	  If you want to use your Amiga's built-in serial port in Linux,
-	  answer Y.
-
-	  To compile this driver as a module, choose M here.
-
-config GVPIOEXT
-	tristate "GVP IO-Extender support"
-	depends on APUS
-	help
-	  If you want to use a GVP IO-Extender serial card in Linux, say Y.
-	  Otherwise, say N.
-
-config GVPIOEXT_LP
-	tristate "GVP IO-Extender parallel printer support"
-	depends on GVPIOEXT
-	help
-	  Say Y to enable driving a printer from the parallel port on your
-	  GVP IO-Extender card, N otherwise.
-
-config GVPIOEXT_PLIP
-	tristate "GVP IO-Extender PLIP support"
-	depends on GVPIOEXT
-	help
-	  Say Y to enable doing IP over the parallel port on your GVP
-	  IO-Extender card, N otherwise.
-
-config MULTIFACE_III_TTY
-	tristate "Multiface Card III serial support"
-	depends on APUS
-	help
-	  If you want to use a Multiface III card's serial port in Linux,
-	  answer Y.
-
-	  To compile this driver as a module, choose M here.
-
-config A2232
-	tristate "Commodore A2232 serial support (EXPERIMENTAL)"
-	depends on EXPERIMENTAL && APUS
-	---help---
-	  This option supports the 2232 7-port serial card shipped with the
-	  Amiga 2000 and other Zorro-bus machines, dating from 1989.  At
-	  a max of 19,200 bps, the ports are served by a 6551 ACIA UART chip
-	  each, plus a 8520 CIA, and a master 6502 CPU and buffer as well. The
-	  ports were connected with 8 pin DIN connectors on the card bracket,
-	  for which 8 pin to DB25 adapters were supplied. The card also had
-	  jumpers internally to toggle various pinning configurations.
-
-	  This driver can be built as a module; but then "generic_serial"
-	  will also be built as a module. This has to be loaded before
-	  "ser_a2232". If you want to do this, answer M here.
-
-config WHIPPET_SERIAL
-	tristate "Hisoft Whippet PCMCIA serial support"
-	depends on AMIGA_PCMCIA
-	help
-	  HiSoft has a web page at <http://www.hisoft.co.uk/>, but there
-	  is no listing for the Whippet in their Amiga section.
-
-config APNE
-	tristate "PCMCIA NE2000 support"
-	depends on AMIGA_PCMCIA
-	help
-	  If you have a PCMCIA NE2000 compatible adapter, say Y.  Otherwise,
-	  say N.
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called apne.
-
-config SERIAL_CONSOLE
-	bool "Support for serial port console"
-	depends on APUS && (AMIGA_BUILTIN_SERIAL=y || GVPIOEXT=y || MULTIFACE_III_TTY=y)
-
-config HEARTBEAT
-	bool "Use power LED as a heartbeat"
-	depends on APUS
-	help
-	  Use the power-on LED on your machine as a load meter.  The exact
-	  behavior is platform-dependent, but normally the flash frequency is
-	  a hyperbolic function of the 5-minute load average.
-
-config PROC_HARDWARE
-	bool "/proc/hardware support"
-	depends on APUS
-
-source "drivers/zorro/Kconfig"
-
-if !44x || BROKEN
+if BROKEN
 source kernel/power/Kconfig
 endif
 
@@ -1203,13 +1015,13 @@ config GENERIC_ISA_DMA
 
 config PPC_I8259
 	bool
-	default y if 85xx || PPC_PREP
+	default y if PPC_PREP
 	default n
 
 config PPC_INDIRECT_PCI
 	bool
 	depends on PCI
-	default y if 40x || 44x || 85xx || 83xx || PPC_PREP
+	default y if 40x || 44x || PPC_PREP
 	default n
 
 config EISA
@@ -1226,9 +1038,8 @@ config MCA
 	bool
 
 config PCI
-	bool "PCI support" if 40x || CPM2 || 83xx || 85xx || PPC_MPC52xx
-	default y if !40x && !CPM2 && !8xx && !APUS && !83xx && !85xx
-	default PCI_PERMEDIA if !4xx && !CPM2 && !8xx && APUS
+	bool "PCI support" if 40x || CPM2 || PPC_MPC52xx
+	default y if !40x && !CPM2 && !8xx
 	default PCI_QSPAN if !4xx && !CPM2 && 8xx
 	help
 	  Find out whether your system includes a PCI bus. PCI is the name of
@@ -1241,11 +1052,6 @@ config PCI_DOMAINS
 
 config PCI_SYSCALL
 	def_bool PCI
-
-config MPC83xx_PCI2
-	bool "Support for 2nd PCI host controller"
-	depends on PCI && MPC834x
-	default y if MPC834x_SYS
 
 config PCI_QSPAN
 	bool "QSpan PCI"
@@ -1283,10 +1089,6 @@ config 8260_PCI9_IDMA4
 	bool "IDMA4"
 
 endchoice
-
-config PCI_PERMEDIA
-	bool "PCI for Permedia2"
-	depends on !4xx && !8xx && APUS
 
 source "drivers/pci/Kconfig"
 
@@ -1419,6 +1221,10 @@ config BOOT_LOAD
 config PIN_TLB
 	bool "Pinned Kernel TLBs (860 ONLY)"
 	depends on ADVANCED_OPTIONS && 8xx
+
+config PPC_LIB_RHEAP
+	bool
+
 endmenu
 
 source "net/Kconfig"
@@ -1452,8 +1258,6 @@ config SERIAL_SICC_CONSOLE
 endmenu
 
 source "lib/Kconfig"
-
-source "arch/powerpc/oprofile/Kconfig"
 
 source "arch/ppc/Kconfig.debug"
 

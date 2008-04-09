@@ -20,6 +20,7 @@
 #include <linux/rtc.h>
 #include <linux/bcd.h>
 #include <linux/clk.h>
+#include <linux/log2.h>
 
 #include <asm/hardware.h>
 #include <asm/uaccess.h>
@@ -309,9 +310,7 @@ static int s3c_rtc_ioctl(struct device *dev,
 		break;
 
 	case RTC_IRQP_SET:
-		/* check for power of 2 */
-
-		if ((arg & (arg-1)) != 0 || arg < 1) {
+		if (!is_power_of_2(arg)) {
 			ret = -EINVAL;
 			goto exit;
 		}
@@ -541,8 +540,6 @@ static int s3c_rtc_probe(struct platform_device *pdev)
 #ifdef CONFIG_PM
 
 /* RTC Power management control */
-
-static struct timespec s3c_rtc_delta;
 
 static int ticnt_save;
 

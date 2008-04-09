@@ -481,9 +481,9 @@ struct bcm43xx_dmaring;
 struct bcm43xx_pioqueue;
 
 struct bcm43xx_initval {
-	u16 offset;
-	u16 size;
-	u32 value;
+	__be16 offset;
+	__be16 size;
+	__be32 value;
 } __attribute__((__packed__));
 
 /* Values for bcm430x_sprominfo.locale */
@@ -993,11 +993,5 @@ int bcm43xx_pci_write_config32(struct bcm43xx_private *bcm, int offset, u32 valu
 	 		__value = __max;		\
 	 	__value;				\
 	})
-
-/** Helpers to print MAC addresses. */
-#define BCM43xx_MACFMT		"%02x:%02x:%02x:%02x:%02x:%02x"
-#define BCM43xx_MACARG(x)	((u8*)(x))[0], ((u8*)(x))[1], \
-				((u8*)(x))[2], ((u8*)(x))[3], \
-				((u8*)(x))[4], ((u8*)(x))[5]
 
 #endif /* BCM43xx_H_ */

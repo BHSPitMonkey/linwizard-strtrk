@@ -44,7 +44,8 @@ typedef enum {
 	ixgb_phy_type_g6005,	/* 850nm, MM fiber, XPAK transceiver */
 	ixgb_phy_type_g6104,	/* 1310nm, SM fiber, XPAK transceiver */
 	ixgb_phy_type_txn17201,	/* 850nm, MM fiber, XPAK transceiver */
-	ixgb_phy_type_txn17401	/* 1310nm, SM fiber, XENPAK transceiver */
+	ixgb_phy_type_txn17401,	/* 1310nm, SM fiber, XENPAK transceiver */
+	ixgb_phy_type_bcm	/* SUN specific board */
 } ixgb_phy_type;
 
 /* XPAK transceiver vendors, for the SR adapters */
@@ -534,12 +535,12 @@ typedef enum {
  * in which case the structure must be packed in some compiler-specific
  * manner. */
 struct ixgb_rx_desc {
-	uint64_t buff_addr;
-	uint16_t length;
-	uint16_t reserved;
+	__le64 buff_addr;
+	__le16 length;
+	__le16 reserved;
 	uint8_t status;
 	uint8_t errors;
-	uint16_t special;
+	__le16 special;
 };
 
 #define IXGB_RX_DESC_STATUS_DD    0x01
@@ -567,11 +568,11 @@ struct ixgb_rx_desc {
  * in which case the structure must be packed in some compiler-specific
  * manner. */
 struct ixgb_tx_desc {
-	uint64_t buff_addr;
-	uint32_t cmd_type_len;
+	__le64 buff_addr;
+	__le32 cmd_type_len;
 	uint8_t status;
 	uint8_t popts;
-	uint16_t vlan;
+	__le16 vlan;
 };
 
 #define IXGB_TX_DESC_LENGTH_MASK    0x000FFFFF
@@ -596,14 +597,14 @@ struct ixgb_tx_desc {
 struct ixgb_context_desc {
 	uint8_t ipcss;
 	uint8_t ipcso;
-	uint16_t ipcse;
+	__le16 ipcse;
 	uint8_t tucss;
 	uint8_t tucso;
-	uint16_t tucse;
-	uint32_t cmd_type_len;
+	__le16 tucse;
+	__le32 cmd_type_len;
 	uint8_t status;
 	uint8_t hdr_len;
-	uint16_t mss;
+	__le16 mss;
 };
 
 #define IXGB_CONTEXT_DESC_CMD_TCP 0x01000000
@@ -711,7 +712,7 @@ struct ixgb_hw {
 	uint32_t bar2;
 	uint32_t bar3;
 	uint16_t pci_cmd_word;	/* PCI command register id from PCI configuration space */
-	uint16_t eeprom[IXGB_EEPROM_SIZE];	/* EEPROM contents read at init time  */
+	__le16 eeprom[IXGB_EEPROM_SIZE];	/* EEPROM contents read at init time  */
 	unsigned long io_base;	/* Our I/O mapped location */
 	uint32_t lastLFC;
 	uint32_t lastRFC;
@@ -809,7 +810,7 @@ void ixgb_get_ee_mac_addr(struct ixgb_hw *hw, uint8_t *mac_addr);
 uint32_t ixgb_get_ee_pba_number(struct ixgb_hw *hw);
 uint16_t ixgb_get_ee_device_id(struct ixgb_hw *hw);
 boolean_t ixgb_get_eeprom_data(struct ixgb_hw *hw);
-uint16_t ixgb_get_eeprom_word(struct ixgb_hw *hw, uint16_t index);
+__le16 ixgb_get_eeprom_word(struct ixgb_hw *hw, uint16_t index);
 
 /* Everything else */
 void ixgb_led_on(struct ixgb_hw *hw);

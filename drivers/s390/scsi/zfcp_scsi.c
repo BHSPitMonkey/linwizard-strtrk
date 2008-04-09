@@ -1,22 +1,22 @@
-/* 
+/*
  * This file is part of the zfcp device driver for
  * FCP adapters for IBM System z9 and zSeries.
  *
  * (C) Copyright IBM Corp. 2002, 2006
- * 
- * This program is free software; you can redistribute it and/or modify 
- * it under the terms of the GNU General Public License as published by 
- * the Free Software Foundation; either version 2, or (at your option) 
- * any later version. 
- * 
- * This program is distributed in the hope that it will be useful, 
- * but WITHOUT ANY WARRANTY; without even the implied warranty of 
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the 
- * GNU General Public License for more details. 
- * 
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2, or (at your option)
+ * any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #define ZFCP_LOG_AREA			ZFCP_LOG_AREA_SCSI
@@ -51,7 +51,6 @@ struct zfcp_data zfcp_data = {
 		.queuecommand		= zfcp_scsi_queuecommand,
 		.eh_abort_handler	= zfcp_scsi_eh_abort_handler,
 		.eh_device_reset_handler = zfcp_scsi_eh_device_reset_handler,
-		.eh_bus_reset_handler	= zfcp_scsi_eh_host_reset_handler,
 		.eh_host_reset_handler	= zfcp_scsi_eh_host_reset_handler,
 		.can_queue		= 4096,
 		.this_id		= -1,
@@ -101,7 +100,7 @@ zfcp_get_fcp_dl_ptr(struct fcp_cmnd_iu * fcp_cmd)
 		((unsigned char *) fcp_cmd +
 		 sizeof (struct fcp_cmnd_iu) + additional_length);
 	/*
-	 * fcp_dl_addr = start address of fcp_cmnd structure + 
+	 * fcp_dl_addr = start address of fcp_cmnd structure +
 	 * size of fixed part + size of dynamically sized add_dcp_cdb field
 	 * SEE FCP-2 documentation
 	 */
@@ -181,21 +180,17 @@ static void zfcp_scsi_slave_destroy(struct scsi_device *sdpnt)
 
 	if (unit) {
 		zfcp_erp_wait(unit->port->adapter);
-		wait_event(unit->scsi_scan_wq,
-			   atomic_test_mask(ZFCP_STATUS_UNIT_SCSI_WORK_PENDING,
-					    &unit->status) == 0);
 		atomic_clear_mask(ZFCP_STATUS_UNIT_REGISTERED, &unit->status);
 		sdpnt->hostdata = NULL;
 		unit->device = NULL;
 		zfcp_erp_unit_failed(unit);
 		zfcp_unit_put(unit);
-	} else {
+	} else
 		ZFCP_LOG_NORMAL("bug: no unit associated with SCSI device at "
 				"address %p\n", sdpnt);
-	}
 }
 
-/* 
+/*
  * called from scsi midlayer to allow finetuning of a device.
  */
 static int
@@ -263,8 +258,9 @@ zfcp_scsi_command_async(struct zfcp_adapter *adapter, struct zfcp_unit *unit,
 		goto out;
 	}
 
-	if (unlikely(
-	     !atomic_test_mask(ZFCP_STATUS_COMMON_UNBLOCKED, &unit->status))) {
+	tmp = zfcp_fsf_send_fcp_command_task(adapter, unit, scpnt, use_timer,
+					     ZFCP_REQ_AUTO_CLEANUP);
+	if (unlikely(tmp == -EBUSY)) {
 		ZFCP_LOG_DEBUG("adapter %s not ready or unit 0x%016Lx "
 			       "on port 0x%016Lx in recovery\n",
 			       zfcp_get_busid_by_unit(unit),
@@ -272,9 +268,6 @@ zfcp_scsi_command_async(struct zfcp_adapter *adapter, struct zfcp_unit *unit,
 		zfcp_scsi_command_fail(scpnt, DID_NO_CONNECT);
 		goto out;
 	}
-
-	tmp = zfcp_fsf_send_fcp_command_task(adapter, unit, scpnt, use_timer,
-					     ZFCP_REQ_AUTO_CLEANUP);
 
 	if (unlikely(tmp < 0)) {
 		ZFCP_LOG_DEBUG("error: initiation of Send FCP Cmnd failed\n");
@@ -361,12 +354,11 @@ zfcp_unit_lookup(struct zfcp_adapter *adapter, int channel, unsigned int id,
 	list_for_each_entry(port, &adapter->port_list_head, list) {
 		if (!port->rport || (id != port->rport->scsi_target_id))
 			continue;
-		list_for_each_entry(unit, &port->unit_list_head, list) {
+		list_for_each_entry(unit, &port->unit_list_head, list)
 			if (lun == unit->scsi_lun) {
 				retval = unit;
 				goto out;
 			}
-		}
 	}
  out:
 	return retval;
@@ -374,7 +366,7 @@ zfcp_unit_lookup(struct zfcp_adapter *adapter, int channel, unsigned int id,
 
 /**
  * zfcp_scsi_eh_abort_handler - abort the specified SCSI command
- * @scpnt: pointer to scsi_cmnd to be aborted 
+ * @scpnt: pointer to scsi_cmnd to be aborted
  * Return: SUCCESS - command has been aborted and cleaned up in internal
  *          bookkeeping, SCSI stack won't be called for aborted command
  *         FAILED - otherwise
@@ -461,7 +453,9 @@ zfcp_scsi_eh_device_reset_handler(struct scsi_cmnd *scpnt)
 		retval = SUCCESS;
 		goto out;
 	}
-	ZFCP_LOG_NORMAL("resetting unit 0x%016Lx\n", unit->fcp_lun);
+	ZFCP_LOG_NORMAL("resetting unit 0x%016Lx on port 0x%016Lx, adapter %s\n",
+			unit->fcp_lun, unit->port->wwpn,
+			zfcp_get_busid_by_adapter(unit->port->adapter));
 
 	/*
 	 * If we do not know whether the unit supports 'logical unit reset'
@@ -544,7 +538,7 @@ zfcp_task_management_function(struct zfcp_unit *unit, u8 tm_flags,
 }
 
 /**
- * zfcp_scsi_eh_host_reset_handler - handler for host and bus reset
+ * zfcp_scsi_eh_host_reset_handler - handler for host reset
  */
 static int zfcp_scsi_eh_host_reset_handler(struct scsi_cmnd *scpnt)
 {
@@ -554,8 +548,10 @@ static int zfcp_scsi_eh_host_reset_handler(struct scsi_cmnd *scpnt)
 	unit = (struct zfcp_unit*) scpnt->device->hostdata;
 	adapter = unit->port->adapter;
 
-	ZFCP_LOG_NORMAL("host/bus reset because of problems with "
-			"unit 0x%016Lx\n", unit->fcp_lun);
+	ZFCP_LOG_NORMAL("host reset because of problems with "
+		"unit 0x%016Lx on port 0x%016Lx, adapter %s\n",
+		unit->fcp_lun, unit->port->wwpn,
+		zfcp_get_busid_by_adapter(unit->port->adapter));
 
 	zfcp_erp_adapter_reopen(adapter, 0);
 	zfcp_erp_wait(adapter);
@@ -733,7 +729,7 @@ zfcp_get_fc_host_stats(struct Scsi_Host *shost)
 	if (!data)
 		return NULL;
 
-	ret = zfcp_fsf_exchange_port_data(NULL, adapter, data);
+	ret = zfcp_fsf_exchange_port_data_sync(adapter, data);
 	if (ret) {
 		kfree(data);
 		return NULL; /* XXX return zeroed fc_stats? */
@@ -763,7 +759,7 @@ zfcp_reset_fc_host_stats(struct Scsi_Host *shost)
 	if (!data)
 		return;
 
-	ret = zfcp_fsf_exchange_port_data(NULL, adapter, data);
+	ret = zfcp_fsf_exchange_port_data_sync(adapter, data);
 	if (ret) {
 		kfree(data);
 	} else {
@@ -802,6 +798,7 @@ struct fc_function_template zfcp_transport_functions = {
 	.show_host_port_type = 1,
 	.show_host_speed = 1,
 	.show_host_port_id = 1,
+	.disable_target_scan = 1,
 };
 
 /**

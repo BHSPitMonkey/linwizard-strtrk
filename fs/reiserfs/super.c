@@ -145,7 +145,7 @@ static int finish_unfinished(struct super_block *s)
 {
 	INITIALIZE_PATH(path);
 	struct cpu_key max_cpu_key, obj_key;
-	struct reiserfs_key save_link_key;
+	struct reiserfs_key save_link_key, last_inode_key;
 	int retval = 0;
 	struct item_head *ih;
 	struct buffer_head *bh;
@@ -165,6 +165,8 @@ static int finish_unfinished(struct super_block *s)
 	max_cpu_key.on_disk_key.k_objectid = ~0U;
 	set_cpu_key_k_offset(&max_cpu_key, ~0U);
 	max_cpu_key.key_length = 3;
+
+	memset(&last_inode_key, 0, sizeof(last_inode_key));
 
 #ifdef CONFIG_QUOTA
 	/* Needed for iput() to work correctly and not trash data */
@@ -278,8 +280,18 @@ static int finish_unfinished(struct super_block *s)
 			REISERFS_I(inode)->i_flags |= i_link_saved_unlink_mask;
 			/* not completed unlink (rmdir) found */
 			reiserfs_info(s, "Removing %k..", INODE_PKEY(inode));
-			/* removal gets completed in iput */
-			retval = 0;
+			if (memcmp(&last_inode_key, INODE_PKEY(inode),
+					sizeof(last_inode_key))){
+				last_inode_key = *INODE_PKEY(inode);
+				/* removal gets completed in iput */
+				retval = 0;
+			} else {
+				reiserfs_warning(s, "Dead loop in "
+						"finish_unfinished detected, "
+						"just remove save link\n");
+				retval = remove_save_link_only(s,
+							&save_link_key, 0);
+			}
 		}
 
 		iput(inode);
@@ -307,7 +319,7 @@ static int finish_unfinished(struct super_block *s)
 
 /* to protect file being unlinked from getting lost we "safe" link files
    being unlinked. This link will be deleted in the same transaction with last
-   item of file. mounting the filesytem we scan all these links and remove
+   item of file. mounting the filesystem we scan all these links and remove
    files which almost got lost */
 void add_save_link(struct reiserfs_transaction_handle *th,
 		   struct inode *inode, int truncate)
@@ -508,7 +520,7 @@ static void reiserfs_destroy_inode(struct inode *inode)
 	kmem_cache_free(reiserfs_inode_cachep, REISERFS_I(inode));
 }
 
-static void init_once(void *foo, struct kmem_cache * cachep, unsigned long flags)
+static void init_once(struct kmem_cache * cachep, void *foo)
 {
 	struct reiserfs_inode_info *ei = (struct reiserfs_inode_info *)foo;
 
@@ -605,6 +617,7 @@ static const struct super_operations reiserfs_sops = {
 	.unlockfs = reiserfs_unlockfs,
 	.statfs = reiserfs_statfs,
 	.remount_fs = reiserfs_remount,
+	.show_options = generic_show_options,
 #ifdef CONFIG_QUOTA
 	.quota_read = reiserfs_quota_read,
 	.quota_write = reiserfs_quota_write,
@@ -649,11 +662,11 @@ static struct quotactl_ops reiserfs_qctl_operations = {
 };
 #endif
 
-static struct export_operations reiserfs_export_ops = {
+static const struct export_operations reiserfs_export_ops = {
 	.encode_fh = reiserfs_encode_fh,
-	.decode_fh = reiserfs_decode_fh,
+	.fh_to_dentry = reiserfs_fh_to_dentry,
+	.fh_to_parent = reiserfs_fh_to_parent,
 	.get_parent = reiserfs_get_parent,
-	.get_dentry = reiserfs_get_dentry,
 };
 
 /* this struct is used in reiserfs_getopt () for containing the value for those
@@ -1126,6 +1139,7 @@ static int reiserfs_remount(struct super_block *s, int *mount_flags, char *arg)
 	unsigned long safe_mask = 0;
 	unsigned int commit_max_age = (unsigned int)-1;
 	struct reiserfs_journal *journal = SB_JOURNAL(s);
+	char *new_opts = kstrdup(arg, GFP_KERNEL);
 	int err;
 #ifdef CONFIG_QUOTA
 	int i;
@@ -1141,7 +1155,8 @@ static int reiserfs_remount(struct super_block *s, int *mount_flags, char *arg)
 			REISERFS_SB(s)->s_qf_names[i] = NULL;
 		}
 #endif
-		return -EINVAL;
+		err = -EINVAL;
+		goto out_err;
 	}
 
 	handle_attrs(s);
@@ -1179,9 +1194,9 @@ static int reiserfs_remount(struct super_block *s, int *mount_flags, char *arg)
 	}
 
 	if (blocks) {
-		int rc = reiserfs_resize(s, blocks);
-		if (rc != 0)
-			return rc;
+		err = reiserfs_resize(s, blocks);
+		if (err != 0)
+			goto out_err;
 	}
 
 	if (*mount_flags & MS_RDONLY) {
@@ -1189,16 +1204,16 @@ static int reiserfs_remount(struct super_block *s, int *mount_flags, char *arg)
 		/* remount read-only */
 		if (s->s_flags & MS_RDONLY)
 			/* it is read-only already */
-			return 0;
+			goto out_ok;
 		/* try to remount file system with read-only permissions */
 		if (sb_umount_state(rs) == REISERFS_VALID_FS
 		    || REISERFS_SB(s)->s_mount_state != REISERFS_VALID_FS) {
-			return 0;
+			goto out_ok;
 		}
 
 		err = journal_begin(&th, s, 10);
 		if (err)
-			return err;
+			goto out_err;
 
 		/* Mounting a rw partition read-only. */
 		reiserfs_prepare_for_journal(s, SB_BUFFER_WITH_SB(s), 1);
@@ -1208,11 +1223,13 @@ static int reiserfs_remount(struct super_block *s, int *mount_flags, char *arg)
 		/* remount read-write */
 		if (!(s->s_flags & MS_RDONLY)) {
 			reiserfs_xattr_init(s, *mount_flags);
-			return 0;	/* We are read-write already */
+			goto out_ok;	/* We are read-write already */
 		}
 
-		if (reiserfs_is_journal_aborted(journal))
-			return journal->j_errno;
+		if (reiserfs_is_journal_aborted(journal)) {
+			err = journal->j_errno;
+			goto out_err;
+		}
 
 		handle_data_mode(s, mount_options);
 		handle_barrier_mode(s, mount_options);
@@ -1220,7 +1237,7 @@ static int reiserfs_remount(struct super_block *s, int *mount_flags, char *arg)
 		s->s_flags &= ~MS_RDONLY;	/* now it is safe to call journal_begin */
 		err = journal_begin(&th, s, 10);
 		if (err)
-			return err;
+			goto out_err;
 
 		/* Mount a partition which is read-only, read-write */
 		reiserfs_prepare_for_journal(s, SB_BUFFER_WITH_SB(s), 1);
@@ -1235,7 +1252,7 @@ static int reiserfs_remount(struct super_block *s, int *mount_flags, char *arg)
 	SB_JOURNAL(s)->j_must_wait = 1;
 	err = journal_end(&th, s, 10);
 	if (err)
-		return err;
+		goto out_err;
 	s->s_dirt = 0;
 
 	if (!(*mount_flags & MS_RDONLY)) {
@@ -1243,7 +1260,14 @@ static int reiserfs_remount(struct super_block *s, int *mount_flags, char *arg)
 		reiserfs_xattr_init(s, *mount_flags);
 	}
 
+out_ok:
+	kfree(s->s_options);
+	s->s_options = new_opts;
 	return 0;
+
+out_err:
+	kfree(new_opts);
+	return err;
 }
 
 static int read_super_block(struct super_block *s, int offset)
@@ -1547,6 +1571,8 @@ static int reiserfs_fill_super(struct super_block *s, void *data, int silent)
 	struct reiserfs_sb_info *sbi;
 	int errval = -EINVAL;
 
+	save_mount_options(s, data);
+
 	sbi = kzalloc(sizeof(struct reiserfs_sb_info), GFP_KERNEL);
 	if (!sbi) {
 		errval = -ENOMEM;
@@ -1712,6 +1738,21 @@ static int reiserfs_fill_super(struct super_block *s, void *data, int silent)
 
 		set_sb_umount_state(rs, REISERFS_ERROR_FS);
 		set_sb_fs_state(rs, 0);
+
+		/* Clear out s_bmap_nr if it would wrap. We can handle this
+		 * case, but older revisions can't. This will cause the
+		 * file system to fail mount on those older implementations,
+		 * avoiding corruption. -jeffm */
+		if (bmap_would_wrap(reiserfs_bmap_count(s)) &&
+		    sb_bmap_nr(rs) != 0) {
+			reiserfs_warning(s, "super-2030: This file system "
+					"claims to use %u bitmap blocks in "
+					"its super block, but requires %u. "
+					"Clearing to zero.", sb_bmap_nr(rs),
+					reiserfs_bmap_count(s));
+
+			set_sb_bmap_nr(rs, 0);
+		}
 
 		if (old_format_only(s)) {
 			/* filesystem of format 3.5 either with standard or non-standard
@@ -1985,29 +2026,29 @@ static int reiserfs_quota_on(struct super_block *sb, int type, int format_id,
 	if (err)
 		return err;
 	/* Quotafile not on the same filesystem? */
-	if (nd.mnt->mnt_sb != sb) {
-		path_release(&nd);
+	if (nd.path.mnt->mnt_sb != sb) {
+		path_put(&nd.path);
 		return -EXDEV;
 	}
 	/* We must not pack tails for quota files on reiserfs for quota IO to work */
-	if (!REISERFS_I(nd.dentry->d_inode)->i_flags & i_nopack_mask) {
+	if (!(REISERFS_I(nd.path.dentry->d_inode)->i_flags & i_nopack_mask)) {
 		reiserfs_warning(sb,
 				 "reiserfs: Quota file must have tail packing disabled.");
-		path_release(&nd);
+		path_put(&nd.path);
 		return -EINVAL;
 	}
 	/* Not journalling quota? No more tests needed... */
 	if (!REISERFS_SB(sb)->s_qf_names[USRQUOTA] &&
 	    !REISERFS_SB(sb)->s_qf_names[GRPQUOTA]) {
-		path_release(&nd);
+		path_put(&nd.path);
 		return vfs_quota_on(sb, type, format_id, path);
 	}
 	/* Quotafile not of fs root? */
-	if (nd.dentry->d_parent->d_inode != sb->s_root->d_inode)
+	if (nd.path.dentry->d_parent->d_inode != sb->s_root->d_inode)
 		reiserfs_warning(sb,
 				 "reiserfs: Quota file not on filesystem root. "
 				 "Journalled quota will not work.");
-	path_release(&nd);
+	path_put(&nd.path);
 	return vfs_quota_on(sb, type, format_id, path);
 }
 

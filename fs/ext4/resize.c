@@ -16,6 +16,7 @@
 #include <linux/errno.h>
 #include <linux/slab.h>
 
+#include "group.h"
 
 #define outside(b, first, last)	((b) < (first) || (b) >= (last))
 #define inside(b, first, last)	((b) >= (first) && (b) < (last))
@@ -27,7 +28,7 @@ static int verify_group_input(struct super_block *sb,
 	struct ext4_super_block *es = sbi->s_es;
 	ext4_fsblk_t start = ext4_blocks_count(es);
 	ext4_fsblk_t end = start + input->blocks_count;
-	unsigned group = input->group;
+	ext4_group_t group = input->group;
 	ext4_fsblk_t itend = input->inode_table + sbi->s_itb_per_group;
 	unsigned overhead = ext4_bg_has_super(sb, group) ?
 		(1 + ext4_bg_num_gdb(sb, group) +
@@ -140,22 +141,29 @@ static struct buffer_head *bclean(handle_t *handle, struct super_block *sb,
 }
 
 /*
- * To avoid calling the atomic setbit hundreds or thousands of times, we only
- * need to use it within a single byte (to ensure we get endianness right).
- * We can use memset for the rest of the bitmap as there are no other users.
+ * If we have fewer than thresh credits, extend by EXT4_MAX_TRANS_DATA.
+ * If that fails, restart the transaction & regain write access for the
+ * buffer head which is used for block_bitmap modifications.
  */
-static void mark_bitmap_end(int start_bit, int end_bit, char *bitmap)
+static int extend_or_restart_transaction(handle_t *handle, int thresh,
+					 struct buffer_head *bh)
 {
-	int i;
+	int err;
 
-	if (start_bit >= end_bit)
-		return;
+	if (handle->h_buffer_credits >= thresh)
+		return 0;
 
-	ext4_debug("mark end bits +%d through +%d used\n", start_bit, end_bit);
-	for (i = start_bit; i < ((start_bit + 7) & ~7UL); i++)
-		ext4_set_bit(i, bitmap);
-	if (i < end_bit)
-		memset(bitmap + (i >> 3), 0xff, (end_bit - i) >> 3);
+	err = ext4_journal_extend(handle, EXT4_MAX_TRANS_DATA);
+	if (err < 0)
+		return err;
+	if (err) {
+		if ((err = ext4_journal_restart(handle, EXT4_MAX_TRANS_DATA)))
+			return err;
+	        if ((err = ext4_journal_get_write_access(handle, bh)))
+			return err;
+        }
+
+	return 0;
 }
 
 /*
@@ -180,8 +188,9 @@ static int setup_new_group_blocks(struct super_block *sb,
 	int i;
 	int err = 0, err2;
 
-	handle = ext4_journal_start_sb(sb, reserved_gdb + gdblocks +
-				       2 + sbi->s_itb_per_group);
+	/* This transaction may be extended/restarted along the way */
+	handle = ext4_journal_start_sb(sb, EXT4_MAX_TRANS_DATA);
+
 	if (IS_ERR(handle))
 		return PTR_ERR(handle);
 
@@ -197,7 +206,7 @@ static int setup_new_group_blocks(struct super_block *sb,
 	}
 
 	if (ext4_bg_has_super(sb, input->group)) {
-		ext4_debug("mark backup superblock %#04lx (+0)\n", start);
+		ext4_debug("mark backup superblock %#04llx (+0)\n", start);
 		ext4_set_bit(0, bh->b_data);
 	}
 
@@ -206,7 +215,10 @@ static int setup_new_group_blocks(struct super_block *sb,
 	     i < gdblocks; i++, block++, bit++) {
 		struct buffer_head *gdb;
 
-		ext4_debug("update backup group %#04lx (+%d)\n", block, bit);
+		ext4_debug("update backup group %#04llx (+%d)\n", block, bit);
+
+		if ((err = extend_or_restart_transaction(handle, 1, bh)))
+			goto exit_bh;
 
 		gdb = sb_getblk(sb, block);
 		if (!gdb) {
@@ -217,10 +229,10 @@ static int setup_new_group_blocks(struct super_block *sb,
 			brelse(gdb);
 			goto exit_bh;
 		}
-		lock_buffer(bh);
-		memcpy(gdb->b_data, sbi->s_group_desc[i]->b_data, bh->b_size);
+		lock_buffer(gdb);
+		memcpy(gdb->b_data, sbi->s_group_desc[i]->b_data, gdb->b_size);
 		set_buffer_uptodate(gdb);
-		unlock_buffer(bh);
+		unlock_buffer(gdb);
 		ext4_journal_dirty_metadata(handle, gdb);
 		ext4_set_bit(bit, bh->b_data);
 		brelse(gdb);
@@ -231,7 +243,10 @@ static int setup_new_group_blocks(struct super_block *sb,
 	     i < reserved_gdb; i++, block++, bit++) {
 		struct buffer_head *gdb;
 
-		ext4_debug("clear reserved block %#04lx (+%d)\n", block, bit);
+		ext4_debug("clear reserved block %#04llx (+%d)\n", block, bit);
+
+		if ((err = extend_or_restart_transaction(handle, 1, bh)))
+			goto exit_bh;
 
 		if (IS_ERR(gdb = bclean(handle, sb, block))) {
 			err = PTR_ERR(bh);
@@ -241,10 +256,10 @@ static int setup_new_group_blocks(struct super_block *sb,
 		ext4_set_bit(bit, bh->b_data);
 		brelse(gdb);
 	}
-	ext4_debug("mark block bitmap %#04x (+%ld)\n", input->block_bitmap,
+	ext4_debug("mark block bitmap %#04llx (+%llu)\n", input->block_bitmap,
 		   input->block_bitmap - start);
 	ext4_set_bit(input->block_bitmap - start, bh->b_data);
-	ext4_debug("mark inode bitmap %#04x (+%ld)\n", input->inode_bitmap,
+	ext4_debug("mark inode bitmap %#04llx (+%llu)\n", input->inode_bitmap,
 		   input->inode_bitmap - start);
 	ext4_set_bit(input->inode_bitmap - start, bh->b_data);
 
@@ -253,7 +268,11 @@ static int setup_new_group_blocks(struct super_block *sb,
 	     i < sbi->s_itb_per_group; i++, bit++, block++) {
 		struct buffer_head *it;
 
-		ext4_debug("clear inode block %#04lx (+%d)\n", block, bit);
+		ext4_debug("clear inode block %#04llx (+%d)\n", block, bit);
+
+		if ((err = extend_or_restart_transaction(handle, 1, bh)))
+			goto exit_bh;
+
 		if (IS_ERR(it = bclean(handle, sb, block))) {
 			err = PTR_ERR(it);
 			goto exit_bh;
@@ -262,13 +281,17 @@ static int setup_new_group_blocks(struct super_block *sb,
 		brelse(it);
 		ext4_set_bit(bit, bh->b_data);
 	}
+
+	if ((err = extend_or_restart_transaction(handle, 2, bh)))
+		goto exit_bh;
+
 	mark_bitmap_end(input->blocks_count, EXT4_BLOCKS_PER_GROUP(sb),
 			bh->b_data);
 	ext4_journal_dirty_metadata(handle, bh);
 	brelse(bh);
 
 	/* Mark unused entries in inode bitmap used */
-	ext4_debug("clear inode bitmap %#04x (+%ld)\n",
+	ext4_debug("clear inode bitmap %#04llx (+%llu)\n",
 		   input->inode_bitmap, input->inode_bitmap - start);
 	if (IS_ERR(bh = bclean(handle, sb, input->inode_bitmap))) {
 		err = PTR_ERR(bh);
@@ -288,7 +311,6 @@ exit_journal:
 
 	return err;
 }
-
 
 /*
  * Iterate through the groups which hold BACKUP superblock/GDT copies in an
@@ -335,7 +357,7 @@ static int verify_reserved_gdb(struct super_block *sb,
 			       struct buffer_head *primary)
 {
 	const ext4_fsblk_t blk = primary->b_blocknr;
-	const unsigned long end = EXT4_SB(sb)->s_groups_count;
+	const ext4_group_t end = EXT4_SB(sb)->s_groups_count;
 	unsigned three = 1;
 	unsigned five = 5;
 	unsigned seven = 7;
@@ -634,12 +656,12 @@ static void update_backups(struct super_block *sb,
 			   int blk_off, char *data, int size)
 {
 	struct ext4_sb_info *sbi = EXT4_SB(sb);
-	const unsigned long last = sbi->s_groups_count;
+	const ext4_group_t last = sbi->s_groups_count;
 	const int bpg = EXT4_BLOCKS_PER_GROUP(sb);
 	unsigned three = 1;
 	unsigned five = 5;
 	unsigned seven = 7;
-	unsigned group;
+	ext4_group_t group;
 	int rest = sb->s_blocksize - size;
 	handle_t *handle;
 	int err = 0, err2;
@@ -694,7 +716,7 @@ static void update_backups(struct super_block *sb,
 exit_err:
 	if (err) {
 		ext4_warning(sb, __FUNCTION__,
-			     "can't update backup for group %d (err %d), "
+			     "can't update backup for group %lu (err %d), "
 			     "forcing fsck on next reboot", group, err);
 		sbi->s_mount_state &= ~EXT4_VALID_FS;
 		sbi->s_es->s_state &= cpu_to_le16(~EXT4_VALID_FS);
@@ -757,12 +779,11 @@ int ext4_group_add(struct super_block *sb, struct ext4_new_group_data *input)
 				     "No reserved GDT blocks, can't resize");
 			return -EPERM;
 		}
-		inode = iget(sb, EXT4_RESIZE_INO);
-		if (!inode || is_bad_inode(inode)) {
+		inode = ext4_iget(sb, EXT4_RESIZE_INO);
+		if (IS_ERR(inode)) {
 			ext4_warning(sb, __FUNCTION__,
 				     "Error opening resize inode");
-			iput(inode);
-			return -ENOENT;
+			return PTR_ERR(inode);
 		}
 	}
 
@@ -842,6 +863,7 @@ int ext4_group_add(struct super_block *sb, struct ext4_new_group_data *input)
 	ext4_inode_table_set(sb, gdp, input->inode_table); /* LV FIXME */
 	gdp->bg_free_blocks_count = cpu_to_le16(input->free_blocks_count);
 	gdp->bg_free_inodes_count = cpu_to_le16(EXT4_INODES_PER_GROUP(sb));
+	gdp->bg_checksum = ext4_group_desc_csum(sbi, input->group, gdp);
 
 	/*
 	 * Make the new blocks and inodes valid next.  We do this before
@@ -893,9 +915,9 @@ int ext4_group_add(struct super_block *sb, struct ext4_new_group_data *input)
 		input->reserved_blocks);
 
 	/* Update the free space counts */
-	percpu_counter_mod(&sbi->s_freeblocks_counter,
+	percpu_counter_add(&sbi->s_freeblocks_counter,
 			   input->free_blocks_count);
-	percpu_counter_mod(&sbi->s_freeinodes_counter,
+	percpu_counter_add(&sbi->s_freeinodes_counter,
 			   EXT4_INODES_PER_GROUP(sb));
 
 	ext4_journal_dirty_metadata(handle, sbi->s_sbh);
@@ -929,7 +951,7 @@ int ext4_group_extend(struct super_block *sb, struct ext4_super_block *es,
 		      ext4_fsblk_t n_blocks_count)
 {
 	ext4_fsblk_t o_blocks_count;
-	unsigned long o_groups_count;
+	ext4_group_t o_groups_count;
 	ext4_grpblk_t last;
 	ext4_grpblk_t add;
 	struct buffer_head * bh;
@@ -1015,6 +1037,7 @@ int ext4_group_extend(struct super_block *sb, struct ext4_super_block *es,
 		ext4_warning(sb, __FUNCTION__,
 			     "multiple resizers run on filesystem!");
 		unlock_super(sb);
+		ext4_journal_stop(handle);
 		err = -EBUSY;
 		goto exit_put;
 	}
@@ -1031,7 +1054,7 @@ int ext4_group_extend(struct super_block *sb, struct ext4_super_block *es,
 	ext4_journal_dirty_metadata(handle, EXT4_SB(sb)->s_sbh);
 	sb->s_dirt = 1;
 	unlock_super(sb);
-	ext4_debug("freeing blocks %lu through %llu\n", o_blocks_count,
+	ext4_debug("freeing blocks %llu through %llu\n", o_blocks_count,
 		   o_blocks_count + add);
 	ext4_free_blocks_sb(handle, sb, o_blocks_count, add, &freed_blocks);
 	ext4_debug("freed blocks %llu through %llu\n", o_blocks_count,

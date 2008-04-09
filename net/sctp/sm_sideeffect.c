@@ -1,21 +1,21 @@
-/* SCTP kernel reference Implementation
+/* SCTP kernel implementation
  * (C) Copyright IBM Corp. 2001, 2004
  * Copyright (c) 1999 Cisco, Inc.
  * Copyright (c) 1999-2001 Motorola, Inc.
  *
- * This file is part of the SCTP kernel reference Implementation
+ * This file is part of the SCTP kernel implementation
  *
  * These functions work with the state functions in sctp_sm_statefuns.c
  * to implement that state operations.  These functions implement the
  * steps which require modifying existing data structures.
  *
- * The SCTP reference implementation is free software;
+ * This SCTP implementation is free software;
  * you can redistribute it and/or modify it under the terms of
  * the GNU General Public License as published by
  * the Free Software Foundation; either version 2, or (at your option)
  * any later version.
  *
- * The SCTP reference implementation is distributed in the hope that it
+ * This SCTP implementation is distributed in the hope that it
  * will be useful, but WITHOUT ANY WARRANTY; without even the implied
  *                 ************************
  * warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
@@ -453,6 +453,7 @@ static void sctp_do_8_2_transport_strike(struct sctp_association *asoc,
 	 * maximum value discussed in rule C7 above (RTO.max) may be
 	 * used to provide an upper bound to this doubling operation.
 	 */
+	transport->last_rto = transport->rto;
 	transport->rto = min((transport->rto * 2), transport->asoc->rto_max);
 }
 
@@ -1267,6 +1268,12 @@ static int sctp_cmd_interpreter(sctp_event_t event_type,
 			sctp_ootb_pkt_free(packet);
 			break;
 
+		case SCTP_CMD_T1_RETRAN:
+			/* Mark a transport for retransmission.  */
+			sctp_retransmit(&asoc->outqueue, cmd->obj.transport,
+					SCTP_RTXR_T1_RTX);
+			break;
+
 		case SCTP_CMD_RETRAN:
 			/* Mark a transport for retransmission.  */
 			sctp_retransmit(&asoc->outqueue, cmd->obj.transport,
@@ -1393,7 +1400,8 @@ static int sctp_cmd_interpreter(sctp_event_t event_type,
 			list_for_each(pos, &asoc->peer.transport_addr_list) {
 				t = list_entry(pos, struct sctp_transport,
 					       transports);
-				sctp_retransmit_mark(&asoc->outqueue, t, 0);
+				sctp_retransmit_mark(&asoc->outqueue, t,
+					    SCTP_RTXR_T1_RTX);
 			}
 
 			sctp_add_cmd_sf(commands,
@@ -1522,6 +1530,11 @@ static int sctp_cmd_interpreter(sctp_event_t event_type,
 			break;
 		case SCTP_CMD_ADAPTATION_IND:
 			sctp_cmd_adaptation_ind(commands, asoc);
+			break;
+
+		case SCTP_CMD_ASSOC_SHKEY:
+			error = sctp_auth_asoc_init_active_key(asoc,
+						GFP_ATOMIC);
 			break;
 
 		default:

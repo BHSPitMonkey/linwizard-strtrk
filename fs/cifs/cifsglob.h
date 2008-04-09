@@ -1,7 +1,7 @@
 /*
  *   fs/cifs/cifsglob.h
  *
- *   Copyright (C) International Business Machines  Corp., 2002,2007
+ *   Copyright (C) International Business Machines  Corp., 2002,2008
  *   Author(s): Steve French (sfrench@us.ibm.com)
  *              Jeremy Allison (jra@samba.org)
  *
@@ -19,6 +19,7 @@
 #include <linux/in.h>
 #include <linux/in6.h>
 #include "cifs_fs_sb.h"
+#include "cifsacl.h"
 /*
  * The sizes of various internal tables and strings
  */
@@ -69,14 +70,6 @@
 #endif
 
 /*
- * This information is kept on every Server we know about.
- *
- * Some things to note:
- *
- */
-#define SERVER_NAME_LEN_WITH_NULL	(SERVER_NAME_LENGTH + 1)
-
-/*
  * CIFS vfs client Status information (based on what we know.)
  */
 
@@ -89,7 +82,8 @@ enum statusEnum {
 };
 
 enum securityEnum {
-	LANMAN = 0,             /* Legacy LANMAN auth */
+	PLAINTXT = 0, 		/* Legacy with Plaintext passwords */
+	LANMAN,			/* Legacy LANMAN auth */
 	NTLM,			/* Legacy NTLM012 auth with NTLM hash */
 	NTLMv2,			/* Legacy NTLM auth with NTLMv2 hash */
 	RawNTLMSSP,		/* NTLMSSP without SPNEGO */
@@ -108,11 +102,23 @@ struct mac_key {
 	unsigned int len;
 	union {
 		char ntlm[CIFS_SESS_KEY_SIZE + 16];
+		char krb5[CIFS_SESS_KEY_SIZE + 16]; /* BB: length correct? */
 		struct {
 			char key[16];
 			struct ntlmv2_resp resp;
 		} ntlmv2;
 	} data;
+};
+
+struct cifs_cred {
+	int uid;
+	int gid;
+	int mode;
+	int cecount;
+	struct cifs_sid osid;
+	struct cifs_sid gsid;
+	struct cifs_ntace *ntaces;
+	struct cifs_ace *aces;
 };
 
 /*
@@ -126,6 +132,7 @@ struct TCP_Server_Info {
 	/* 15 character server name + 0x20 16th byte indicating type = srv */
 	char server_RFC1001_name[SERVER_NAME_LEN_WITH_NULL];
 	char unicode_server_Name[SERVER_NAME_LEN_WITH_NULL * 2];
+	char *hostname; /* hostname portion of UNC string */
 	struct socket *ssocket;
 	union {
 		struct sockaddr_in sockAddr;
@@ -279,6 +286,7 @@ struct cifsTconInfo {
 	FILE_SYSTEM_DEVICE_INFO fsDevInfo;
 	FILE_SYSTEM_ATTRIBUTE_INFO fsAttrInfo; /* ok if fs name truncated */
 	FILE_SYSTEM_UNIX_INFO fsUnixInfo;
+	unsigned ipc:1;		/* set if connection to IPC$ eg for RPC/PIPES */
 	unsigned retry:1;
 	unsigned nocase:1;
 	unsigned unix_ext:1; /* if off disable Linux extensions to CIFS protocol
@@ -329,6 +337,7 @@ struct cifsFileInfo {
 	struct list_head llist; /* list of byte range locks we have. */
 	unsigned closePend:1;	/* file is marked to close */
 	unsigned invalidHandle:1;  /* file closed via session abend */
+	unsigned messageMode:1;    /* for pipes: message vs byte mode */
 	atomic_t wrtPending;   /* handle in use - defer close */
 	struct semaphore fh_sem; /* prevents reopen race after dead ses*/
 	char *search_resume_name; /* BB removeme BB */
@@ -443,6 +452,37 @@ struct dir_notify_req {
        struct file *pfile;
 };
 
+struct dfs_info3_param {
+	int flags; /* DFSREF_REFERRAL_SERVER, DFSREF_STORAGE_SERVER*/
+	int path_consumed;
+	int server_type;
+	int ref_flag;
+	char *path_name;
+	char *node_name;
+};
+
+static inline void free_dfs_info_param(struct dfs_info3_param *param)
+{
+	if (param) {
+		kfree(param->path_name);
+		kfree(param->node_name);
+		kfree(param);
+	}
+}
+
+static inline void free_dfs_info_array(struct dfs_info3_param *param,
+				       int number_of_items)
+{
+	int i;
+	if ((number_of_items == 0) || (param == NULL))
+		return;
+	for (i = 0; i < number_of_items; i++) {
+		kfree(param[i].path_name);
+		kfree(param[i].node_name);
+	}
+	kfree(param);
+}
+
 #define   MID_FREE 0
 #define   MID_REQUEST_ALLOCATED 1
 #define   MID_REQUEST_SUBMITTED 2
@@ -456,6 +496,17 @@ struct dir_notify_req {
 #define   CIFS_LARGE_BUFFER     2
 #define   CIFS_IOVEC            4    /* array of response buffers */
 
+/* Type of Request to SendReceive2 */
+#define   CIFS_STD_OP	        0    /* normal request timeout */
+#define   CIFS_LONG_OP          1    /* long op (up to 45 sec, oplock time) */
+#define   CIFS_VLONG_OP         2    /* sloow op - can take up to 180 seconds */
+#define   CIFS_BLOCKING_OP      4    /* operation can block */
+#define   CIFS_ASYNC_OP         8    /* do not wait for response */
+#define   CIFS_TIMEOUT_MASK 0x00F    /* only one of 5 above set in req */
+#define   CIFS_LOG_ERROR    0x010    /* log NT STATUS if non-zero */
+#define   CIFS_LARGE_BUF_OP 0x020    /* large request buffer */
+#define   CIFS_NO_RESP      0x040    /* no response buffer required */
+
 /* Security Flags: indicate type of session setup needed */
 #define   CIFSSEC_MAY_SIGN	0x00001
 #define   CIFSSEC_MAY_NTLM	0x00002
@@ -464,6 +515,9 @@ struct dir_notify_req {
 #ifdef CONFIG_CIFS_WEAK_PW_HASH
 #define   CIFSSEC_MAY_LANMAN	0x00010
 #define   CIFSSEC_MAY_PLNTXT	0x00020
+#else
+#define   CIFSSEC_MAY_LANMAN    0
+#define   CIFSSEC_MAY_PLNTXT    0
 #endif /* weak passwords */
 #define   CIFSSEC_MAY_SEAL	0x00040 /* not supported yet */
 
@@ -477,14 +531,23 @@ require use of the stronger protocol */
 #ifdef CONFIG_CIFS_WEAK_PW_HASH
 #define   CIFSSEC_MUST_LANMAN	0x10010
 #define   CIFSSEC_MUST_PLNTXT	0x20020
-#define   CIFSSEC_MASK          0x37037 /* current flags supported if weak */
+#ifdef CONFIG_CIFS_UPCALL
+#define   CIFSSEC_MASK          0x3F03F /* allows weak security but also krb5 */
 #else
-#define	  CIFSSEC_MASK          0x07007 /* flags supported if no weak config */
+#define   CIFSSEC_MASK          0x37037 /* current flags supported if weak */
+#endif /* UPCALL */
+#else /* do not allow weak pw hash */
+#ifdef CONFIG_CIFS_UPCALL
+#define   CIFSSEC_MASK          0x0F00F /* flags supported if no weak allowed */
+#else
+#define	  CIFSSEC_MASK          0x07007 /* flags supported if no weak allowed */
+#endif /* UPCALL */
 #endif /* WEAK_PW_HASH */
 #define   CIFSSEC_MUST_SEAL	0x40040 /* not supported yet */
 
 #define   CIFSSEC_DEF  CIFSSEC_MAY_SIGN | CIFSSEC_MAY_NTLM | CIFSSEC_MAY_NTLMV2
 #define   CIFSSEC_MAX  CIFSSEC_MUST_SIGN | CIFSSEC_MUST_NTLMV2
+#define   CIFSSEC_AUTH_MASK (CIFSSEC_MAY_NTLM | CIFSSEC_MAY_NTLMV2 | CIFSSEC_MAY_LANMAN | CIFSSEC_MAY_PLNTXT | CIFSSEC_MAY_KRB5)
 /*
  *****************************************************************
  * All constants go here

@@ -279,6 +279,7 @@ bsg_map_hdr(struct bsg_device *bd, struct sg_io_v4 *hdr)
 			goto out;
 		}
 		rq->next_rq = next_rq;
+		next_rq->cmd_type = rq->cmd_type;
 
 		dxferp = (void*)(unsigned long)hdr->din_xferp;
 		ret =  blk_rq_map_user(q, next_rq, dxferp, hdr->din_xfer_len);
@@ -444,6 +445,15 @@ static int blk_complete_sgv4_hdr_rq(struct request *rq, struct sg_io_v4 *hdr,
 		hdr->din_resid = rq->data_len;
 	else
 		hdr->dout_resid = rq->data_len;
+
+	/*
+	 * If the request generated a negative error number, return it
+	 * (providing we aren't already returning an error); if it's
+	 * just a protocol response (i.e. non negative), that gets
+	 * processed above.
+	 */
+	if (!ret && rq->errors < 0)
+		ret = rq->errors;
 
 	blk_rq_unmap_user(bio);
 	blk_put_request(rq);
@@ -837,6 +847,7 @@ static long bsg_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	struct bsg_device *bd = file->private_data;
 	int __user *uarg = (int __user *) arg;
+	int ret;
 
 	switch (cmd) {
 		/*
@@ -889,12 +900,12 @@ static long bsg_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		if (rq->next_rq)
 			bidi_bio = rq->next_rq->bio;
 		blk_execute_rq(bd->queue, NULL, rq, 0);
-		blk_complete_sgv4_hdr_rq(rq, &hdr, bio, bidi_bio);
+		ret = blk_complete_sgv4_hdr_rq(rq, &hdr, bio, bidi_bio);
 
 		if (copy_to_user(uarg, &hdr, sizeof(hdr)))
 			return -EFAULT;
 
-		return 0;
+		return ret;
 	}
 	/*
 	 * block device ioctls
@@ -908,7 +919,7 @@ static long bsg_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	}
 }
 
-static struct file_operations bsg_fops = {
+static const struct file_operations bsg_fops = {
 	.read		=	bsg_read,
 	.write		=	bsg_write,
 	.poll		=	bsg_poll,
@@ -1010,10 +1021,7 @@ unlock:
 }
 EXPORT_SYMBOL_GPL(bsg_register_queue);
 
-static struct cdev bsg_cdev = {
-	.kobj   = {.name = "bsg", },
-	.owner  = THIS_MODULE,
-};
+static struct cdev bsg_cdev;
 
 static int __init bsg_init(void)
 {

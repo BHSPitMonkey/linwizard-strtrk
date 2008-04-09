@@ -111,7 +111,7 @@ asmlinkage int irix_prctl(unsigned option, ...)
 		printk("irix_prctl[%s:%d]: Wants PR_ISBLOCKED\n",
 		       current->comm, current->pid);
 		read_lock(&tasklist_lock);
-		task = find_task_by_pid(va_arg(args, pid_t));
+		task = find_task_by_vpid(va_arg(args, pid_t));
 		error = -ESRCH;
 		if (error)
 			error = (task->run_list.next != NULL);
@@ -356,7 +356,7 @@ asmlinkage int irix_syssgi(struct pt_regs *regs)
 			retval = NGROUPS_MAX;
 			goto out;
 		case 5:
-			retval = NR_OPEN;
+			retval = sysctl_nr_open;
 			goto out;
 		case 6:
 			retval = 1;
@@ -486,10 +486,10 @@ asmlinkage int irix_syssgi(struct pt_regs *regs)
 
 		switch (arg1) {
 		case SGI_INV_SIZEOF:
-			retval = sizeof (inventory_t);
+			retval = sizeof(inventory_t);
 			break;
 		case SGI_INV_READ:
-			retval = dump_inventory_to_user (buffer, count);
+			retval = dump_inventory_to_user(buffer, count);
 			break;
 		default:
 			retval = -EINVAL;
@@ -582,8 +582,8 @@ out:
 
 asmlinkage int irix_getpid(struct pt_regs *regs)
 {
-	regs->regs[3] = current->real_parent->pid;
-	return current->pid;
+	regs->regs[3] = task_pid_vnr(current->real_parent);
+	return task_pid_vnr(current);
 }
 
 asmlinkage int irix_getuid(struct pt_regs *regs)
@@ -694,7 +694,7 @@ asmlinkage int irix_statfs(const char __user *path,
 	if (error)
 		goto out;
 
-	error = vfs_statfs(nd.dentry, &kbuf);
+	error = vfs_statfs(nd.path.dentry, &kbuf);
 	if (error)
 		goto dput_and_out;
 
@@ -711,7 +711,7 @@ asmlinkage int irix_statfs(const char __user *path,
 	}
 
 dput_and_out:
-	path_release(&nd);
+	path_put(&nd.path);
 out:
 	return error;
 }
@@ -763,11 +763,11 @@ asmlinkage int irix_setpgrp(int flags)
 	printk("[%s:%d] setpgrp(%d) ", current->comm, current->pid, flags);
 #endif
 	if(!flags)
-		error = process_group(current);
+		error = task_pgrp_vnr(current);
 	else
 		error = sys_setsid();
 #ifdef DEBUG_PROCGRPS
-	printk("returning %d\n", process_group(current));
+	printk("returning %d\n", error);
 #endif
 
 	return error;
@@ -778,7 +778,7 @@ asmlinkage int irix_times(struct tms __user *tbuf)
 	int err = 0;
 
 	if (tbuf) {
-		if (!access_ok(VERIFY_WRITE,tbuf,sizeof *tbuf))
+		if (!access_ok(VERIFY_WRITE, tbuf, sizeof *tbuf))
 			return -EFAULT;
 
 		err = __put_user(current->utime, &tbuf->tms_utime);
@@ -1042,9 +1042,9 @@ asmlinkage unsigned long irix_mmap32(unsigned long addr, size_t len, int prot,
 			long max_size = offset + len;
 
 			if (max_size > file->f_path.dentry->d_inode->i_size) {
-				old_pos = sys_lseek (fd, max_size - 1, 0);
-				sys_write (fd, (void __user *) "", 1);
-				sys_lseek (fd, old_pos, 0);
+				old_pos = sys_lseek(fd, max_size - 1, 0);
+				sys_write(fd, (void __user *) "", 1);
+				sys_lseek(fd, old_pos, 0);
 			}
 		}
 	}
@@ -1093,10 +1093,10 @@ asmlinkage int irix_BSDsetpgrp(int pid, int pgrp)
 	       pid, pgrp);
 #endif
 	if(!pid)
-		pid = current->pid;
+		pid = task_pid_vnr(current);
 
 	/* Wheee, weird sysv thing... */
-	if ((pgrp == 0) && (pid == current->pid))
+	if ((pgrp == 0) && (pid == task_pid_vnr(current)))
 		error = sys_setsid();
 	else
 		error = sys_setpgid(pid, pgrp);
@@ -1176,7 +1176,7 @@ static int irix_xstat32_xlate(struct kstat *stat, void __user *ubuf)
 	ub.st_ctime1  = stat->atime.tv_nsec;
 	ub.st_blksize = stat->blksize;
 	ub.st_blocks  = stat->blocks;
-	strcpy (ub.st_fstype, "efs");
+	strcpy(ub.st_fstype, "efs");
 
 	return copy_to_user(ubuf, &ub, sizeof(ub)) ? -EFAULT : 0;
 }
@@ -1208,7 +1208,7 @@ static int irix_xstat64_xlate(struct kstat *stat, void __user *ubuf)
 	ks.st_nlink = (u32) stat->nlink;
 	ks.st_uid = (s32) stat->uid;
 	ks.st_gid = (s32) stat->gid;
-	ks.st_rdev = sysv_encode_dev (stat->rdev);
+	ks.st_rdev = sysv_encode_dev(stat->rdev);
 	ks.st_pad2[0] = ks.st_pad2[1] = 0;
 	ks.st_size = (long long) stat->size;
 	ks.st_pad3 = 0;
@@ -1360,7 +1360,7 @@ asmlinkage int irix_statvfs(char __user *fname, struct irix_statvfs __user *buf)
 	error = user_path_walk(fname, &nd);
 	if (error)
 		goto out;
-	error = vfs_statfs(nd.dentry, &kbuf);
+	error = vfs_statfs(nd.path.dentry, &kbuf);
 	if (error)
 		goto dput_and_out;
 
@@ -1385,7 +1385,7 @@ asmlinkage int irix_statvfs(char __user *fname, struct irix_statvfs __user *buf)
 		error |= __put_user(0, &buf->f_fstr[i]);
 
 dput_and_out:
-	path_release(&nd);
+	path_put(&nd.path);
 out:
 	return error;
 }
@@ -1527,9 +1527,9 @@ asmlinkage int irix_mmap64(struct pt_regs *regs)
 			long max_size = off2 + len;
 
 			if (max_size > file->f_path.dentry->d_inode->i_size) {
-				old_pos = sys_lseek (fd, max_size - 1, 0);
-				sys_write (fd, (void __user *) "", 1);
-				sys_lseek (fd, old_pos, 0);
+				old_pos = sys_lseek(fd, max_size - 1, 0);
+				sys_write(fd, (void __user *) "", 1);
+				sys_lseek(fd, old_pos, 0);
 			}
 		}
 	}
@@ -1611,7 +1611,7 @@ asmlinkage int irix_statvfs64(char __user *fname, struct irix_statvfs64 __user *
 	error = user_path_walk(fname, &nd);
 	if (error)
 		goto out;
-	error = vfs_statfs(nd.dentry, &kbuf);
+	error = vfs_statfs(nd.path.dentry, &kbuf);
 	if (error)
 		goto dput_and_out;
 
@@ -1636,7 +1636,7 @@ asmlinkage int irix_statvfs64(char __user *fname, struct irix_statvfs64 __user *
 		error |= __put_user(0, &buf->f_fstr[i]);
 
 dput_and_out:
-	path_release(&nd);
+	path_put(&nd.path);
 out:
 	return error;
 }

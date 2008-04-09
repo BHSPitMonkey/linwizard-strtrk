@@ -140,6 +140,7 @@ config EXT4DEV_FS
 	tristate "Ext4dev/ext4 extended fs support development (EXPERIMENTAL)"
 	depends on EXPERIMENTAL
 	select JBD2
+	select CRC16
 	help
 	  Ext4dev is a predecessor filesystem of the next generation
 	  extended fs ext4, based on ext3 filesystem code. It will be
@@ -219,7 +220,7 @@ config JBD
 
 config JBD_DEBUG
 	bool "JBD (ext3) debugging support"
-	depends on JBD
+	depends on JBD && DEBUG_FS
 	help
 	  If you are using the ext3 journaled file system (or potentially any
 	  other file system/device using JBD), this option allows you to
@@ -228,13 +229,14 @@ config JBD_DEBUG
 	  debugging output will be turned off.
 
 	  If you select Y here, then you will be able to turn on debugging
-	  with "echo N > /proc/sys/fs/jbd-debug", where N is a number between
-	  1 and 5, the higher the number, the more debugging output is
-	  generated.  To turn debugging off again, do
-	  "echo 0 > /proc/sys/fs/jbd-debug".
+	  with "echo N > /sys/kernel/debug/jbd/jbd-debug", where N is a
+	  number between 1 and 5, the higher the number, the more debugging
+	  output is generated.  To turn debugging off again, do
+	  "echo 0 > /sys/kernel/debug/jbd/jbd-debug".
 
 config JBD2
 	tristate
+	select CRC32
 	help
 	  This is a generic journaling layer for block devices that support
 	  both 32-bit and 64-bit block numbers.  It is currently used by
@@ -439,14 +441,8 @@ config OCFS2_FS
 	  Tools web page:      http://oss.oracle.com/projects/ocfs2-tools
 	  OCFS2 mailing lists: http://oss.oracle.com/projects/ocfs2/mailman/
 
-	  Note: Features which OCFS2 does not support yet:
-	          - extended attributes
-	          - quotas
-	          - cluster aware flock
-	          - Directory change notification (F_NOTIFY)
-	          - Distributed Caching (F_SETLEASE/F_GETLEASE/break_lease)
-	          - POSIX ACLs
-	          - readpages / writepages (not user visible)
+	  For more information on OCFS2, see the file
+	  <file:Documentation/filesystems/ocfs2.txt>.
 
 config OCFS2_DEBUG_MASKLOG
 	bool "OCFS2 logging support"
@@ -458,40 +454,27 @@ config OCFS2_DEBUG_MASKLOG
 	  This option will enlarge your kernel, but it allows debugging of
 	  ocfs2 filesystem issues.
 
-config MINIX_FS
-	tristate "Minix fs support"
+config OCFS2_DEBUG_FS
+	bool "OCFS2 expensive checks"
+	depends on OCFS2_FS
+	default n
 	help
-	  Minix is a simple operating system used in many classes about OS's.
-	  The minix file system (method to organize files on a hard disk
-	  partition or a floppy disk) was the original file system for Linux,
-	  but has been superseded by the second extended file system ext2fs.
-	  You don't want to use the minix file system on your hard disk
-	  because of certain built-in restrictions, but it is sometimes found
-	  on older Linux floppy disks.  This option will enlarge your kernel
-	  by about 28 KB. If unsure, say N.
+	  This option will enable expensive consistency checks. Enable
+	  this option for debugging only as it is likely to decrease
+	  performance of the filesystem.
 
-	  To compile this file system support as a module, choose M here: the
-	  module will be called minix.  Note that the file system of your root
-	  partition (the one containing the directory /) cannot be compiled as
-	  a module.
+endif # BLOCK
 
-config ROMFS_FS
-	tristate "ROM file system support"
-	---help---
-	  This is a very small read-only file system mainly intended for
-	  initial ram disks of installation disks, but it could be used for
-	  other read-only media as well.  Read
-	  <file:Documentation/filesystems/romfs.txt> for details.
+config DNOTIFY
+	bool "Dnotify support"
+	default y
+	help
+	  Dnotify is a directory-based per-fd file change notification system
+	  that uses signals to communicate events to user-space.  There exist
+	  superior alternatives, but some applications may still rely on
+	  dnotify.
 
-	  To compile this file system support as a module, choose M here: the
-	  module will be called romfs.  Note that the file system of your
-	  root partition (the one containing the directory /) cannot be a
-	  module.
-
-	  If you don't know whether you need it, then you don't need it:
-	  answer N.
-
-endif
+	  If unsure, say Y.
 
 config INOTIFY
 	bool "Inotify file change notification support"
@@ -503,7 +486,7 @@ config INOTIFY
 	  including multiple file events, one-shot support, and unmount
 	  notification.
 
-	  For more information, see Documentation/filesystems/inotify.txt
+	  For more information, see <file:Documentation/filesystems/inotify.txt>
 
 	  If unsure, say Y.
 
@@ -517,7 +500,7 @@ config INOTIFY_USER
 	  directories via a single open fd.  Events are read from the file
 	  descriptor, which is also select()- and poll()-able.
 
-	  For more information, see Documentation/filesystems/inotify.txt
+	  For more information, see <file:Documentation/filesystems/inotify.txt>
 
 	  If unsure, say Y.
 
@@ -533,6 +516,24 @@ config QUOTA
 	  <http://www.tldp.org/docs.html#howto>, or the documentation provided
 	  with the quota tools. Probably the quota support is only useful for
 	  multi user systems. If unsure, say N.
+
+config QUOTA_NETLINK_INTERFACE
+	bool "Report quota messages through netlink interface"
+	depends on QUOTA && NET
+	help
+	  If you say Y here, quota warnings (about exceeding softlimit, reaching
+	  hardlimit, etc.) will be reported through netlink interface. If unsure,
+	  say Y.
+
+config PRINT_QUOTA_WARNING
+	bool "Print quota warnings to console (OBSOLETE)"
+	depends on QUOTA
+	default y
+	help
+	  If you say Y here, quota warnings (about exceeding softlimit, reaching
+	  hardlimit, etc.) will be printed to the process' controlling terminal.
+	  Note that this behavior is currently deprecated and may go away in
+	  future. Please use notification via netlink socket instead.
 
 config QFMT_V1
 	tristate "Old quota format support"
@@ -553,17 +554,6 @@ config QUOTACTL
 	bool
 	depends on XFS_QUOTA || QUOTA
 	default y
-
-config DNOTIFY
-	bool "Dnotify support" if EMBEDDED
-	default y
-	help
-	  Dnotify is a directory-based per-fd file change notification system
-	  that uses signals to communicate events to user-space.  There exist
-	  superior alternatives, but some applications may still rely on
-	  dnotify.
-
-	  Because of this, if unsure, say Y.
 
 config AUTOFS_FS
 	tristate "Kernel automounter support"
@@ -690,7 +680,7 @@ config UDF_NLS
 	depends on (UDF_FS=m && NLS) || (UDF_FS=y && NLS=y)
 
 endmenu
-endif
+endif # BLOCK
 
 if BLOCK
 menu "DOS/FAT/NT Filesystems"
@@ -873,7 +863,7 @@ config NTFS_RW
 	  It is perfectly safe to say N here.
 
 endmenu
-endif
+endif # BLOCK
 
 menu "Pseudo filesystems"
 
@@ -999,23 +989,9 @@ config HUGETLBFS
 config HUGETLB_PAGE
 	def_bool HUGETLBFS
 
-config RAMFS
-	bool
-	default y
-	---help---
-	  Ramfs is a file system which keeps all files in RAM. It allows
-	  read and write access.
-
-	  It is more of an programming example than a useable file system.  If
-	  you need a file system which lives in RAM with limit checking use
-	  tmpfs.
-
-	  To compile this as a module, choose M here: the module will be called
-	  ramfs.
-
 config CONFIGFS_FS
-	tristate "Userspace-driven configuration filesystem (EXPERIMENTAL)"
-	depends on SYSFS && EXPERIMENTAL
+	tristate "Userspace-driven configuration filesystem"
+	depends on SYSFS
 	help
 	  configfs is a ram-based filesystem that provides the converse
 	  of sysfs's functionality. Where sysfs is a filesystem-based
@@ -1084,7 +1060,7 @@ config ECRYPT_FS
 	depends on EXPERIMENTAL && KEYS && CRYPTO && NET
 	help
 	  Encrypted filesystem that operates on the VFS layer.  See
-	  <file:Documentation/ecryptfs.txt> to learn more about
+	  <file:Documentation/filesystems/ecryptfs.txt> to learn more about
 	  eCryptfs.  Userspace components are required and can be
 	  obtained from <http://ecryptfs.sf.net>.
 
@@ -1098,8 +1074,8 @@ config HFS_FS
 	help
 	  If you say Y here, you will be able to mount Macintosh-formatted
 	  floppy disks and hard drive partitions with full read-write access.
-	  Please read <file:fs/hfs/HFS.txt> to learn about the available mount
-	  options.
+	  Please read <file:Documentation/filesystems/hfs.txt> to learn about
+	  the available mount options.
 
 	  To compile this file system support as a module, choose M here: the
 	  module will be called hfs.
@@ -1143,7 +1119,7 @@ config BEFS_DEBUG
 	depends on BEFS_FS
 	help
 	  If you say Y here, you can use the 'debug' mount option to enable
-	  debugging output from the driver. 
+	  debugging output from the driver.
 
 config BFS_FS
 	tristate "BFS file system support (EXPERIMENTAL)"
@@ -1225,6 +1201,14 @@ config JFFS2_FS_WRITEBUFFER
 	    - NOR flash with transparent ECC
 	    - DataFlash
 
+config JFFS2_FS_WBUF_VERIFY
+	bool "Verify JFFS2 write-buffer reads"
+	depends on JFFS2_FS_WRITEBUFFER
+	default n
+	help
+	  This causes JFFS2 to read back every page written through the
+	  write-buffer, and check for errors.
+
 config JFFS2_SUMMARY
 	bool "JFFS2 summary support (EXPERIMENTAL)"
 	depends on JFFS2_FS && EXPERIMENTAL
@@ -1246,7 +1230,7 @@ config JFFS2_FS_XATTR
 	  Extended attributes are name:value pairs associated with inodes by
 	  the kernel or by users (see the attr(5) manual page, or visit
 	  <http://acl.bestbits.at/> for details).
-	  
+
 	  If unsure, say N.
 
 config JFFS2_FS_POSIX_ACL
@@ -1257,10 +1241,10 @@ config JFFS2_FS_POSIX_ACL
 	help
 	  Posix Access Control Lists (ACLs) support permissions for users and
 	  groups beyond the owner/group/world scheme.
-	  
+
 	  To learn more about Access Control Lists, visit the Posix ACLs for
 	  Linux website <http://acl.bestbits.at/>.
-	  
+
 	  If you don't know what Access Control Lists are, say N
 
 config JFFS2_FS_SECURITY
@@ -1272,7 +1256,7 @@ config JFFS2_FS_SECURITY
 	  implemented by security modules like SELinux.  This option
 	  enables an extended attribute handler for file security
 	  labels in the jffs2 filesystem.
-	  
+
 	  If you are not using a security module that requires using
 	  extended attributes for file security labels, say N.
 
@@ -1283,7 +1267,7 @@ config JFFS2_COMPRESSION_OPTIONS
 	help
 	  Enabling this option allows you to explicitly choose which
 	  compression modules, if any, are enabled in JFFS2. Removing
-	  compressors and mean you cannot read existing file systems,
+	  compressors can mean you cannot read existing file systems,
 	  and enabling experimental compressors can mean that you
 	  write a file system which cannot be read by a standard kernel.
 
@@ -1295,52 +1279,71 @@ config JFFS2_ZLIB
 	select ZLIB_DEFLATE
 	depends on JFFS2_FS
 	default y
-        help
-          Zlib is designed to be a free, general-purpose, legally unencumbered,
-          lossless data-compression library for use on virtually any computer
-          hardware and operating system. See <http://www.gzip.org/zlib/> for
-          further information.
+	help
+	  Zlib is designed to be a free, general-purpose, legally unencumbered,
+	  lossless data-compression library for use on virtually any computer
+	  hardware and operating system. See <http://www.gzip.org/zlib/> for
+	  further information.
 
-          Say 'Y' if unsure.
+	  Say 'Y' if unsure.
+
+config JFFS2_LZO
+	bool "JFFS2 LZO compression support" if JFFS2_COMPRESSION_OPTIONS
+	select LZO_COMPRESS
+	select LZO_DECOMPRESS
+	depends on JFFS2_FS
+	default n
+	help
+	  minilzo-based compression. Generally works better than Zlib.
+
+	  This feature was added in July, 2007. Say 'N' if you need
+	  compatibility with older bootloaders or kernels.
 
 config JFFS2_RTIME
 	bool "JFFS2 RTIME compression support" if JFFS2_COMPRESSION_OPTIONS
 	depends on JFFS2_FS
 	default y
-        help
-          Rtime does manage to recompress already-compressed data. Say 'Y' if unsure.
+	help
+	  Rtime does manage to recompress already-compressed data. Say 'Y' if unsure.
 
 config JFFS2_RUBIN
 	bool "JFFS2 RUBIN compression support" if JFFS2_COMPRESSION_OPTIONS
 	depends on JFFS2_FS
 	default n
-        help
-          RUBINMIPS and DYNRUBIN compressors. Say 'N' if unsure.
+	help
+	  RUBINMIPS and DYNRUBIN compressors. Say 'N' if unsure.
 
 choice
-        prompt "JFFS2 default compression mode" if JFFS2_COMPRESSION_OPTIONS
-        default JFFS2_CMODE_PRIORITY
-        depends on JFFS2_FS
-        help
-          You can set here the default compression mode of JFFS2 from
-          the available compression modes. Don't touch if unsure.
+	prompt "JFFS2 default compression mode" if JFFS2_COMPRESSION_OPTIONS
+	default JFFS2_CMODE_PRIORITY
+	depends on JFFS2_FS
+	help
+	  You can set here the default compression mode of JFFS2 from
+	  the available compression modes. Don't touch if unsure.
 
 config JFFS2_CMODE_NONE
-        bool "no compression"
-        help
-          Uses no compression.
+	bool "no compression"
+	help
+	  Uses no compression.
 
 config JFFS2_CMODE_PRIORITY
-        bool "priority"
-        help
-          Tries the compressors in a predefined order and chooses the first
-          successful one.
+	bool "priority"
+	help
+	  Tries the compressors in a predefined order and chooses the first
+	  successful one.
 
 config JFFS2_CMODE_SIZE
-        bool "size (EXPERIMENTAL)"
-        help
-          Tries all compressors and chooses the one which has the smallest
-          result.
+	bool "size (EXPERIMENTAL)"
+	help
+	  Tries all compressors and chooses the one which has the smallest
+	  result.
+
+config JFFS2_CMODE_FAVOURLZO
+	bool "Favour LZO"
+	help
+	  Tries all compressors and chooses the one which has the smallest
+	  result but gives some preference to LZO (which has faster
+	  decompression) at the expense of size.
 
 endchoice
 
@@ -1381,6 +1384,24 @@ config VXFS_FS
 	  To compile this as a module, choose M here: the module will be
 	  called freevxfs.  If unsure, say N.
 
+config MINIX_FS
+	tristate "Minix file system support"
+	depends on BLOCK
+	help
+	  Minix is a simple operating system used in many classes about OS's.
+	  The minix file system (method to organize files on a hard disk
+	  partition or a floppy disk) was the original file system for Linux,
+	  but has been superseded by the second extended file system ext2fs.
+	  You don't want to use the minix file system on your hard disk
+	  because of certain built-in restrictions, but it is sometimes found
+	  on older Linux floppy disks.  This option will enlarge your kernel
+	  by about 28 KB. If unsure, say N.
+
+	  To compile this file system support as a module, choose M here: the
+	  module will be called minix.  Note that the file system of your root
+	  partition (the one containing the directory /) cannot be compiled as
+	  a module.
+
 
 config HPFS_FS
 	tristate "OS/2 HPFS file system support"
@@ -1396,7 +1417,6 @@ config HPFS_FS
 
 	  To compile this file system support as a module, choose M here: the
 	  module will be called hpfs.  If unsure, say N.
-
 
 
 config QNX4FS_FS
@@ -1425,6 +1445,22 @@ config QNX4FS_RW
 	  It's currently broken, so for now:
 	  answer N.
 
+config ROMFS_FS
+	tristate "ROM file system support"
+	depends on BLOCK
+	---help---
+	  This is a very small read-only file system mainly intended for
+	  initial ram disks of installation disks, but it could be used for
+	  other read-only media as well.  Read
+	  <file:Documentation/filesystems/romfs.txt> for details.
+
+	  To compile this file system support as a module, choose M here: the
+	  module will be called romfs.  Note that the file system of your
+	  root partition (the one containing the directory /) cannot be a
+	  module.
+
+	  If you don't know whether you need it, then you don't need it:
+	  answer N.
 
 
 config SYSV_FS
@@ -1463,7 +1499,6 @@ config SYSV_FS
 	  sysv.
 
 	  If you haven't heard about all of this before, it's safe to say N.
-
 
 
 config UFS_FS
@@ -1516,8 +1551,20 @@ config UFS_DEBUG
 
 endmenu
 
-menu "Network File Systems"
+menuconfig NETWORK_FILESYSTEMS
+	bool "Network File Systems"
+	default y
 	depends on NET
+	---help---
+	  Say Y here to get to see options for network filesystems and
+	  filesystem-related networking code, such as NFS daemon and
+	  RPCSEC security modules.
+	  This option alone does not add any kernel code.
+
+	  If you say N, all options in this submenu will be skipped and
+	  disabled; if unsure, say Y here.
+
+if NETWORK_FILESYSTEMS
 
 config NFS_FS
 	tristate "NFS file system support"
@@ -1626,6 +1673,8 @@ config NFSD
 	select CRYPTO_MD5 if NFSD_V4
 	select CRYPTO if NFSD_V4
 	select FS_POSIX_ACL if NFSD_V4
+	select PROC_FS if NFSD_V4
+	select PROC_FS if SUNRPC_GSS
 	help
 	  If you want your Linux box to act as an NFS *server*, so that other
 	  computers on your local network which support NFS can access certain
@@ -1728,6 +1777,11 @@ config SUNRPC
 config SUNRPC_GSS
 	tristate
 
+config SUNRPC_XPRT_RDMA
+	tristate
+	depends on SUNRPC && INFINIBAND && EXPERIMENTAL
+	default SUNRPC && INFINIBAND
+
 config SUNRPC_BIND34
 	bool "Support for rpcbind versions 3 & 4 (EXPERIMENTAL)"
 	depends on SUNRPC && EXPERIMENTAL
@@ -1777,7 +1831,7 @@ config RPCSEC_GSS_SPKM3
 	  If unsure, say N.
 
 config SMB_FS
-	tristate "SMB file system support (to mount Windows shares etc.)"
+	tristate "SMB file system support (OBSOLETE, please use CIFS)"
 	depends on INET
 	select NLS
 	help
@@ -1800,8 +1854,8 @@ config SMB_FS
 	  General information about how to connect Linux, Windows machines and
 	  Macs is on the WWW at <http://www.eats.com/linux_mac_win.html>.
 
-	  To compile the SMB support as a module, choose M here: the module will
-	  be called smbfs.  Most people say N, however.
+	  To compile the SMB support as a module, choose M here:
+	  the module will be called smbfs.  Most people say N, however.
 
 config SMB_NLS_DEFAULT
 	bool "Use a default NLS"
@@ -1833,7 +1887,7 @@ config SMB_NLS_REMOTE
 	  smbmount from samba 2.2.0 or later supports this.
 
 config CIFS
-	tristate "CIFS support (advanced network filesystem for Samba, Window and other CIFS compliant servers)"
+	tristate "CIFS support (advanced network filesystem, SMBFS successor)"
 	depends on INET
 	select NLS
 	help
@@ -1844,13 +1898,15 @@ config CIFS
 	  file servers such as Windows 2000 (including Windows 2003, NT 4  
 	  and Windows XP) as well by Samba (which provides excellent CIFS
 	  server support for Linux and many other operating systems). Limited
-	  support for OS/2 and Windows ME and similar servers is provided as well.
+	  support for OS/2 and Windows ME and similar servers is provided as
+	  well.
 
-	  The intent of the cifs module is to provide an advanced
-	  network file system client for mounting to CIFS compliant servers,
-	  including support for dfs (hierarchical name space), secure per-user
-	  session establishment, safe distributed caching (oplock), optional
-	  packet signing, Unicode and other internationalization improvements. 
+	  The cifs module provides an advanced network file system
+	  client for mounting to CIFS compliant servers.  It includes
+	  support for DFS (hierarchical name space), secure per-user
+	  session establishment via Kerberos or NTLM or NTLMv2,
+	  safe distributed caching (oplock), optional packet
+	  signing, Unicode and other internationalization improvements.
 	  If you need to mount to Samba or Windows from this machine, say Y.
 
 config CIFS_STATS
@@ -1882,22 +1938,23 @@ config CIFS_WEAK_PW_HASH
 	  (since 1997) support stronger NTLM (and even NTLMv2 and Kerberos)
 	  security mechanisms. These hash the password more securely
 	  than the mechanisms used in the older LANMAN version of the
-          SMB protocol needed to establish sessions with old SMB servers.
+	  SMB protocol but LANMAN based authentication is needed to
+	  establish sessions with some old SMB servers.
 
 	  Enabling this option allows the cifs module to mount to older
 	  LANMAN based servers such as OS/2 and Windows 95, but such
 	  mounts may be less secure than mounts using NTLM or more recent
 	  security mechanisms if you are on a public network.  Unless you
-	  have a need to access old SMB servers (and are on a private 
+	  have a need to access old SMB servers (and are on a private
 	  network) you probably want to say N.  Even if this support
-	  is enabled in the kernel build, they will not be used
-	  automatically. At runtime LANMAN mounts are disabled but
+	  is enabled in the kernel build, LANMAN authentication will not be
+	  used automatically. At runtime LANMAN mounts are disabled but
 	  can be set to required (or optional) either in
 	  /proc/fs/cifs (see fs/cifs/README for more detail) or via an
-	  option on the mount command. This support is disabled by 
+	  option on the mount command. This support is disabled by
 	  default in order to reduce the possibility of a downgrade
 	  attack.
- 
+
 	  If unsure, say N.
 
 config CIFS_XATTR
@@ -1938,7 +1995,7 @@ config CIFS_DEBUG2
 	   messages in some error paths, slowing performance. This
 	   option can be turned off unless you are debugging
 	   cifs problems.  If unsure, say N.
-	   
+
 config CIFS_EXPERIMENTAL
 	  bool "CIFS Experimental Features (EXPERIMENTAL)"
 	  depends on CIFS && EXPERIMENTAL
@@ -1955,13 +2012,23 @@ config CIFS_EXPERIMENTAL
 config CIFS_UPCALL
 	  bool "Kerberos/SPNEGO advanced session setup (EXPERIMENTAL)"
 	  depends on CIFS_EXPERIMENTAL
-	  depends on CONNECTOR
+	  depends on KEYS
 	  help
-	    Enables an upcall mechanism for CIFS which will be used to contact
-	    userspace helper utilities to provide SPNEGO packaged Kerberos
-	    tickets which are needed to mount to certain secure servers
+	    Enables an upcall mechanism for CIFS which accesses
+	    userspace helper utilities to provide SPNEGO packaged (RFC 4178)
+	    Kerberos tickets which are needed to mount to certain secure servers
 	    (for which more secure Kerberos authentication is required). If
 	    unsure, say N.
+
+config CIFS_DFS_UPCALL
+	  bool "DFS feature support (EXPERIMENTAL)"
+	  depends on CIFS_EXPERIMENTAL
+	  depends on KEYS
+	  help
+	    Enables an upcall mechanism for CIFS which contacts userspace
+	    helper utilities to provide server name resolution (host names to
+	    IP addresses) which is needed for implicit mounts of DFS junction
+	    points. If unsure, say N.
 
 config NCP_FS
 	tristate "NCP file system support (to mount NetWare volumes)"
@@ -2019,7 +2086,7 @@ config CODA_FS_OLD_API
 	  However this new API is not backward compatible with older
 	  clients. If you really need to run the old Coda userspace
 	  cache manager then say Y.
-	  
+
 	  For most cases you probably want to say N.
 
 config AFS_FS
@@ -2055,7 +2122,7 @@ config 9P_FS
 
 	  If unsure, say N.
 
-endmenu
+endif # NETWORK_FILESYSTEMS
 
 if BLOCK
 menu "Partition Types"
@@ -2069,4 +2136,3 @@ source "fs/nls/Kconfig"
 source "fs/dlm/Kconfig"
 
 endmenu
-

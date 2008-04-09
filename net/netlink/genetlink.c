@@ -22,22 +22,14 @@ struct sock *genl_sock = NULL;
 
 static DEFINE_MUTEX(genl_mutex); /* serialization of message processing */
 
-static void genl_lock(void)
+static inline void genl_lock(void)
 {
 	mutex_lock(&genl_mutex);
 }
 
-static int genl_trylock(void)
-{
-	return !mutex_trylock(&genl_mutex);
-}
-
-static void genl_unlock(void)
+static inline void genl_unlock(void)
 {
 	mutex_unlock(&genl_mutex);
-
-	if (genl_sock && genl_sock->sk_receive_queue.qlen)
-		genl_sock->sk_data_ready(genl_sock, 0);
 }
 
 #define GENL_FAM_TAB_SIZE	16
@@ -238,10 +230,8 @@ static void genl_unregister_mc_groups(struct genl_family *family)
 {
 	struct genl_multicast_group *grp, *tmp;
 
-	genl_lock();
 	list_for_each_entry_safe(grp, tmp, &family->mcast_groups, list)
 		__genl_unregister_mc_group(family, grp);
-	genl_unlock();
 }
 
 /**
@@ -404,9 +394,9 @@ int genl_unregister_family(struct genl_family *family)
 {
 	struct genl_family *rc;
 
-	genl_unregister_mc_groups(family);
-
 	genl_lock();
+
+	genl_unregister_mc_groups(family);
 
 	list_for_each_entry(rc, genl_family_chain(family->id), family_list) {
 		if (family->id != rc->id || strcmp(rc->name, family->name))
@@ -478,16 +468,11 @@ static int genl_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 	return ops->doit(skb, &info);
 }
 
-static void genl_rcv(struct sock *sk, int len)
+static void genl_rcv(struct sk_buff *skb)
 {
-	unsigned int qlen = 0;
-
-	do {
-		if (genl_trylock())
-			return;
-		netlink_run_queue(sk, &qlen, genl_rcv_msg);
-		genl_unlock();
-	} while (qlen && genl_sock && genl_sock->sk_receive_queue.qlen);
+	genl_lock();
+	netlink_rcv_skb(skb, &genl_rcv_msg);
+	genl_unlock();
 }
 
 /**************************************************************************
@@ -782,8 +767,8 @@ static int __init genl_init(void)
 	netlink_set_nonroot(NETLINK_GENERIC, NL_NONROOT_RECV);
 
 	/* we'll bump the group number right afterwards */
-	genl_sock = netlink_kernel_create(NETLINK_GENERIC, 0, genl_rcv,
-					  NULL, THIS_MODULE);
+	genl_sock = netlink_kernel_create(&init_net, NETLINK_GENERIC, 0,
+					  genl_rcv, NULL, THIS_MODULE);
 	if (genl_sock == NULL)
 		panic("GENL: Cannot initialize generic netlink\n");
 

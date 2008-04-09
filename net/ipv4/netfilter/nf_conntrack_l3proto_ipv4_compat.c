@@ -11,6 +11,7 @@
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
 #include <linux/percpu.h>
+#include <net/net_namespace.h>
 
 #include <linux/netfilter.h>
 #include <net/netfilter/nf_conntrack_core.h>
@@ -38,12 +39,14 @@ struct ct_iter_state {
 static struct hlist_node *ct_get_first(struct seq_file *seq)
 {
 	struct ct_iter_state *st = seq->private;
+	struct hlist_node *n;
 
 	for (st->bucket = 0;
 	     st->bucket < nf_conntrack_htable_size;
 	     st->bucket++) {
-		if (!hlist_empty(&nf_conntrack_hash[st->bucket]))
-			return nf_conntrack_hash[st->bucket].first;
+		n = rcu_dereference(nf_conntrack_hash[st->bucket].first);
+		if (n)
+			return n;
 	}
 	return NULL;
 }
@@ -53,11 +56,11 @@ static struct hlist_node *ct_get_next(struct seq_file *seq,
 {
 	struct ct_iter_state *st = seq->private;
 
-	head = head->next;
+	head = rcu_dereference(head->next);
 	while (head == NULL) {
 		if (++st->bucket >= nf_conntrack_htable_size)
 			return NULL;
-		head = nf_conntrack_hash[st->bucket].first;
+		head = rcu_dereference(nf_conntrack_hash[st->bucket].first);
 	}
 	return head;
 }
@@ -73,8 +76,9 @@ static struct hlist_node *ct_get_idx(struct seq_file *seq, loff_t pos)
 }
 
 static void *ct_seq_start(struct seq_file *seq, loff_t *pos)
+	__acquires(RCU)
 {
-	read_lock_bh(&nf_conntrack_lock);
+	rcu_read_lock();
 	return ct_get_idx(seq, *pos);
 }
 
@@ -85,16 +89,17 @@ static void *ct_seq_next(struct seq_file *s, void *v, loff_t *pos)
 }
 
 static void ct_seq_stop(struct seq_file *s, void *v)
+	__releases(RCU)
 {
-	read_unlock_bh(&nf_conntrack_lock);
+	rcu_read_unlock();
 }
 
 static int ct_seq_show(struct seq_file *s, void *v)
 {
 	const struct nf_conntrack_tuple_hash *hash = v;
 	const struct nf_conn *ct = nf_ct_tuplehash_to_ctrack(hash);
-	struct nf_conntrack_l3proto *l3proto;
-	struct nf_conntrack_l4proto *l4proto;
+	const struct nf_conntrack_l3proto *l3proto;
+	const struct nf_conntrack_l4proto *l4proto;
 
 	NF_CT_ASSERT(ct);
 
@@ -120,10 +125,7 @@ static int ct_seq_show(struct seq_file *s, void *v)
 		      ? (long)(ct->timeout.expires - jiffies)/HZ : 0) != 0)
 		return -ENOSPC;
 
-	if (l3proto->print_conntrack(s, ct))
-		return -ENOSPC;
-
-	if (l4proto->print_conntrack(s, ct))
+	if (l4proto->print_conntrack && l4proto->print_conntrack(s, ct))
 		return -ENOSPC;
 
 	if (print_tuple(s, &ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple,
@@ -173,22 +175,8 @@ static const struct seq_operations ct_seq_ops = {
 
 static int ct_open(struct inode *inode, struct file *file)
 {
-	struct seq_file *seq;
-	struct ct_iter_state *st;
-	int ret;
-
-	st = kzalloc(sizeof(struct ct_iter_state), GFP_KERNEL);
-	if (st == NULL)
-		return -ENOMEM;
-	ret = seq_open(file, &ct_seq_ops);
-	if (ret)
-		goto out_free;
-	seq          = file->private_data;
-	seq->private = st;
-	return ret;
-out_free:
-	kfree(st);
-	return ret;
+	return seq_open_private(file, &ct_seq_ops,
+			sizeof(struct ct_iter_state));
 }
 
 static const struct file_operations ct_file_ops = {
@@ -207,10 +195,12 @@ struct ct_expect_iter_state {
 static struct hlist_node *ct_expect_get_first(struct seq_file *seq)
 {
 	struct ct_expect_iter_state *st = seq->private;
+	struct hlist_node *n;
 
 	for (st->bucket = 0; st->bucket < nf_ct_expect_hsize; st->bucket++) {
-		if (!hlist_empty(&nf_ct_expect_hash[st->bucket]))
-			return nf_ct_expect_hash[st->bucket].first;
+		n = rcu_dereference(nf_ct_expect_hash[st->bucket].first);
+		if (n)
+			return n;
 	}
 	return NULL;
 }
@@ -220,11 +210,11 @@ static struct hlist_node *ct_expect_get_next(struct seq_file *seq,
 {
 	struct ct_expect_iter_state *st = seq->private;
 
-	head = head->next;
+	head = rcu_dereference(head->next);
 	while (head == NULL) {
 		if (++st->bucket >= nf_ct_expect_hsize)
 			return NULL;
-		head = nf_ct_expect_hash[st->bucket].first;
+		head = rcu_dereference(nf_ct_expect_hash[st->bucket].first);
 	}
 	return head;
 }
@@ -240,8 +230,9 @@ static struct hlist_node *ct_expect_get_idx(struct seq_file *seq, loff_t pos)
 }
 
 static void *exp_seq_start(struct seq_file *seq, loff_t *pos)
+	__acquires(RCU)
 {
-	read_lock_bh(&nf_conntrack_lock);
+	rcu_read_lock();
 	return ct_expect_get_idx(seq, *pos);
 }
 
@@ -252,14 +243,15 @@ static void *exp_seq_next(struct seq_file *seq, void *v, loff_t *pos)
 }
 
 static void exp_seq_stop(struct seq_file *seq, void *v)
+	__releases(RCU)
 {
-	read_unlock_bh(&nf_conntrack_lock);
+	rcu_read_unlock();
 }
 
 static int exp_seq_show(struct seq_file *s, void *v)
 {
 	struct nf_conntrack_expect *exp;
-	struct hlist_node *n = v;
+	const struct hlist_node *n = v;
 
 	exp = hlist_entry(n, struct nf_conntrack_expect, hnode);
 
@@ -290,22 +282,8 @@ static const struct seq_operations exp_seq_ops = {
 
 static int exp_open(struct inode *inode, struct file *file)
 {
-	struct seq_file *seq;
-	struct ct_expect_iter_state *st;
-	int ret;
-
-	st = kzalloc(sizeof(struct ct_expect_iter_state), GFP_KERNEL);
-	if (!st)
-		return -ENOMEM;
-	ret = seq_open(file, &exp_seq_ops);
-	if (ret)
-		goto out_free;
-	seq          = file->private_data;
-	seq->private = st;
-	return ret;
-out_free:
-	kfree(st);
-	return ret;
+	return seq_open_private(file, &exp_seq_ops,
+			sizeof(struct ct_expect_iter_state));
 }
 
 static const struct file_operations ip_exp_file_ops = {
@@ -354,7 +332,7 @@ static void ct_cpu_seq_stop(struct seq_file *seq, void *v)
 static int ct_cpu_seq_show(struct seq_file *seq, void *v)
 {
 	unsigned int nr_conntracks = atomic_read(&nf_conntrack_count);
-	struct ip_conntrack_stat *st = v;
+	const struct ip_conntrack_stat *st = v;
 
 	if (v == SEQ_START_TOKEN) {
 		seq_printf(seq, "entries  searched found new invalid ignore delete delete_list insert insert_failed drop early_drop icmp_error  expect_new expect_create expect_delete\n");
@@ -408,35 +386,32 @@ int __init nf_conntrack_ipv4_compat_init(void)
 {
 	struct proc_dir_entry *proc, *proc_exp, *proc_stat;
 
-	proc = proc_net_fops_create("ip_conntrack", 0440, &ct_file_ops);
+	proc = proc_net_fops_create(&init_net, "ip_conntrack", 0440, &ct_file_ops);
 	if (!proc)
 		goto err1;
 
-	proc_exp = proc_net_fops_create("ip_conntrack_expect", 0440,
+	proc_exp = proc_net_fops_create(&init_net, "ip_conntrack_expect", 0440,
 					&ip_exp_file_ops);
 	if (!proc_exp)
 		goto err2;
 
-	proc_stat = create_proc_entry("ip_conntrack", S_IRUGO, proc_net_stat);
+	proc_stat = proc_create("ip_conntrack", S_IRUGO,
+				init_net.proc_net_stat, &ct_cpu_seq_fops);
 	if (!proc_stat)
 		goto err3;
-
-	proc_stat->proc_fops = &ct_cpu_seq_fops;
-	proc_stat->owner = THIS_MODULE;
-
 	return 0;
 
 err3:
-	proc_net_remove("ip_conntrack_expect");
+	proc_net_remove(&init_net, "ip_conntrack_expect");
 err2:
-	proc_net_remove("ip_conntrack");
+	proc_net_remove(&init_net, "ip_conntrack");
 err1:
 	return -ENOMEM;
 }
 
 void __exit nf_conntrack_ipv4_compat_fini(void)
 {
-	remove_proc_entry("ip_conntrack", proc_net_stat);
-	proc_net_remove("ip_conntrack_expect");
-	proc_net_remove("ip_conntrack");
+	remove_proc_entry("ip_conntrack", init_net.proc_net_stat);
+	proc_net_remove(&init_net, "ip_conntrack_expect");
+	proc_net_remove(&init_net, "ip_conntrack");
 }

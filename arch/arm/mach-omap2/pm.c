@@ -20,7 +20,7 @@
  * published by the Free Software Foundation.
  */
 
-#include <linux/pm.h>
+#include <linux/suspend.h>
 #include <linux/sched.h>
 #include <linux/proc_fs.h>
 #include <linux/interrupt.h>
@@ -108,201 +108,12 @@ static void serial_console_fclk_mask(u32 *f1, u32 *f2)
 	}
 }
 
-static void serial_console_sleep(int enable)
+static int omap2_pm_prepare(void)
 {
-	if (console_iclk == NULL || console_fclk == NULL)
-		return;
-
-	if (enable) {
-		BUG_ON(serial_console_clock_disabled);
-		if (clk_get_usecount(console_fclk) == 0)
-			return;
-		if ((int) serial_console_next_disable - (int) omap2_read_32k_sync_counter() >= 0)
-			return;
-		serial_wait_tx();
-		clk_disable(console_iclk);
-		clk_disable(console_fclk);
-		serial_console_clock_disabled = 1;
-	} else {
-		int serial_wakeup = 0;
-		u32 l;
-
-		switch (serial_console_uart)  {
-		case 1:
-			l = prm_read_mod_reg(CORE_MOD, PM_WKST1);
-			if (l & OMAP24XX_ST_UART1)
-				serial_wakeup = 1;
-			break;
-		case 2:
-			l = prm_read_mod_reg(CORE_MOD, PM_WKST1);
-			if (l & OMAP24XX_ST_UART2)
-				serial_wakeup = 1;
-			break;
-		case 3:
-			l = prm_read_mod_reg(CORE_MOD, OMAP24XX_PM_WKST2);
-			if (l & OMAP24XX_ST_UART3)
-				serial_wakeup = 1;
-			break;
-		}
-		if (serial_wakeup)
-			serial_console_kick();
-		if (!serial_console_clock_disabled)
-			return;
-		clk_enable(console_iclk);
-		clk_enable(console_fclk);
-		serial_console_clock_disabled = 0;
-	}
-}
-
-static void pm_init_serial_console(void)
-{
-	const struct omap_serial_console_config *conf;
-	char name[16];
-	u32 l;
-
-	conf = omap_get_config(OMAP_TAG_SERIAL_CONSOLE,
-			       struct omap_serial_console_config);
-	if (conf == NULL)
-		return;
-	if (conf->console_uart > 3 || conf->console_uart < 1)
-		return;
-	serial_console_uart = conf->console_uart;
-	sprintf(name, "uart%d_fck", conf->console_uart);
-	console_fclk = clk_get(NULL, name);
-	if (IS_ERR(console_fclk))
-		console_fclk = NULL;
-	name[6] = 'i';
-	console_iclk = clk_get(NULL, name);
-	if (IS_ERR(console_fclk))
-		console_iclk = NULL;
-	if (console_fclk == NULL || console_iclk == NULL) {
-		serial_console_uart = 0;
-		return;
-	}
-	switch (serial_console_uart) {
-	case 1:
-		l = prm_read_mod_reg(CORE_MOD, PM_WKEN1);
-		l |= OMAP24XX_ST_UART1;
-		prm_write_mod_reg(l, CORE_MOD, PM_WKEN1);
-		break;
-	case 2:
-		l = prm_read_mod_reg(CORE_MOD, PM_WKEN1);
-		l |= OMAP24XX_ST_UART2;
-		prm_write_mod_reg(l, CORE_MOD, PM_WKEN1);
-		break;
-	case 3:
-		l = prm_read_mod_reg(CORE_MOD, OMAP24XX_PM_WKEN2);
-		l |= OMAP24XX_ST_UART3;
-		prm_write_mod_reg(l, CORE_MOD, OMAP24XX_PM_WKEN2);
-		break;
-	}
-}
-
-#define DUMP_PRM_MOD_REG(mod, reg)    \
-	regs[reg_count].name = #mod "." #reg; \
-	regs[reg_count++].val = prm_read_mod_reg(mod, reg)
-#define DUMP_CM_MOD_REG(mod, reg)     \
-	regs[reg_count].name = #mod "." #reg; \
-	regs[reg_count++].val = cm_read_mod_reg(mod, reg)
-#define DUMP_PRM_REG(reg) \
-	regs[reg_count].name = #reg; \
-	regs[reg_count++].val = prm_read_reg(reg)
-#define DUMP_CM_REG(reg) \
-	regs[reg_count].name = #reg; \
-	regs[reg_count++].val = cm_read_reg(reg)
-#define DUMP_INTC_REG(reg, off) \
-	regs[reg_count].name = #reg; \
-	regs[reg_count++].val = __raw_readl(IO_ADDRESS(0x480fe000 + (off)))
-
-static void omap2_pm_dump(int mode, int resume, unsigned int us)
-{
-	struct reg {
-		const char *name;
-		u32 val;
-	} regs[32];
-	int reg_count = 0, i;
-	const char *s1 = NULL, *s2 = NULL;
-
-	if (!resume) {
-#if 0
-		/* MPU */
-		DUMP_PRM_REG(OMAP24XX_PRCM_IRQENABLE_MPU);
-		DUMP_CM_MOD_REG(MPU_MOD, CM_CLKSTCTRL);
-		DUMP_PRM_MOD_REG(MPU_MOD, PM_PWSTCTRL);
-		DUMP_PRM_MOD_REG(MPU_MOD, PM_PWSTST);
-		DUMP_PRM_MOD_REG(MPU_MOD, PM_WKDEP);
-#endif
-#if 0
-		/* INTC */
-		DUMP_INTC_REG(INTC_MIR0, 0x0084);
-		DUMP_INTC_REG(INTC_MIR1, 0x00a4);
-		DUMP_INTC_REG(INTC_MIR2, 0x00c4);
-#endif
-#if 0
-		DUMP_CM_MOD_REG(CORE_MOD, CM_FCLKEN1);
-		DUMP_CM_MOD_REG(CORE_MOD, CM_FCLKEN2);
-		DUMP_CM_MOD_REG(WKUP_MOD, CM_FCLKEN);
-		DUMP_CM_MOD_REG(CORE_MOD, CM_ICLKEN1);
-		DUMP_CM_MOD_REG(CORE_MOD, CM_ICLKEN2);
-		DUMP_CM_MOD_REG(WKUP_MOD, CM_ICLKEN);
-		DUMP_CM_MOD_REG(PLL_MOD, CM_CLKEN_PLL);
-		DUMP_PRM_REG(OMAP24XX_PRCM_CLKEMUL_CTRL);
-		DUMP_CM_MOD_REG(PLL_MOD, CM_AUTOIDLE);
-		DUMP_PRM_MOD_REG(CORE_REG, PM_PWSTST);
-		DUMP_PRM_REG(OMAP24XX_PRCM_CLKSRC_CTRL);
-#endif
-#if 0
-		/* DSP */
-		DUMP_CM_MOD_REG(OMAP24XX_DSP_MOD, CM_FCLKEN);
-		DUMP_CM_MOD_REG(OMAP24XX_DSP_MOD, CM_ICLKEN);
-		DUMP_CM_MOD_REG(OMAP24XX_DSP_MOD, CM_IDLEST);
-		DUMP_CM_MOD_REG(OMAP24XX_DSP_MOD, CM_AUTOIDLE);
-		DUMP_CM_MOD_REG(OMAP24XX_DSP_MOD, CM_CLKSEL);
-		DUMP_CM_MOD_REG(OMAP24XX_DSP_MOD, CM_CLKSTCTRL);
-		DUMP_PRM_MOD_REG(OMAP24XX_DSP_MOD, RM_RSTCTRL);
-		DUMP_PRM_MOD_REG(OMAP24XX_DSP_MOD, RM_RSTST);
-		DUMP_PRM_MOD_REG(OMAP24XX_DSP_MOD, PM_PWSTCTRL);
-		DUMP_PRM_MOD_REG(OMAP24XX_DSP_MOD, PM_PWSTST);
-#endif
-	} else {
-		DUMP_PRM_MOD_REG(CORE_MOD, PM_WKST1);
-		DUMP_PRM_MOD_REG(CORE_MOD, OMAP24XX_PM_WKST2);
-		DUMP_PRM_MOD_REG(WKUP_MOD, PM_WKST);
-		DUMP_PRM_REG(OMAP24XX_PRCM_IRQSTATUS_MPU);
-#if 1
-		DUMP_INTC_REG(INTC_PENDING_IRQ0, 0x0098);
-		DUMP_INTC_REG(INTC_PENDING_IRQ1, 0x00b8);
-		DUMP_INTC_REG(INTC_PENDING_IRQ2, 0x00d8);
-#endif
-	}
-
-	switch (mode) {
-	case 0:
-		s1 = "full";
-		s2 = "retention";
-		break;
-	case 1:
-		s1 = "MPU";
-		s2 = "retention";
-		break;
-	case 2:
-		s1 = "MPU";
-		s2 = "idle";
-		break;
-	}
-
-	if (!resume)
-#if defined(CONFIG_NO_IDLE_HZ) || defined(CONFIG_NO_HZ)
-		printk("--- Going to %s %s (next timer after %u ms)\n", s1, s2,
-		       jiffies_to_msecs(get_next_timer_interrupt(jiffies) - 
-					jiffies));
-#else
-		printk("--- Going to %s %s\n", s1, s2);
-#endif
-	else
-		printk("--- Woke up (slept for %u.%03u ms)\n", us / 1000, us % 1000);
-	for (i = 0; i < reg_count; i++)
-		printk("%-20s: 0x%08x\n", regs[i].name, regs[i].val);
+	/* We cannot sleep in idle until we have resumed */
+	saved_idle = pm_idle;
+	pm_idle = NULL;
+	return 0;
 }
 
 #else
@@ -635,17 +446,16 @@ static int omap2_pm_enter(suspend_state_t state)
 	return ret;
 }
 
-static int omap2_pm_finish(suspend_state_t state)
+static void omap2_pm_finish(void)
 {
 	pm_idle = saved_idle;
-	return 0;
 }
 
-static struct pm_ops omap_pm_ops = {
+static struct platform_suspend_ops omap_pm_ops = {
 	.prepare	= omap2_pm_prepare,
 	.enter		= omap2_pm_enter,
 	.finish		= omap2_pm_finish,
-	.valid		= pm_valid_only_mem,
+	.valid		= suspend_valid_only_mem,
 };
 
 static void __init prcm_setup_regs(void)
@@ -817,7 +627,7 @@ int __init omap2_pm_init(void)
 	omap2_sram_suspend = omap_sram_push(omap24xx_cpu_suspend,
 					    omap24xx_cpu_suspend_sz);
 
-	pm_set_ops(&omap_pm_ops);
+	suspend_set_ops(&omap_pm_ops);
 	pm_idle = omap2_pm_idle;
 
 	l = subsys_create_file(&power_subsys, &sleep_while_idle_attr);

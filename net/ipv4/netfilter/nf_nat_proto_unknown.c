@@ -37,7 +37,7 @@ static int unknown_unique_tuple(struct nf_conntrack_tuple *tuple,
 }
 
 static int
-unknown_manip_pkt(struct sk_buff **pskb,
+unknown_manip_pkt(struct sk_buff *skb,
 		  unsigned int iphdroff,
 		  const struct nf_conntrack_tuple *tuple,
 		  enum nf_nat_manip_type maniptype)
@@ -45,7 +45,7 @@ unknown_manip_pkt(struct sk_buff **pskb,
 	return 1;
 }
 
-struct nf_nat_protocol nf_nat_unknown_protocol = {
+const struct nf_nat_protocol nf_nat_unknown_protocol = {
 	.name			= "unknown",
 	/* .me isn't set: getting a ref to this cannot fail. */
 	.manip_pkt		= unknown_manip_pkt,

@@ -52,12 +52,13 @@ static int __init sh7780_pci_init(void)
 
 	pr_debug("PCI: Starting intialization.\n");
 
-	outl(0x00000001, SH7780_PCI_VCR2); /* Enable PCIC */
+	ctrl_outl(0x00000001, SH7780_PCI_VCR2); /* Enable PCIC */
 
 	/* check for SH7780/SH7780R hardware */
 	id = pci_read_reg(SH7780_PCIVID);
 	if ((id & 0xffff) == SH7780_VENDOR_ID) {
 		switch ((id >> 16) & 0xffff) {
+		case SH7763_DEVICE_ID:
 		case SH7780_DEVICE_ID:
 		case SH7781_DEVICE_ID:
 		case SH7785_DEVICE_ID:
@@ -79,19 +80,6 @@ static int __init sh7780_pci_init(void)
 		ctrl_outl(0xAAAA0000, INTC_ICR1);
 		/* INTPRI: priority=3(all) */
 		ctrl_outl(0x33333333, INTC_INTPRI);
-	} else {
-		/* INTC SH-4 Mode */
-		ctrl_outl(0x00200000, INTC_ICR0);
-		/* enable PCIINTA - PCIINTD */
-		ctrl_outl(0x00078000, INTC_INT2MSKCR);
-		/* disable IRL4-7 Interrupt */
-		ctrl_outl(0x40000000, INTC_INTMSK1);
-		/* disable IRL4-7 Interrupt */
-		ctrl_outl(0x0000fffe, INTC_INTMSK2);
-		/* enable IRL0-3 Interrupt */
-		ctrl_outl(0x80000000, INTC_INTMSKCLR1);
-		/* enable IRL0-3 Interrupt */
-		ctrl_outl(0xfffe0000, INTC_INTMSKCLR2);
 	}
 
 	if ((ret = sh4_pci_check_direct()) != 0)

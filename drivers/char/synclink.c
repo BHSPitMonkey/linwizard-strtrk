@@ -81,14 +81,11 @@
 #include <linux/mm.h>
 #include <linux/slab.h>
 #include <linux/delay.h>
-
 #include <linux/netdevice.h>
-
 #include <linux/vmalloc.h>
 #include <linux/init.h>
-
-#include <linux/delay.h>
 #include <linux/ioctl.h>
+#include <linux/synclink.h>
 
 #include <asm/system.h>
 #include <asm/io.h>
@@ -113,8 +110,6 @@
 #define COPY_TO_USER(error,dest,src,size) error = copy_to_user(dest,src,size) ? -EFAULT : 0
 
 #include <asm/uaccess.h>
-
-#include "linux/synclink.h"
 
 #define RCLRVALUE 0xffff
 
@@ -1548,7 +1543,7 @@ static void mgsl_isr_receive_data( struct mgsl_struct *info )
 
 /* mgsl_isr_misc()
  * 
- * 	Service a miscellaneos interrupt source.
+ * 	Service a miscellaneous interrupt source.
  * 	
  * Arguments:		info		pointer to device extension (instance data)
  * Return Value:	None

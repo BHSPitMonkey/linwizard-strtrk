@@ -1,16 +1,12 @@
-/* drivers/video/pvr2fb.c
+/*
+ * drivers/video/pvr2fb.c
  *
  * Frame buffer and fbcon support for the NEC PowerVR2 found within the Sega
  * Dreamcast.
  *
  * Copyright (c) 2001 M. R. Brown <mrbrown@0xd6.org>
- * Copyright (c) 2001, 2002, 2003, 2004, 2005 Paul Mundt <lethal@linux-sh.org>
+ * Copyright (c) 2001 - 2008  Paul Mundt <lethal@linux-sh.org>
  *
- * This file is part of the LinuxDC project (linuxdc.sourceforge.net).
- *
- */
-
-/*
  * This driver is mostly based on the excellent amifb and vfb sources.  It uses
  * an odd scheme for converting hardware values to/from framebuffer values,
  * here are some hacked-up formulas:
@@ -72,7 +68,7 @@
 #endif
 
 #ifdef CONFIG_SH_STORE_QUEUES
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/cpu/sq.h>
 #endif
 
@@ -490,7 +486,7 @@ static int pvr2fb_check_var(struct fb_var_screeninfo *var, struct fb_info *info)
 	} else {
 		var->sync &= ~FB_SYNC_BROADCAST;
 		var->vmode &= ~FB_VMODE_INTERLACED;
-		var->vmode |= pvr2_var.vmode;
+		var->vmode |= FB_VMODE_NONINTERLACED;
 	}
 
 	if ((var->activate & FB_ACTIVATE_MASK) != FB_ACTIVATE_TEST) {
@@ -667,6 +663,8 @@ static int pvr2_init_cable(void)
 	  related */
 	if (cable_type == CT_COMPOSITE)
 		fb_writel(3 << 8, VOUTC);
+	else if (cable_type == CT_RGB)
+		fb_writel(1 << 9, VOUTC);
 	else
 		fb_writel(0, VOUTC);
 
@@ -890,7 +888,7 @@ static int __init pvr2fb_dc_init(void)
 	pvr2_fix.mmio_start	= 0xa05f8000;	/* registers start here */
 	pvr2_fix.mmio_len	= 0x2000;
 
-	if (request_irq(HW_EVENT_VSYNC, pvr2fb_interrupt, 0,
+	if (request_irq(HW_EVENT_VSYNC, pvr2fb_interrupt, IRQF_SHARED,
 	                "pvr2 VBL handler", fb_info)) {
 		return -EBUSY;
 	}

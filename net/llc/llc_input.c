@@ -12,6 +12,7 @@
  * See the GNU General Public License for more details.
  */
 #include <linux/netdevice.h>
+#include <net/net_namespace.h>
 #include <net/llc.h>
 #include <net/llc_pdu.h>
 #include <net/llc_sap.h>
@@ -116,8 +117,12 @@ static inline int llc_fixup_skb(struct sk_buff *skb)
 	skb_pull(skb, llc_len);
 	if (skb->protocol == htons(ETH_P_802_2)) {
 		__be16 pdulen = eth_hdr(skb)->h_proto;
-		u16 data_size = ntohs(pdulen) - llc_len;
+		s32 data_size = ntohs(pdulen) - llc_len;
 
+		if (data_size < 0 ||
+		    ((skb_tail_pointer(skb) -
+		      (u8 *)pdu) - llc_len) < data_size)
+			return 0;
 		if (unlikely(pskb_trim_rcsum(skb, data_size)))
 			return 0;
 	}
@@ -144,6 +149,9 @@ int llc_rcv(struct sk_buff *skb, struct net_device *dev,
 	int dest;
 	int (*rcv)(struct sk_buff *, struct net_device *,
 		   struct packet_type *, struct net_device *);
+
+	if (dev->nd_net != &init_net)
+		goto drop;
 
 	/*
 	 * When the interface is in promisc. mode, drop all the crap that it

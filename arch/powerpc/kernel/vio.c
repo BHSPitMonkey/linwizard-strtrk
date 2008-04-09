@@ -37,7 +37,7 @@
 #include <asm/iseries/hv_call_xm.h>
 #include <asm/iseries/iommu.h>
 
-extern struct kset devices_subsys; /* needed for vio_find_name() */
+static struct bus_type vio_bus_type;
 
 static struct vio_dev vio_bus_device  = { /* fake "parent" device */
 	.name = vio_bus_device.dev.bus_id,
@@ -46,60 +46,33 @@ static struct vio_dev vio_bus_device  = { /* fake "parent" device */
 	.dev.bus = &vio_bus_type,
 };
 
-#ifdef CONFIG_PPC_ISERIES
-struct device *iSeries_vio_dev = &vio_bus_device.dev;
-EXPORT_SYMBOL(iSeries_vio_dev);
-
-static struct iommu_table veth_iommu_table;
-static struct iommu_table vio_iommu_table;
-
-static void __init iommu_vio_init(void)
-{
-	iommu_table_getparms_iSeries(255, 0, 0xff, &veth_iommu_table);
-	veth_iommu_table.it_size /= 2;
-	vio_iommu_table = veth_iommu_table;
-	vio_iommu_table.it_offset += veth_iommu_table.it_size;
-
-	if (!iommu_init_table(&veth_iommu_table, -1))
-		printk("Virtual Bus VETH TCE table failed.\n");
-	if (!iommu_init_table(&vio_iommu_table, -1))
-		printk("Virtual Bus VIO TCE table failed.\n");
-}
-#endif
-
 static struct iommu_table *vio_build_iommu_table(struct vio_dev *dev)
 {
-#ifdef CONFIG_PPC_ISERIES
-	if (firmware_has_feature(FW_FEATURE_ISERIES)) {
-		if (strcmp(dev->type, "network") == 0)
-			return &veth_iommu_table;
-		return &vio_iommu_table;
-	} else
-#endif
-	{
-		const unsigned char *dma_window;
-		struct iommu_table *tbl;
-		unsigned long offset, size;
+	const unsigned char *dma_window;
+	struct iommu_table *tbl;
+	unsigned long offset, size;
 
-		dma_window = of_get_property(dev->dev.archdata.of_node,
-					  "ibm,my-dma-window", NULL);
-		if (!dma_window)
-			return NULL;
+	if (firmware_has_feature(FW_FEATURE_ISERIES))
+		return vio_build_iommu_table_iseries(dev);
 
-		tbl = kmalloc(sizeof(*tbl), GFP_KERNEL);
+	dma_window = of_get_property(dev->dev.archdata.of_node,
+				  "ibm,my-dma-window", NULL);
+	if (!dma_window)
+		return NULL;
 
-		of_parse_dma_window(dev->dev.archdata.of_node, dma_window,
-				    &tbl->it_index, &offset, &size);
+	tbl = kmalloc(sizeof(*tbl), GFP_KERNEL);
 
-		/* TCE table size - measured in tce entries */
-		tbl->it_size = size >> IOMMU_PAGE_SHIFT;
-		/* offset for VIO should always be 0 */
-		tbl->it_offset = offset >> IOMMU_PAGE_SHIFT;
-		tbl->it_busno = 0;
-		tbl->it_type = TCE_VB;
+	of_parse_dma_window(dev->dev.archdata.of_node, dma_window,
+			    &tbl->it_index, &offset, &size);
 
-		return iommu_init_table(tbl, -1);
-	}
+	/* TCE table size - measured in tce entries */
+	tbl->it_size = size >> IOMMU_PAGE_SHIFT;
+	/* offset for VIO should always be 0 */
+	tbl->it_offset = offset >> IOMMU_PAGE_SHIFT;
+	tbl->it_busno = 0;
+	tbl->it_type = TCE_VB;
+
+	return iommu_init_table(tbl, -1);
 }
 
 /**
@@ -160,16 +133,6 @@ static int vio_bus_remove(struct device *dev)
 	return 1;
 }
 
-/* convert from struct device to struct vio_dev and pass to driver. */
-static void vio_bus_shutdown(struct device *dev)
-{
-	struct vio_dev *viodev = to_vio_dev(dev);
-	struct vio_driver *viodrv = to_vio_driver(dev->driver);
-
-	if (dev->driver && viodrv->shutdown)
-		viodrv->shutdown(viodev);
-}
-
 /**
  * vio_register_driver: - Register a new vio driver
  * @drv:	The vio_driver structure to be registered.
@@ -213,7 +176,7 @@ static void __devinit vio_dev_release(struct device *dev)
  * Returns a pointer to the created vio_dev or NULL if node has
  * NULL device_type or compatible fields.
  */
-struct vio_dev * __devinit vio_register_device_node(struct device_node *of_node)
+struct vio_dev *vio_register_device_node(struct device_node *of_node)
 {
 	struct vio_dev *viodev;
 	const unsigned int *unit_address;
@@ -282,15 +245,6 @@ static int __init vio_bus_init(void)
 	int err;
 	struct device_node *node_vroot;
 
-#ifdef CONFIG_PPC_ISERIES
-	if (firmware_has_feature(FW_FEATURE_ISERIES)) {
-		iommu_vio_init();
-		vio_bus_device.dev.archdata.dma_ops = &dma_iommu_ops;
-		vio_bus_device.dev.archdata.dma_data = &vio_iommu_table;
-		iSeries_vio_dev = &vio_bus_device.dev;
-	}
-#endif /* CONFIG_PPC_ISERIES */
-
 	err = bus_register(&vio_bus_type);
 	if (err) {
 		printk(KERN_ERR "failed to register VIO bus\n");
@@ -317,11 +271,8 @@ static int __init vio_bus_init(void)
 		 * the device tree. Drivers will associate with them later.
 		 */
 		for (of_node = node_vroot->child; of_node != NULL;
-				of_node = of_node->sibling) {
-			printk(KERN_DEBUG "%s: processing %p\n",
-					__FUNCTION__, of_node);
+				of_node = of_node->sibling)
 			vio_register_device_node(of_node);
-		}
 		of_node_put(node_vroot);
 	}
 
@@ -364,41 +315,30 @@ static int vio_bus_match(struct device *dev, struct device_driver *drv)
 	return (ids != NULL) && (vio_match_device(ids, vio_dev) != NULL);
 }
 
-static int vio_hotplug(struct device *dev, char **envp, int num_envp,
-			char *buffer, int buffer_size)
+static int vio_hotplug(struct device *dev, struct kobj_uevent_env *env)
 {
 	const struct vio_dev *vio_dev = to_vio_dev(dev);
 	struct device_node *dn;
 	const char *cp;
-	int length;
-
-	if (!num_envp)
-		return -ENOMEM;
 
 	dn = dev->archdata.of_node;
 	if (!dn)
 		return -ENODEV;
-	cp = of_get_property(dn, "compatible", &length);
+	cp = of_get_property(dn, "compatible", NULL);
 	if (!cp)
 		return -ENODEV;
 
-	envp[0] = buffer;
-	length = scnprintf(buffer, buffer_size, "MODALIAS=vio:T%sS%s",
-				vio_dev->type, cp);
-	if ((buffer_size - length) <= 0)
-		return -ENOMEM;
-	envp[1] = NULL;
+	add_uevent_var(env, "MODALIAS=vio:T%sS%s", vio_dev->type, cp);
 	return 0;
 }
 
-struct bus_type vio_bus_type = {
+static struct bus_type vio_bus_type = {
 	.name = "vio",
 	.dev_attrs = vio_dev_attrs,
 	.uevent = vio_hotplug,
 	.match = vio_bus_match,
 	.probe = vio_bus_probe,
 	.remove = vio_bus_remove,
-	.shutdown = vio_bus_shutdown,
 };
 
 /**
@@ -419,19 +359,16 @@ EXPORT_SYMBOL(vio_get_attribute);
 #ifdef CONFIG_PPC_PSERIES
 /* vio_find_name() - internal because only vio.c knows how we formatted the
  * kobject name
- * XXX once vio_bus_type.devices is actually used as a kset in
- * drivers/base/bus.c, this function should be removed in favor of
- * "device_find(kobj_name, &vio_bus_type)"
  */
-static struct vio_dev *vio_find_name(const char *kobj_name)
+static struct vio_dev *vio_find_name(const char *name)
 {
-	struct kobject *found;
+	struct device *found;
 
-	found = kset_find_obj(&devices_subsys, kobj_name);
+	found = bus_find_device_by_name(&vio_bus_type, NULL, name);
 	if (!found)
 		return NULL;
 
-	return to_vio_dev(container_of(found, struct device, kobj));
+	return to_vio_dev(found);
 }
 
 /**

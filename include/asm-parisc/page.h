@@ -1,7 +1,7 @@
 #ifndef _PARISC_PAGE_H
 #define _PARISC_PAGE_H
 
-#ifdef __KERNEL__
+#include <linux/const.h>
 
 #if defined(CONFIG_PARISC_PAGE_SIZE_4KB)
 # define PAGE_SHIFT	12
@@ -12,7 +12,7 @@
 #else
 # error "unknown default kernel page size"
 #endif
-#define PAGE_SIZE	(1UL << PAGE_SHIFT)
+#define PAGE_SIZE	(_AC(1,UL) << PAGE_SHIFT)
 #define PAGE_MASK	(~(PAGE_SIZE-1))
 
 
@@ -91,6 +91,7 @@ typedef unsigned long pgprot_t;
 
 #endif /* STRICT_MM_TYPECHECKS */
 
+typedef struct page *pgtable_t;
 
 typedef struct __physmem_range {
 	unsigned long start_pfn;
@@ -172,7 +173,5 @@ extern int npmem_ranges;
 
 #include <asm-generic/memory_model.h>
 #include <asm-generic/page.h>
-
-#endif /* __KERNEL__ */
 
 #endif /* _PARISC_PAGE_H */

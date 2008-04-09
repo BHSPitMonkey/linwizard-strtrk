@@ -28,7 +28,7 @@ static void zfcp_ccw_remove(struct ccw_device *);
 static int zfcp_ccw_set_online(struct ccw_device *);
 static int zfcp_ccw_set_offline(struct ccw_device *);
 static int zfcp_ccw_notify(struct ccw_device *, int);
-static void zfcp_ccw_shutdown(struct device *);
+static void zfcp_ccw_shutdown(struct ccw_device *);
 
 static struct ccw_device_id zfcp_ccw_device_id[] = {
 	{CCW_DEVICE_DEVTYPE(ZFCP_CONTROL_UNIT_TYPE,
@@ -51,8 +51,9 @@ static struct ccw_driver zfcp_ccw_driver = {
 	.set_online  = zfcp_ccw_set_online,
 	.set_offline = zfcp_ccw_set_offline,
 	.notify      = zfcp_ccw_notify,
-	.driver      = {
-		.shutdown = zfcp_ccw_shutdown,
+	.shutdown    = zfcp_ccw_shutdown,
+	.driver = {
+		.groups = zfcp_driver_attr_groups,
 	},
 };
 
@@ -122,6 +123,9 @@ zfcp_ccw_remove(struct ccw_device *ccw_device)
 
 	list_for_each_entry_safe(port, p, &adapter->port_remove_lh, list) {
 		list_for_each_entry_safe(unit, u, &port->unit_remove_lh, list) {
+			if (atomic_test_mask(ZFCP_STATUS_UNIT_REGISTERED,
+				&unit->status))
+				scsi_remove_device(unit->device);
 			zfcp_unit_dequeue(unit);
 		}
 		zfcp_port_dequeue(port);
@@ -150,15 +154,12 @@ zfcp_ccw_set_online(struct ccw_device *ccw_device)
 	down(&zfcp_data.config_sema);
 	adapter = dev_get_drvdata(&ccw_device->dev);
 
-	retval = zfcp_adapter_debug_register(adapter);
-	if (retval)
-		goto out;
 	retval = zfcp_erp_thread_setup(adapter);
 	if (retval) {
 		ZFCP_LOG_INFO("error: start of error recovery thread for "
 			      "adapter %s failed\n",
 			      zfcp_get_busid_by_adapter(adapter));
-		goto out_erp_thread;
+		goto out;
 	}
 
 	retval = zfcp_adapter_scsi_register(adapter);
@@ -177,8 +178,6 @@ zfcp_ccw_set_online(struct ccw_device *ccw_device)
 
  out_scsi_register:
 	zfcp_erp_thread_kill(adapter);
- out_erp_thread:
-	zfcp_adapter_debug_unregister(adapter);
  out:
 	up(&zfcp_data.config_sema);
 	return retval;
@@ -201,7 +200,6 @@ zfcp_ccw_set_offline(struct ccw_device *ccw_device)
 	zfcp_erp_adapter_shutdown(adapter, 0);
 	zfcp_erp_wait(adapter);
 	zfcp_erp_thread_kill(adapter);
-	zfcp_adapter_debug_unregister(adapter);
 	up(&zfcp_data.config_sema);
 	return 0;
 }
@@ -259,16 +257,7 @@ zfcp_ccw_notify(struct ccw_device *ccw_device, int event)
 int __init
 zfcp_ccw_register(void)
 {
-	int retval;
-
-	retval = ccw_driver_register(&zfcp_ccw_driver);
-	if (retval)
-		goto out;
-	retval = zfcp_sysfs_driver_create_files(&zfcp_ccw_driver.driver);
-	if (retval)
-		ccw_driver_unregister(&zfcp_ccw_driver);
- out:
-	return retval;
+	return ccw_driver_register(&zfcp_ccw_driver);
 }
 
 /**
@@ -277,12 +266,12 @@ zfcp_ccw_register(void)
  * Makes sure that QDIO queues are down when the system gets stopped.
  */
 static void
-zfcp_ccw_shutdown(struct device *dev)
+zfcp_ccw_shutdown(struct ccw_device *cdev)
 {
 	struct zfcp_adapter *adapter;
 
 	down(&zfcp_data.config_sema);
-	adapter = dev_get_drvdata(dev);
+	adapter = dev_get_drvdata(&cdev->dev);
 	zfcp_erp_adapter_shutdown(adapter, 0);
 	zfcp_erp_wait(adapter);
 	up(&zfcp_data.config_sema);

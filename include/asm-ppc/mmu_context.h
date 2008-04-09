@@ -2,8 +2,9 @@
 #ifndef __PPC_MMU_CONTEXT_H
 #define __PPC_MMU_CONTEXT_H
 
+#include <linux/bitops.h>
+
 #include <asm/atomic.h>
-#include <asm/bitops.h>
 #include <asm/mmu.h>
 #include <asm/cputable.h>
 #include <asm-generic/mm_hooks.h>
@@ -59,11 +60,6 @@ static inline void enter_lazy_tlb(struct mm_struct *mm, struct task_struct *tsk)
 #define FIRST_CONTEXT    	0
 
 #elif defined(CONFIG_4xx)
-#define NO_CONTEXT      	256
-#define LAST_CONTEXT    	255
-#define FIRST_CONTEXT    	1
-
-#elif defined(CONFIG_E200) || defined(CONFIG_E500)
 #define NO_CONTEXT      	256
 #define LAST_CONTEXT    	255
 #define FIRST_CONTEXT    	1

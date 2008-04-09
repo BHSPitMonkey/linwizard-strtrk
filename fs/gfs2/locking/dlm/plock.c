@@ -89,15 +89,19 @@ int gdlm_plock(void *lockspace, struct lm_lockname *name,
 	op->info.number		= name->ln_number;
 	op->info.start		= fl->fl_start;
 	op->info.end		= fl->fl_end;
-	op->info.owner		= (__u64)(long) fl->fl_owner;
 	if (fl->fl_lmops && fl->fl_lmops->fl_grant) {
+		/* fl_owner is lockd which doesn't distinguish
+		   processes on the nfs client */
+		op->info.owner	= (__u64) fl->fl_pid;
 		xop->callback	= fl->fl_lmops->fl_grant;
 		locks_init_lock(&xop->flc);
 		locks_copy_lock(&xop->flc, fl);
 		xop->fl		= fl;
 		xop->file	= file;
-	} else
+	} else {
+		op->info.owner	= (__u64)(long) fl->fl_owner;
 		xop->callback	= NULL;
+	}
 
 	send_op(op);
 
@@ -203,7 +207,10 @@ int gdlm_punlock(void *lockspace, struct lm_lockname *name,
 	op->info.number		= name->ln_number;
 	op->info.start		= fl->fl_start;
 	op->info.end		= fl->fl_end;
-	op->info.owner		= (__u64)(long) fl->fl_owner;
+	if (fl->fl_lmops && fl->fl_lmops->fl_grant)
+		op->info.owner	= (__u64) fl->fl_pid;
+	else
+		op->info.owner	= (__u64)(long) fl->fl_owner;
 
 	send_op(op);
 	wait_event(recv_wq, (op->done != 0));
@@ -242,7 +249,10 @@ int gdlm_plock_get(void *lockspace, struct lm_lockname *name,
 	op->info.number		= name->ln_number;
 	op->info.start		= fl->fl_start;
 	op->info.end		= fl->fl_end;
-	op->info.owner		= (__u64)(long) fl->fl_owner;
+	if (fl->fl_lmops && fl->fl_lmops->fl_grant)
+		op->info.owner	= (__u64) fl->fl_pid;
+	else
+		op->info.owner	= (__u64)(long) fl->fl_owner;
 
 	send_op(op);
 	wait_event(recv_wq, (op->done != 0));
@@ -346,15 +356,16 @@ static ssize_t dev_write(struct file *file, const char __user *u, size_t count,
 
 static unsigned int dev_poll(struct file *file, poll_table *wait)
 {
+	unsigned int mask = 0;
+
 	poll_wait(file, &send_wq, wait);
 
 	spin_lock(&ops_lock);
-	if (!list_empty(&send_list)) {
-		spin_unlock(&ops_lock);
-		return POLLIN | POLLRDNORM;
-	}
+	if (!list_empty(&send_list))
+		mask = POLLIN | POLLRDNORM;
 	spin_unlock(&ops_lock);
-	return 0;
+
+	return mask;
 }
 
 static const struct file_operations dev_fops = {

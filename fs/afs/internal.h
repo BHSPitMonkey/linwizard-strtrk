@@ -570,11 +570,9 @@ extern int afs_abort_to_error(u32);
  */
 extern const struct inode_operations afs_mntpt_inode_operations;
 extern const struct file_operations afs_mntpt_file_operations;
-extern unsigned long afs_mntpt_expiry_timeout;
 
 extern int afs_mntpt_check_symlink(struct afs_vnode *, struct key *);
 extern void afs_mntpt_kill_timer(void);
-extern void afs_umount_begin(struct vfsmount *, int);
 
 /*
  * proc.c
@@ -751,7 +749,7 @@ extern int afs_fsync(struct file *, struct dentry *, int);
 extern unsigned afs_debug;
 
 #define dbgprintk(FMT,...) \
-	printk("[%x%-6.6s] "FMT"\n", smp_processor_id(), current->comm ,##__VA_ARGS__)
+	printk("[%-6.6s] "FMT"\n", current->comm ,##__VA_ARGS__)
 
 /* make sure we maintain the format strings, even when debugging is disabled */
 static inline __attribute__((format(printf,1,2)))

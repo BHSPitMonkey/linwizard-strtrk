@@ -11,10 +11,10 @@
 
 #ifndef _NF_CONNTRACK_L3PROTO_H
 #define _NF_CONNTRACK_L3PROTO_H
+#include <linux/netlink.h>
+#include <net/netlink.h>
 #include <linux/seq_file.h>
 #include <net/netfilter/nf_conntrack.h>
-
-struct nfattr;
 
 struct nf_conntrack_l3proto
 {
@@ -42,11 +42,8 @@ struct nf_conntrack_l3proto
 	int (*print_tuple)(struct seq_file *s,
 			   const struct nf_conntrack_tuple *);
 
-	/* Print out the private part of the conntrack. */
-	int (*print_conntrack)(struct seq_file *s, const struct nf_conn *);
-
 	/* Returns verdict for packet, or -1 for invalid. */
-	int (*packet)(struct nf_conn *conntrack,
+	int (*packet)(struct nf_conn *ct,
 		      const struct sk_buff *skb,
 		      enum ip_conntrack_info ctinfo);
 
@@ -54,7 +51,7 @@ struct nf_conntrack_l3proto
 	 * Called when a new connection for this protocol found;
 	 * returns TRUE if it's OK.  If so, packet() called next.
 	 */
-	int (*new)(struct nf_conn *conntrack, const struct sk_buff *skb);
+	int (*new)(struct nf_conn *ct, const struct sk_buff *skb);
 
 	/*
 	 * Called before tracking. 
@@ -64,15 +61,16 @@ struct nf_conntrack_l3proto
 	int (*get_l4proto)(const struct sk_buff *skb, unsigned int nhoff,
 			   unsigned int *dataoff, u_int8_t *protonum);
 
-	int (*tuple_to_nfattr)(struct sk_buff *skb,
+	int (*tuple_to_nlattr)(struct sk_buff *skb,
 			       const struct nf_conntrack_tuple *t);
 
-	int (*nfattr_to_tuple)(struct nfattr *tb[],
+	int (*nlattr_to_tuple)(struct nlattr *tb[],
 			       struct nf_conntrack_tuple *t);
+	const struct nla_policy *nla_policy;
 
 #ifdef CONFIG_SYSCTL
 	struct ctl_table_header	*ctl_table_header;
-	struct ctl_table	*ctl_table_path;
+	struct ctl_path		*ctl_table_path;
 	struct ctl_table	*ctl_table;
 #endif /* CONFIG_SYSCTL */
 

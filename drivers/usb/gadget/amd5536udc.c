@@ -69,7 +69,7 @@
 
 /* gadget stack */
 #include <linux/usb/ch9.h>
-#include <linux/usb_gadget.h>
+#include <linux/usb/gadget.h>
 
 /* udc specific */
 #include "amd5536udc.h"
@@ -1244,7 +1244,7 @@ udc_queue(struct usb_ep *usbep, struct usb_request *usbreq, gfp_t gfp)
 		/* stop OUT naking */
 		if (!ep->in) {
 			if (!use_dma && udc_rxfifo_pending) {
-				DBG(dev, "udc_queue(): pending bytes in"
+				DBG(dev, "udc_queue(): pending bytes in "
 					"rxfifo after nyet\n");
 				/*
 				 * read pending bytes afer nyet:
@@ -2038,6 +2038,7 @@ int usb_gadget_unregister_driver(struct usb_gadget_driver *driver)
 	spin_unlock_irqrestore(&dev->lock, flags);
 
 	driver->unbind(&dev->gadget);
+	dev->gadget.dev.driver = NULL;
 	dev->driver = NULL;
 
 	/* set SD */
@@ -3244,7 +3245,6 @@ static int udc_pci_probe(
 		retval = -ENOMEM;
 		goto finished;
 	}
-	memset(dev, 0, sizeof(struct udc));
 
 	/* pci setup */
 	if (pci_enable_device(pdev) < 0) {
@@ -3286,14 +3286,12 @@ static int udc_pci_probe(
 
 	pci_set_drvdata(pdev, dev);
 
-	/* chip revision */
-	dev->chiprev = 0;
+	/* chip revision for Hs AMD5536 */
+	dev->chiprev = pdev->revision;
 
 	pci_set_master(pdev);
-	pci_set_mwi(pdev);
+	pci_try_set_mwi(pdev);
 
-	/* chip rev for Hs AMD5536 */
-	pci_read_config_byte(pdev, PCI_REVISION_ID, (u8 *) &dev->chiprev);
 	/* init dma pools */
 	if (use_dma) {
 		retval = init_dma_pools(dev);

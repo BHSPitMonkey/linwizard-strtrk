@@ -61,7 +61,7 @@ static int debug;
 
 static LIST_HEAD(pci_hotplug_slot_list);
 
-struct kset pci_hotplug_slots_subsys;
+struct kset *pci_hotplug_slots_kset;
 
 static ssize_t hotplug_slot_attr_show(struct kobject *kobj,
 		struct attribute *attr, char *buf)
@@ -95,8 +95,6 @@ static struct kobj_type hotplug_slot_ktype = {
 	.sysfs_ops = &hotplug_slot_sysfs_ops,
 	.release = &hotplug_slot_release,
 };
-
-decl_subsys_name(pci_hotplug_slots, slots, &hotplug_slot_ktype, NULL);
 
 /* these strings match up with the values in pci_bus_speed */
 static char *pci_bus_speed_strings[] = {
@@ -139,7 +137,7 @@ static int get_##name (struct hotplug_slot *slot, type *value)		\
 	int retval = 0;							\
 	if (try_module_get(ops->owner)) {				\
 		if (ops->get_##name)					\
-			retval = ops->get_##name (slot, value);		\
+			retval = ops->get_##name(slot, value);		\
 		else							\
 			*value = slot->info->name;			\
 		module_put(ops->owner);					\
@@ -627,23 +625,24 @@ int pci_hp_register (struct hotplug_slot *slot)
 	if ((slot->info == NULL) || (slot->ops == NULL))
 		return -EINVAL;
 	if (slot->release == NULL) {
-		dbg("Why are you trying to register a hotplug slot"
+		dbg("Why are you trying to register a hotplug slot "
 		    "without a proper release function?\n");
 		return -EINVAL;
 	}
 
-	kobject_set_name(&slot->kobj, "%s", slot->name);
-	kobj_set_kset_s(slot, pci_hotplug_slots_subsys);
-
 	/* this can fail if we have already registered a slot with the same name */
-	if (kobject_register(&slot->kobj)) {
-		err("Unable to register kobject");
+	slot->kobj.kset = pci_hotplug_slots_kset;
+	result = kobject_init_and_add(&slot->kobj, &hotplug_slot_ktype, NULL,
+				      "%s", slot->name);
+	if (result) {
+		err("Unable to register kobject '%s'", slot->name);
 		return -EINVAL;
 	}
-		
+
 	list_add (&slot->slot_list, &pci_hotplug_slot_list);
 
 	result = fs_add_slot (slot);
+	kobject_uevent(&slot->kobj, KOBJ_ADD);
 	dbg ("Added slot %s to the list\n", slot->name);
 	return result;
 }
@@ -672,7 +671,7 @@ int pci_hp_deregister (struct hotplug_slot *slot)
 
 	fs_remove_slot (slot);
 	dbg ("Removed slot %s from the list\n", slot->name);
-	kobject_unregister(&slot->kobj);
+	kobject_put(&slot->kobj);
 	return 0;
 }
 
@@ -689,70 +688,8 @@ int pci_hp_deregister (struct hotplug_slot *slot)
 int __must_check pci_hp_change_slot_info(struct hotplug_slot *slot,
 					 struct hotplug_slot_info *info)
 {
-	int retval;
-
 	if ((slot == NULL) || (info == NULL))
 		return -ENODEV;
-
-	/*
-	* check all fields in the info structure, and update timestamps
-	* for the files referring to the fields that have now changed.
-	*/
-	if ((has_power_file(slot) == 0) &&
-	    (slot->info->power_status != info->power_status)) {
-		retval = sysfs_update_file(&slot->kobj,
-					   &hotplug_slot_attr_power.attr);
-		if (retval)
-			return retval;
-	}
-
-	if ((has_attention_file(slot) == 0) &&
-	    (slot->info->attention_status != info->attention_status)) {
-		retval = sysfs_update_file(&slot->kobj,
-					   &hotplug_slot_attr_attention.attr);
-		if (retval)
-			return retval;
-	}
-
-	if ((has_latch_file(slot) == 0) &&
-	    (slot->info->latch_status != info->latch_status)) {
-		retval = sysfs_update_file(&slot->kobj,
-					   &hotplug_slot_attr_latch.attr);
-		if (retval)
-			return retval;
-	}
-
-	if ((has_adapter_file(slot) == 0) &&
-	    (slot->info->adapter_status != info->adapter_status)) {
-		retval = sysfs_update_file(&slot->kobj,
-					   &hotplug_slot_attr_presence.attr);
-		if (retval)
-			return retval;
-	}
-
-	if ((has_address_file(slot) == 0) &&
-	    (slot->info->address != info->address)) {
-		retval = sysfs_update_file(&slot->kobj,
-					   &hotplug_slot_attr_address.attr);
-		if (retval)
-			return retval;
-	}
-
-	if ((has_max_bus_speed_file(slot) == 0) &&
-	    (slot->info->max_bus_speed != info->max_bus_speed)) {
-		retval = sysfs_update_file(&slot->kobj,
-					   &hotplug_slot_attr_max_bus_speed.attr);
-		if (retval)
-			return retval;
-	}
-
-	if ((has_cur_bus_speed_file(slot) == 0) &&
-	    (slot->info->cur_bus_speed != info->cur_bus_speed)) {
-		retval = sysfs_update_file(&slot->kobj,
-					   &hotplug_slot_attr_cur_bus_speed.attr);
-		if (retval)
-			return retval;
-	}
 
 	memcpy (slot->info, info, sizeof (struct hotplug_slot_info));
 
@@ -762,11 +699,15 @@ int __must_check pci_hp_change_slot_info(struct hotplug_slot *slot,
 static int __init pci_hotplug_init (void)
 {
 	int result;
+	struct kset *pci_bus_kset;
 
-	kobj_set_kset_s(&pci_hotplug_slots_subsys, pci_bus_type.subsys);
-	result = subsystem_register(&pci_hotplug_slots_subsys);
-	if (result) {
-		err("Register subsys with error %d\n", result);
+	pci_bus_kset = bus_get_kset(&pci_bus_type);
+
+	pci_hotplug_slots_kset = kset_create_and_add("slots", NULL,
+						     &pci_bus_kset->kobj);
+	if (!pci_hotplug_slots_kset) {
+		result = -ENOMEM;
+		err("Register subsys error\n");
 		goto exit;
 	}
 	result = cpci_hotplug_init(debug);
@@ -777,9 +718,9 @@ static int __init pci_hotplug_init (void)
 
 	info (DRIVER_DESC " version: " DRIVER_VERSION "\n");
 	goto exit;
-	
+
 err_subsys:
-	subsystem_unregister(&pci_hotplug_slots_subsys);
+	kset_unregister(pci_hotplug_slots_kset);
 exit:
 	return result;
 }
@@ -787,7 +728,7 @@ exit:
 static void __exit pci_hotplug_exit (void)
 {
 	cpci_hotplug_exit();
-	subsystem_unregister(&pci_hotplug_slots_subsys);
+	kset_unregister(pci_hotplug_slots_kset);
 }
 
 module_init(pci_hotplug_init);
@@ -799,7 +740,7 @@ MODULE_LICENSE("GPL");
 module_param(debug, bool, 0644);
 MODULE_PARM_DESC(debug, "Debugging mode enabled or not");
 
-EXPORT_SYMBOL_GPL(pci_hotplug_slots_subsys);
+EXPORT_SYMBOL_GPL(pci_hotplug_slots_kset);
 EXPORT_SYMBOL_GPL(pci_hp_register);
 EXPORT_SYMBOL_GPL(pci_hp_deregister);
 EXPORT_SYMBOL_GPL(pci_hp_change_slot_info);

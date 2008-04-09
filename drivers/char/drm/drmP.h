@@ -54,6 +54,7 @@
 #include <linux/pci.h>
 #include <linux/jiffies.h>
 #include <linux/smp_lock.h>	/* For (un)lock_kernel */
+#include <linux/dma-mapping.h>
 #include <linux/mm.h>
 #include <linux/cdev.h>
 #include <linux/mutex.h>
@@ -79,6 +80,9 @@
 
 #define __OS_HAS_AGP (defined(CONFIG_AGP) || (defined(CONFIG_AGP_MODULE) && defined(MODULE)))
 #define __OS_HAS_MTRR (defined(CONFIG_MTRR))
+
+struct drm_file;
+struct drm_device;
 
 #include "drm_os_linux.h"
 #include "drm_hashtab.h"
@@ -231,12 +235,13 @@
  * \param dev DRM device.
  * \param filp file pointer of the caller.
  */
-#define LOCK_TEST_WITH_RETURN( dev, filp )				\
+#define LOCK_TEST_WITH_RETURN( dev, file_priv )				\
 do {									\
 	if ( !_DRM_LOCK_IS_HELD( dev->lock.hw_lock->lock ) ||		\
-	     dev->lock.filp != filp ) {				\
-		DRM_ERROR( "%s called without lock held\n",		\
-			   __FUNCTION__ );				\
+	     dev->lock.file_priv != file_priv )	{			\
+		DRM_ERROR( "%s called without lock held, held  %d owner %p %p\n",\
+			   __FUNCTION__, _DRM_LOCK_IS_HELD( dev->lock.hw_lock->lock ),\
+			   dev->lock.file_priv, file_priv );		\
 		return -EINVAL;						\
 	}								\
 } while (0)
@@ -257,12 +262,12 @@ do {									\
  * Ioctl function type.
  *
  * \param inode device inode.
- * \param filp file pointer.
+ * \param file_priv DRM file private pointer.
  * \param cmd command.
  * \param arg argument.
  */
-typedef int drm_ioctl_t(struct inode *inode, struct file *filp,
-			unsigned int cmd, unsigned long arg);
+typedef int drm_ioctl_t(struct drm_device *dev, void *data,
+			struct drm_file *file_priv);
 
 typedef int drm_ioctl_compat_t(struct file *filp, unsigned int cmd,
 			       unsigned long arg);
@@ -271,16 +276,23 @@ typedef int drm_ioctl_compat_t(struct file *filp, unsigned int cmd,
 #define	DRM_MASTER	0x2
 #define DRM_ROOT_ONLY	0x4
 
-typedef struct drm_ioctl_desc {
+struct drm_ioctl_desc {
+	unsigned int cmd;
 	drm_ioctl_t *func;
 	int flags;
-} drm_ioctl_desc_t;
+};
+
+/**
+ * Creates a driver or general drm_ioctl_desc array entry for the given
+ * ioctl, for use by drm_ioctl().
+ */
+#define DRM_IOCTL_DEF(ioctl, func, flags) \
+	[DRM_IOCTL_NR(ioctl)] = {ioctl, func, flags}
 
 struct drm_magic_entry {
 	struct list_head head;
 	struct drm_hash_item hash_item;
 	struct drm_file *priv;
-	struct drm_magic_entry *next;
 };
 
 struct drm_vma_entry {
@@ -304,7 +316,7 @@ struct drm_buf {
 	__volatile__ int waiting;      /**< On kernel DMA queue */
 	__volatile__ int pending;      /**< On hardware DMA queue */
 	wait_queue_head_t dma_wait;    /**< Processes waiting */
-	struct file *filp;	       /**< Pointer to holding file descr */
+	struct drm_file *file_priv;    /**< Private of holding file descr */
 	int context;		       /**< Kernel queue for this buffer */
 	int while_locked;	       /**< Dispatch this buffer while locked */
 	enum {
@@ -376,6 +388,7 @@ struct drm_file {
 	struct drm_head *head;
 	int remove_auth_on_close;
 	unsigned long lock_count;
+	struct file *filp;
 	void *driver_priv;
 };
 
@@ -388,11 +401,9 @@ struct drm_queue {
 	wait_queue_head_t read_queue;	/**< Processes waiting on block_read */
 	atomic_t block_write;		/**< Queue blocked for writes */
 	wait_queue_head_t write_queue;	/**< Processes waiting on block_write */
-#if 1
 	atomic_t total_queued;		/**< Total queued statistic */
 	atomic_t total_flushed;		/**< Total flushes statistic */
 	atomic_t total_locks;		/**< Total locks statistics */
-#endif
 	enum drm_ctx_flags flags;	/**< Context preserving and 2D-only */
 	struct drm_waitlist waitlist;	/**< Pending buffers */
 	wait_queue_head_t flush_queue;	/**< Processes waiting until flush */
@@ -403,7 +414,8 @@ struct drm_queue {
  */
 struct drm_lock_data {
 	struct drm_hw_lock *hw_lock;	/**< Hardware lock */
-	struct file *filp;		/**< File descr of lock holder (0=kernel) */
+	/** Private of lock holder's file (NULL=kernel) */
+	struct drm_file *file_priv;
 	wait_queue_head_t lock_queue;	/**< Queue of blocked processes */
 	unsigned long lock_time;	/**< Time of last lock in jiffies */
 	spinlock_t spinlock;
@@ -478,6 +490,27 @@ struct drm_sigdata {
 	struct drm_hw_lock *lock;
 };
 
+
+/*
+ * Generic memory manager structs
+ */
+
+struct drm_mm_node {
+	struct list_head fl_entry;
+	struct list_head ml_entry;
+	int free;
+	unsigned long start;
+	unsigned long size;
+	struct drm_mm *mm;
+	void *private;
+};
+
+struct drm_mm {
+	struct list_head fl_entry;
+	struct list_head ml_entry;
+};
+
+
 /**
  * Mappings list
  */
@@ -485,7 +518,7 @@ struct drm_map_list {
 	struct list_head head;		/**< list head */
 	struct drm_hash_item hash;
 	struct drm_map *map;			/**< mapping */
-	unsigned int user_token;
+	uint64_t user_token;
 };
 
 typedef struct drm_map drm_local_map_t;
@@ -519,26 +552,10 @@ struct drm_ati_pcigart_info {
 	int gart_reg_if;
 	void *addr;
 	dma_addr_t bus_addr;
+	dma_addr_t table_mask;
+	struct drm_dma_handle *table_handle;
 	drm_local_map_t mapping;
 	int table_size;
-};
-
-/*
- * Generic memory manager structs
- */
-struct drm_mm_node {
-	struct list_head fl_entry;
-	struct list_head ml_entry;
-	int free;
-	unsigned long start;
-	unsigned long size;
-	struct drm_mm *mm;
-	void *private;
-};
-
-struct drm_mm {
-	struct list_head fl_entry;
-	struct list_head ml_entry;
 };
 
 /**
@@ -546,17 +563,17 @@ struct drm_mm {
  * a family of cards. There will one drm_device for each card present
  * in this family
  */
-struct drm_device;
-
 struct drm_driver {
 	int (*load) (struct drm_device *, unsigned long flags);
 	int (*firstopen) (struct drm_device *);
 	int (*open) (struct drm_device *, struct drm_file *);
-	void (*preclose) (struct drm_device *, struct file * filp);
+	void (*preclose) (struct drm_device *, struct drm_file *file_priv);
 	void (*postclose) (struct drm_device *, struct drm_file *);
 	void (*lastclose) (struct drm_device *);
 	int (*unload) (struct drm_device *);
-	int (*dma_ioctl) (DRM_IOCTL_ARGS);
+	int (*suspend) (struct drm_device *, pm_message_t state);
+	int (*resume) (struct drm_device *);
+	int (*dma_ioctl) (struct drm_device *dev, void *data, struct drm_file *file_priv);
 	void (*dma_ready) (struct drm_device *);
 	int (*dma_quiescent) (struct drm_device *);
 	int (*context_ctor) (struct drm_device *dev, int context);
@@ -587,11 +604,12 @@ struct drm_driver {
 	void (*irq_preinstall) (struct drm_device *dev);
 	void (*irq_postinstall) (struct drm_device *dev);
 	void (*irq_uninstall) (struct drm_device *dev);
-	void (*reclaim_buffers) (struct drm_device *dev, struct file * filp);
+	void (*reclaim_buffers) (struct drm_device *dev,
+				 struct drm_file * file_priv);
 	void (*reclaim_buffers_locked) (struct drm_device *dev,
-					struct file *filp);
+					struct drm_file *file_priv);
 	void (*reclaim_buffers_idlelocked) (struct drm_device *dev,
-					struct file * filp);
+					    struct drm_file *file_priv);
 	unsigned long (*get_map_ofs) (struct drm_map * map);
 	unsigned long (*get_reg_ofs) (struct drm_device *dev);
 	void (*set_version) (struct drm_device *dev,
@@ -606,7 +624,7 @@ struct drm_driver {
 
 	u32 driver_features;
 	int dev_priv_size;
-	drm_ioctl_desc_t *ioctls;
+	struct drm_ioctl_desc *ioctls;
 	int num_ioctls;
 	struct file_operations fops;
 	struct pci_driver pci_driver;
@@ -630,6 +648,7 @@ struct drm_head {
  * may contain multiple heads.
  */
 struct drm_device {
+	struct device dev;		/**< Linux device */
 	char *unique;			/**< Unique identifier: e.g., busid */
 	int unique_len;			/**< Length of unique field */
 	char *devname;			/**< For /proc/interrupts */
@@ -738,7 +757,6 @@ struct drm_device {
 	struct pci_controller *hose;
 #endif
 	struct drm_sg_mem *sg;	/**< Scatter gather memory */
-	unsigned long *ctx_bitmap;	/**< context bitmap */
 	void *dev_private;		/**< device private data */
 	struct drm_sigdata sigdata;	   /**< For block_all_signals */
 	sigset_t sigmask;
@@ -835,6 +853,8 @@ extern int drm_release(struct inode *inode, struct file *filp);
 
 				/* Mapping support (drm_vm.h) */
 extern int drm_mmap(struct file *filp, struct vm_area_struct *vma);
+extern unsigned long drm_core_get_map_ofs(struct drm_map * map);
+extern unsigned long drm_core_get_reg_ofs(struct drm_device *dev);
 extern unsigned int drm_poll(struct file *filp, struct poll_table_struct *wait);
 
 				/* Memory management support (drm_memory.h) */
@@ -850,70 +870,70 @@ extern int drm_bind_agp(DRM_AGP_MEM * handle, unsigned int start);
 extern int drm_unbind_agp(DRM_AGP_MEM * handle);
 
 				/* Misc. IOCTL support (drm_ioctl.h) */
-extern int drm_irq_by_busid(struct inode *inode, struct file *filp,
-			    unsigned int cmd, unsigned long arg);
-extern int drm_getunique(struct inode *inode, struct file *filp,
-			 unsigned int cmd, unsigned long arg);
-extern int drm_setunique(struct inode *inode, struct file *filp,
-			 unsigned int cmd, unsigned long arg);
-extern int drm_getmap(struct inode *inode, struct file *filp,
-		      unsigned int cmd, unsigned long arg);
-extern int drm_getclient(struct inode *inode, struct file *filp,
-			 unsigned int cmd, unsigned long arg);
-extern int drm_getstats(struct inode *inode, struct file *filp,
-			unsigned int cmd, unsigned long arg);
-extern int drm_setversion(struct inode *inode, struct file *filp,
-			  unsigned int cmd, unsigned long arg);
-extern int drm_noop(struct inode *inode, struct file *filp,
-		    unsigned int cmd, unsigned long arg);
+extern int drm_irq_by_busid(struct drm_device *dev, void *data,
+			    struct drm_file *file_priv);
+extern int drm_getunique(struct drm_device *dev, void *data,
+			 struct drm_file *file_priv);
+extern int drm_setunique(struct drm_device *dev, void *data,
+			 struct drm_file *file_priv);
+extern int drm_getmap(struct drm_device *dev, void *data,
+		      struct drm_file *file_priv);
+extern int drm_getclient(struct drm_device *dev, void *data,
+			 struct drm_file *file_priv);
+extern int drm_getstats(struct drm_device *dev, void *data,
+			struct drm_file *file_priv);
+extern int drm_setversion(struct drm_device *dev, void *data,
+			  struct drm_file *file_priv);
+extern int drm_noop(struct drm_device *dev, void *data,
+		    struct drm_file *file_priv);
 
 				/* Context IOCTL support (drm_context.h) */
-extern int drm_resctx(struct inode *inode, struct file *filp,
-		      unsigned int cmd, unsigned long arg);
-extern int drm_addctx(struct inode *inode, struct file *filp,
-		      unsigned int cmd, unsigned long arg);
-extern int drm_modctx(struct inode *inode, struct file *filp,
-		      unsigned int cmd, unsigned long arg);
-extern int drm_getctx(struct inode *inode, struct file *filp,
-		      unsigned int cmd, unsigned long arg);
-extern int drm_switchctx(struct inode *inode, struct file *filp,
-			 unsigned int cmd, unsigned long arg);
-extern int drm_newctx(struct inode *inode, struct file *filp,
-		      unsigned int cmd, unsigned long arg);
-extern int drm_rmctx(struct inode *inode, struct file *filp,
-		     unsigned int cmd, unsigned long arg);
+extern int drm_resctx(struct drm_device *dev, void *data,
+		      struct drm_file *file_priv);
+extern int drm_addctx(struct drm_device *dev, void *data,
+		      struct drm_file *file_priv);
+extern int drm_modctx(struct drm_device *dev, void *data,
+		      struct drm_file *file_priv);
+extern int drm_getctx(struct drm_device *dev, void *data,
+		      struct drm_file *file_priv);
+extern int drm_switchctx(struct drm_device *dev, void *data,
+			 struct drm_file *file_priv);
+extern int drm_newctx(struct drm_device *dev, void *data,
+		      struct drm_file *file_priv);
+extern int drm_rmctx(struct drm_device *dev, void *data,
+		     struct drm_file *file_priv);
 
 extern int drm_ctxbitmap_init(struct drm_device *dev);
 extern void drm_ctxbitmap_cleanup(struct drm_device *dev);
 extern void drm_ctxbitmap_free(struct drm_device *dev, int ctx_handle);
 
-extern int drm_setsareactx(struct inode *inode, struct file *filp,
-			   unsigned int cmd, unsigned long arg);
-extern int drm_getsareactx(struct inode *inode, struct file *filp,
-			   unsigned int cmd, unsigned long arg);
+extern int drm_setsareactx(struct drm_device *dev, void *data,
+			   struct drm_file *file_priv);
+extern int drm_getsareactx(struct drm_device *dev, void *data,
+			   struct drm_file *file_priv);
 
 				/* Drawable IOCTL support (drm_drawable.h) */
-extern int drm_adddraw(struct inode *inode, struct file *filp,
-		       unsigned int cmd, unsigned long arg);
-extern int drm_rmdraw(struct inode *inode, struct file *filp,
-		      unsigned int cmd, unsigned long arg);
-extern int drm_update_drawable_info(struct inode *inode, struct file *filp,
-		       unsigned int cmd, unsigned long arg);
+extern int drm_adddraw(struct drm_device *dev, void *data,
+		       struct drm_file *file_priv);
+extern int drm_rmdraw(struct drm_device *dev, void *data,
+		      struct drm_file *file_priv);
+extern int drm_update_drawable_info(struct drm_device *dev, void *data,
+				    struct drm_file *file_priv);
 extern struct drm_drawable_info *drm_get_drawable_info(struct drm_device *dev,
 						  drm_drawable_t id);
 extern void drm_drawable_free_all(struct drm_device *dev);
 
 				/* Authentication IOCTL support (drm_auth.h) */
-extern int drm_getmagic(struct inode *inode, struct file *filp,
-			unsigned int cmd, unsigned long arg);
-extern int drm_authmagic(struct inode *inode, struct file *filp,
-			 unsigned int cmd, unsigned long arg);
+extern int drm_getmagic(struct drm_device *dev, void *data,
+			struct drm_file *file_priv);
+extern int drm_authmagic(struct drm_device *dev, void *data,
+			 struct drm_file *file_priv);
 
 				/* Locking IOCTL support (drm_lock.h) */
-extern int drm_lock(struct inode *inode, struct file *filp,
-		    unsigned int cmd, unsigned long arg);
-extern int drm_unlock(struct inode *inode, struct file *filp,
-		      unsigned int cmd, unsigned long arg);
+extern int drm_lock(struct drm_device *dev, void *data,
+		    struct drm_file *file_priv);
+extern int drm_unlock(struct drm_device *dev, void *data,
+		      struct drm_file *file_priv);
 extern int drm_lock_take(struct drm_lock_data *lock_data, unsigned int context);
 extern int drm_lock_free(struct drm_lock_data *lock_data, unsigned int context);
 extern void drm_idlelock_take(struct drm_lock_data *lock_data);
@@ -924,8 +944,7 @@ extern void drm_idlelock_release(struct drm_lock_data *lock_data);
  * DMA quiscent + idle. DMA quiescent usually requires the hardware lock.
  */
 
-extern int drm_i_have_hw_lock(struct file *filp);
-extern int drm_kernel_take_hw_lock(struct file *filp);
+extern int drm_i_have_hw_lock(struct drm_device *dev, struct drm_file *file_priv);
 
 				/* Buffer management support (drm_bufs.h) */
 extern int drm_addbufs_agp(struct drm_device *dev, struct drm_buf_desc * request);
@@ -933,24 +952,23 @@ extern int drm_addbufs_pci(struct drm_device *dev, struct drm_buf_desc * request
 extern int drm_addmap(struct drm_device *dev, unsigned int offset,
 		      unsigned int size, enum drm_map_type type,
 		      enum drm_map_flags flags, drm_local_map_t ** map_ptr);
-extern int drm_addmap_ioctl(struct inode *inode, struct file *filp,
-			    unsigned int cmd, unsigned long arg);
-extern int drm_rmmap(struct drm_device *dev, drm_local_map_t * map);
-extern int drm_rmmap_locked(struct drm_device *dev, drm_local_map_t * map);
-extern int drm_rmmap_ioctl(struct inode *inode, struct file *filp,
-			   unsigned int cmd, unsigned long arg);
-
+extern int drm_addmap_ioctl(struct drm_device *dev, void *data,
+			    struct drm_file *file_priv);
+extern int drm_rmmap(struct drm_device *dev, drm_local_map_t *map);
+extern int drm_rmmap_locked(struct drm_device *dev, drm_local_map_t *map);
+extern int drm_rmmap_ioctl(struct drm_device *dev, void *data,
+			   struct drm_file *file_priv);
+extern int drm_addbufs(struct drm_device *dev, void *data,
+		       struct drm_file *file_priv);
+extern int drm_infobufs(struct drm_device *dev, void *data,
+			struct drm_file *file_priv);
+extern int drm_markbufs(struct drm_device *dev, void *data,
+			struct drm_file *file_priv);
+extern int drm_freebufs(struct drm_device *dev, void *data,
+			struct drm_file *file_priv);
+extern int drm_mapbufs(struct drm_device *dev, void *data,
+		       struct drm_file *file_priv);
 extern int drm_order(unsigned long size);
-extern int drm_addbufs(struct inode *inode, struct file *filp,
-		       unsigned int cmd, unsigned long arg);
-extern int drm_infobufs(struct inode *inode, struct file *filp,
-			unsigned int cmd, unsigned long arg);
-extern int drm_markbufs(struct inode *inode, struct file *filp,
-			unsigned int cmd, unsigned long arg);
-extern int drm_freebufs(struct inode *inode, struct file *filp,
-			unsigned int cmd, unsigned long arg);
-extern int drm_mapbufs(struct inode *inode, struct file *filp,
-		       unsigned int cmd, unsigned long arg);
 extern unsigned long drm_get_resource_start(struct drm_device *dev,
 					    unsigned int resource);
 extern unsigned long drm_get_resource_len(struct drm_device *dev,
@@ -960,19 +978,20 @@ extern unsigned long drm_get_resource_len(struct drm_device *dev,
 extern int drm_dma_setup(struct drm_device *dev);
 extern void drm_dma_takedown(struct drm_device *dev);
 extern void drm_free_buffer(struct drm_device *dev, struct drm_buf * buf);
-extern void drm_core_reclaim_buffers(struct drm_device *dev, struct file *filp);
+extern void drm_core_reclaim_buffers(struct drm_device *dev,
+				     struct drm_file *filp);
 
 				/* IRQ support (drm_irq.h) */
-extern int drm_control(struct inode *inode, struct file *filp,
-		       unsigned int cmd, unsigned long arg);
+extern int drm_control(struct drm_device *dev, void *data,
+		       struct drm_file *file_priv);
 extern irqreturn_t drm_irq_handler(DRM_IRQ_ARGS);
 extern int drm_irq_uninstall(struct drm_device *dev);
 extern void drm_driver_irq_preinstall(struct drm_device *dev);
 extern void drm_driver_irq_postinstall(struct drm_device *dev);
 extern void drm_driver_irq_uninstall(struct drm_device *dev);
 
-extern int drm_wait_vblank(struct inode *inode, struct file *filp,
-			   unsigned int cmd, unsigned long arg);
+extern int drm_wait_vblank(struct drm_device *dev, void *data,
+			   struct drm_file *file_priv);
 extern int drm_vblank_wait(struct drm_device *dev, unsigned int *vbl_seq);
 extern void drm_vbl_send_signals(struct drm_device *dev);
 extern void drm_locked_tasklet(struct drm_device *dev, void(*func)(struct drm_device*));
@@ -980,31 +999,30 @@ extern void drm_locked_tasklet(struct drm_device *dev, void(*func)(struct drm_de
 				/* AGP/GART support (drm_agpsupport.h) */
 extern struct drm_agp_head *drm_agp_init(struct drm_device *dev);
 extern int drm_agp_acquire(struct drm_device *dev);
-extern int drm_agp_acquire_ioctl(struct inode *inode, struct file *filp,
-				 unsigned int cmd, unsigned long arg);
+extern int drm_agp_acquire_ioctl(struct drm_device *dev, void *data,
+				 struct drm_file *file_priv);
 extern int drm_agp_release(struct drm_device *dev);
-extern int drm_agp_release_ioctl(struct inode *inode, struct file *filp,
-				 unsigned int cmd, unsigned long arg);
+extern int drm_agp_release_ioctl(struct drm_device *dev, void *data,
+				 struct drm_file *file_priv);
 extern int drm_agp_enable(struct drm_device *dev, struct drm_agp_mode mode);
-extern int drm_agp_enable_ioctl(struct inode *inode, struct file *filp,
-				unsigned int cmd, unsigned long arg);
-extern int drm_agp_info(struct drm_device *dev, struct drm_agp_info * info);
-extern int drm_agp_info_ioctl(struct inode *inode, struct file *filp,
-			      unsigned int cmd, unsigned long arg);
+extern int drm_agp_enable_ioctl(struct drm_device *dev, void *data,
+				struct drm_file *file_priv);
+extern int drm_agp_info(struct drm_device *dev, struct drm_agp_info *info);
+extern int drm_agp_info_ioctl(struct drm_device *dev, void *data,
+			struct drm_file *file_priv);
 extern int drm_agp_alloc(struct drm_device *dev, struct drm_agp_buffer *request);
-extern int drm_agp_alloc_ioctl(struct inode *inode, struct file *filp,
-			 unsigned int cmd, unsigned long arg);
+extern int drm_agp_alloc_ioctl(struct drm_device *dev, void *data,
+			 struct drm_file *file_priv);
 extern int drm_agp_free(struct drm_device *dev, struct drm_agp_buffer *request);
-extern int drm_agp_free_ioctl(struct inode *inode, struct file *filp,
-			unsigned int cmd, unsigned long arg);
+extern int drm_agp_free_ioctl(struct drm_device *dev, void *data,
+			struct drm_file *file_priv);
 extern int drm_agp_unbind(struct drm_device *dev, struct drm_agp_binding *request);
-extern int drm_agp_unbind_ioctl(struct inode *inode, struct file *filp,
-			  unsigned int cmd, unsigned long arg);
+extern int drm_agp_unbind_ioctl(struct drm_device *dev, void *data,
+			  struct drm_file *file_priv);
 extern int drm_agp_bind(struct drm_device *dev, struct drm_agp_binding *request);
-extern int drm_agp_bind_ioctl(struct inode *inode, struct file *filp,
-			unsigned int cmd, unsigned long arg);
-extern DRM_AGP_MEM *drm_agp_allocate_memory(struct agp_bridge_data *bridge,
-					    size_t pages, u32 type);
+extern int drm_agp_bind_ioctl(struct drm_device *dev, void *data,
+			struct drm_file *file_priv);
+extern DRM_AGP_MEM *drm_agp_allocate_memory(struct agp_bridge_data *bridge, size_t pages, u32 type);
 extern int drm_agp_free_memory(DRM_AGP_MEM * handle);
 extern int drm_agp_bind_memory(DRM_AGP_MEM * handle, off_t start);
 extern int drm_agp_unbind_memory(DRM_AGP_MEM * handle);
@@ -1033,10 +1051,11 @@ extern int drm_proc_cleanup(int minor,
 
 				/* Scatter Gather Support (drm_scatter.h) */
 extern void drm_sg_cleanup(struct drm_sg_mem * entry);
-extern int drm_sg_alloc(struct inode *inode, struct file *filp,
-			unsigned int cmd, unsigned long arg);
-extern int drm_sg_free(struct inode *inode, struct file *filp,
-		       unsigned int cmd, unsigned long arg);
+extern int drm_sg_alloc_ioctl(struct drm_device *dev, void *data,
+			struct drm_file *file_priv);
+extern int drm_sg_alloc(struct drm_device *dev, struct drm_scatter_gather * request);
+extern int drm_sg_free(struct drm_device *dev, void *data,
+		       struct drm_file *file_priv);
 
 			       /* ATI PCIGART support (ati_pcigart.h) */
 extern int drm_ati_pcigart_init(struct drm_device *dev,
@@ -1050,11 +1069,11 @@ extern void __drm_pci_free(struct drm_device *dev, drm_dma_handle_t * dmah);
 extern void drm_pci_free(struct drm_device *dev, drm_dma_handle_t * dmah);
 
 			       /* sysfs support (drm_sysfs.c) */
+struct drm_sysfs_class;
 extern struct class *drm_sysfs_create(struct module *owner, char *name);
-extern void drm_sysfs_destroy(struct class *cs);
-extern struct class_device *drm_sysfs_device_add(struct class *cs,
-						 struct drm_head *head);
-extern void drm_sysfs_device_remove(struct class_device *class_dev);
+extern void drm_sysfs_destroy(void);
+extern int drm_sysfs_device_add(struct drm_device *dev, struct drm_head *head);
+extern void drm_sysfs_device_remove(struct drm_device *dev);
 
 /*
  * Basic memory manager support (drm_mm.c)
@@ -1062,7 +1081,7 @@ extern void drm_sysfs_device_remove(struct class_device *class_dev);
 extern struct drm_mm_node *drm_mm_get_block(struct drm_mm_node * parent,
 				       unsigned long size,
 				       unsigned alignment);
-void drm_mm_put_block(struct drm_mm_node * cur);
+extern void drm_mm_put_block(struct drm_mm_node * cur);
 extern struct drm_mm_node *drm_mm_search_free(const struct drm_mm *mm, unsigned long size,
 					 unsigned alignment, int best_match);
 extern int drm_mm_init(struct drm_mm *mm, unsigned long start, unsigned long size);
@@ -1132,9 +1151,6 @@ extern void *drm_calloc(size_t nmemb, size_t size, int area);
 #endif
 
 /*@}*/
-
-extern unsigned long drm_core_get_map_ofs(struct drm_map * map);
-extern unsigned long drm_core_get_reg_ofs(struct drm_device *dev);
 
 #endif				/* __KERNEL__ */
 #endif

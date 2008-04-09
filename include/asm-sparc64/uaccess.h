@@ -10,7 +10,6 @@
 #include <linux/compiler.h>
 #include <linux/sched.h>
 #include <linux/string.h>
-#include <asm/a.out.h>
 #include <asm/asi.h>
 #include <asm/system.h>
 #include <asm/spitfire.h>
@@ -123,7 +122,8 @@ __asm__ __volatile__(							\
 	".section .fixup,#alloc,#execinstr\n\t"				\
 	".align	4\n"							\
 "3:\n\t"								\
-	"b	2b\n\t"							\
+	"sethi	%%hi(2b), %0\n\t"					\
+	"jmpl	%0 + %%lo(2b), %%g0\n\t"				\
 	" mov	%3, %0\n\n\t"						\
 	".previous\n\t"							\
 	".section __ex_table,\"a\"\n\t"					\
@@ -165,8 +165,9 @@ __asm__ __volatile__(							\
 	".section .fixup,#alloc,#execinstr\n\t"				\
 	".align	4\n"							\
 "3:\n\t"								\
+	"sethi	%%hi(2b), %0\n\t"					\
 	"clr	%1\n\t"							\
-	"b	2b\n\t"							\
+	"jmpl	%0 + %%lo(2b), %%g0\n\t"				\
 	" mov	%3, %0\n\n\t"						\
 	".previous\n\t"							\
 	".section __ex_table,\"a\"\n\t"					\

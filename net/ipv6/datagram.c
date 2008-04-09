@@ -123,10 +123,10 @@ ipv4_connected:
 				goto out;
 			}
 			sk->sk_bound_dev_if = usin->sin6_scope_id;
-			if (!sk->sk_bound_dev_if &&
-			    (addr_type & IPV6_ADDR_MULTICAST))
-				fl.oif = np->mcast_oif;
 		}
+
+		if (!sk->sk_bound_dev_if && (addr_type & IPV6_ADDR_MULTICAST))
+			sk->sk_bound_dev_if = np->mcast_oif;
 
 		/* Connect to link-local address requires an interface */
 		if (!sk->sk_bound_dev_if) {
@@ -177,7 +177,7 @@ ipv4_connected:
 	if (final_p)
 		ipv6_addr_copy(&fl.fl6_dst, final_p);
 
-	if ((err = __xfrm_lookup(&dst, &fl, sk, 1)) < 0) {
+	if ((err = __xfrm_lookup(&dst, &fl, sk, XFRM_LOOKUP_WAIT)) < 0) {
 		if (err == -EREMOTE)
 			err = ip6_dst_blackhole(sk, &dst, &fl);
 		if (err < 0)
@@ -544,12 +544,13 @@ int datagram_send_ctl(struct msghdr *msg, struct flowi *fl,
 				if (!src_info->ipi6_ifindex)
 					return -EINVAL;
 				else {
-					dev = dev_get_by_index(src_info->ipi6_ifindex);
+					dev = dev_get_by_index(&init_net, src_info->ipi6_ifindex);
 					if (!dev)
 						return -ENODEV;
 				}
 			}
-			if (!ipv6_chk_addr(&src_info->ipi6_addr, dev, 0)) {
+			if (!ipv6_chk_addr(&init_net, &src_info->ipi6_addr,
+					   dev, 0)) {
 				if (dev)
 					dev_put(dev);
 				err = -EINVAL;

@@ -3,7 +3,7 @@
  *
  * Copyright (C) 2001-2004 Stelian Pop <stelian@popies.net>
  *
- * Copyright (C) 2001-2002 Alcôve <www.alcove.com>
+ * Copyright (C) 2001-2002 AlcÃ´ve <www.alcove.com>
  *
  * Copyright (C) 2000 Andrew Tridgell <tridge@valinux.com>
  *
@@ -1762,7 +1762,6 @@ static struct video_device meye_template = {
 	.owner		= THIS_MODULE,
 	.name		= "meye",
 	.type		= VID_TYPE_CAPTURE,
-	.hardware	= VID_HARDWARE_MEYE,
 	.fops		= &meye_fops,
 	.release	= video_device_release,
 	.minor		= -1,
@@ -2024,7 +2023,7 @@ static int __init meye_init(void)
 	if (gbufsize < 0 || gbufsize > MEYE_MAX_BUFSIZE)
 		gbufsize = MEYE_MAX_BUFSIZE;
 	gbufsize = PAGE_ALIGN(gbufsize);
-	printk(KERN_INFO "meye: using %d buffers with %dk (%dk total)"
+	printk(KERN_INFO "meye: using %d buffers with %dk (%dk total) "
 			 "for capture\n",
 			 gbuffers,
 			 gbufsize / 1024, gbuffers * gbufsize / 1024);

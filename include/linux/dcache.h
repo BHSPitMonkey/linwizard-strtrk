@@ -10,6 +10,7 @@
 #include <linux/rcupdate.h>
 
 struct nameidata;
+struct path;
 struct vfsmount;
 
 /*
@@ -178,6 +179,7 @@ d_iput:		no		no		no       yes
 #define DCACHE_INOTIFY_PARENT_WATCHED	0x0020 /* Parent inode is watched */
 
 extern spinlock_t dcache_lock;
+extern seqlock_t rename_lock;
 
 /**
  * d_drop - drop a dentry
@@ -299,8 +301,8 @@ extern int d_validate(struct dentry *, struct dentry *);
  */
 extern char *dynamic_dname(struct dentry *, char *, int, const char *, ...);
 
-extern char * d_path(struct dentry *, struct vfsmount *, char *, int);
-  
+extern char *d_path(struct path *, char *, int);
+
 /* Allocation counts.. */
 
 /**

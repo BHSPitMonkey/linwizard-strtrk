@@ -53,6 +53,8 @@ struct file_security_struct {
 	struct file *file;              /* back pointer to file object */
 	u32 sid;              /* SID of open file description */
 	u32 fown_sid;         /* SID of file owner (for SIGIO) */
+	u32 isid;             /* SID of inode at the time of file open */
+	u32 pseqno;           /* Policy seqno at the time of file open */
 };
 
 struct superblock_security_struct {
@@ -63,6 +65,7 @@ struct superblock_security_struct {
 	u32 mntpoint_sid;		/* SECURITY_FS_USE_MNTPOINT context for files */
 	unsigned int behavior;          /* labeling behavior */
 	unsigned char initialized;      /* initialization flag */
+	unsigned char flags;		/* which mount options were specified */
 	unsigned char proc;             /* proc fs */
 	struct mutex lock;
 	struct list_head isec_head;
@@ -93,17 +96,25 @@ struct bprm_security_struct {
 };
 
 struct netif_security_struct {
-	struct net_device *dev;		/* back pointer */
-	u32 if_sid;			/* SID for this interface */
-	u32 msg_sid;			/* default SID for messages received on this interface */
+	int ifindex;			/* device index */
+	u32 sid;			/* SID for this interface */
+};
+
+struct netnode_security_struct {
+	union {
+		__be32 ipv4;		/* IPv4 node address */
+		struct in6_addr ipv6;	/* IPv6 node address */
+	} addr;
+	u32 sid;			/* SID for this node */
+	u16 family;			/* address family */
 };
 
 struct sk_security_struct {
 	struct sock *sk;		/* back pointer to sk object */
 	u32 sid;			/* SID of this object */
 	u32 peer_sid;			/* SID of peer */
-#ifdef CONFIG_NETLABEL
 	u16 sclass;			/* sock security class */
+#ifdef CONFIG_NETLABEL
 	enum {				/* NetLabel state */
 		NLBL_UNSET = 0,
 		NLBL_REQUIRE,

@@ -2,7 +2,7 @@
  * \file drm_sarea.h
  * \brief SAREA definitions
  *
- * \author Michel Dänzer <michel@daenzer.net>
+ * \author Michel DÃ¤nzer <michel@daenzer.net>
  */
 
 /*
@@ -45,7 +45,7 @@
 #endif
 
 /** Maximum number of drawables in the SAREA */
-#define SAREA_MAX_DRAWABLES 		256
+#define SAREA_MAX_DRAWABLES		256
 
 #define SAREA_DRAWABLE_CLAIMED_ENTRY    0x80000000
 

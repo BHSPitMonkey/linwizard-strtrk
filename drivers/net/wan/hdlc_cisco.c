@@ -74,7 +74,7 @@ static inline struct cisco_state * state(hdlc_device *hdlc)
 
 
 static int cisco_hard_header(struct sk_buff *skb, struct net_device *dev,
-			     u16 type, void *daddr, void *saddr,
+			     u16 type, const void *daddr, const void *saddr,
 			     unsigned int len)
 {
 	struct hdlc_header *data;
@@ -250,7 +250,7 @@ static int cisco_rx(struct sk_buff *skb)
 	return NET_RX_DROP;
 
  rx_error:
-	dev_to_desc(dev)->stats.rx_errors++; /* Mark error */
+	dev_to_hdlc(dev)->stats.rx_errors++; /* Mark error */
 	dev_kfree_skb_any(skb);
 	return NET_RX_DROP;
 }
@@ -309,15 +309,18 @@ static void cisco_stop(struct net_device *dev)
 }
 
 
-
 static struct hdlc_proto proto = {
 	.start		= cisco_start,
 	.stop		= cisco_stop,
 	.type_trans	= cisco_type_trans,
 	.ioctl		= cisco_ioctl,
+	.netif_rx	= cisco_rx,
 	.module		= THIS_MODULE,
 };
- 
+
+static const struct header_ops cisco_header_ops = {
+	.create = cisco_hard_header,
+};
  
 static int cisco_ioctl(struct net_device *dev, struct ifreq *ifr)
 {
@@ -358,14 +361,14 @@ static int cisco_ioctl(struct net_device *dev, struct ifreq *ifr)
 		if (result)
 			return result;
 
-		result = attach_hdlc_protocol(dev, &proto, cisco_rx,
+		result = attach_hdlc_protocol(dev, &proto,
 					      sizeof(struct cisco_state));
 		if (result)
 			return result;
 
 		memcpy(&state(hdlc)->settings, &new_settings, size);
 		dev->hard_start_xmit = hdlc->xmit;
-		dev->hard_header = cisco_hard_header;
+		dev->header_ops = &cisco_header_ops;
 		dev->type = ARPHRD_CISCO;
 		netif_dormant_on(dev);
 		return 0;

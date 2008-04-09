@@ -41,6 +41,7 @@
 #include <asm/hardware/sa1111.h>
 
 #include <asm/arch/pxa-regs.h>
+#include <asm/arch/pxa2xx-regs.h>
 #include <asm/arch/lubbock.h>
 #include <asm/arch/udc.h>
 #include <asm/arch/irda.h>
@@ -126,7 +127,7 @@ static int lubbock_irq_resume(struct sys_device *dev)
 }
 
 static struct sysdev_class lubbock_irq_sysclass = {
-	set_kset_name("cpld_irq"),
+	.name = "cpld_irq",
 	.resume = lubbock_irq_resume,
 };
 
@@ -136,9 +137,13 @@ static struct sys_device lubbock_irq_device = {
 
 static int __init lubbock_irq_device_init(void)
 {
-	int ret = sysdev_class_register(&lubbock_irq_sysclass);
-	if (ret == 0)
-		ret = sysdev_register(&lubbock_irq_device);
+	int ret = -ENODEV;
+
+	if (machine_is_lubbock()) {
+		ret = sysdev_class_register(&lubbock_irq_sysclass);
+		if (ret == 0)
+			ret = sysdev_register(&lubbock_irq_device);
+	}
 	return ret;
 }
 
@@ -191,7 +196,7 @@ static struct resource smc91x_resources[] = {
 	[1] = {
 		.start	= LUBBOCK_ETH_IRQ,
 		.end	= LUBBOCK_ETH_IRQ,
-		.flags	= IORESOURCE_IRQ,
+		.flags	= IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHEDGE,
 	},
 	[2] = {
 		.name	= "smc91x-attrib",
@@ -206,30 +211,13 @@ static struct resource smc91x_resources[] = {
  * (to J5) and poking board registers (as done below).  Else it's only useful
  * for the temperature sensors.
  */
-static struct resource pxa_ssp_resources[] = {
-	[0] = {
-		.start	= __PREG(SSCR0_P(1)),
-		.end	= __PREG(SSCR0_P(1)) + 0x14,
-		.flags	= IORESOURCE_MEM,
-	},
-	[1] = {
-		.start	= IRQ_SSP,
-		.end	= IRQ_SSP,
-		.flags	= IORESOURCE_IRQ,
-	},
-};
-
 static struct pxa2xx_spi_master pxa_ssp_master_info = {
-	.ssp_type	= PXA25x_SSP,
-	.clock_enable	= CKEN_SSP,
 	.num_chipselect	= 0,
 };
 
 static struct platform_device pxa_ssp = {
 	.name		= "pxa2xx-spi",
 	.id		= 1,
-	.resource	= pxa_ssp_resources,
-	.num_resources	= ARRAY_SIZE(pxa_ssp_resources),
 	.dev = {
 		.platform_data	= &pxa_ssp_master_info,
 	},
@@ -511,6 +499,25 @@ static void __init lubbock_map_io(void)
 	pxa_gpio_mode(GPIO43_BTTXD_MD);
 	pxa_gpio_mode(GPIO44_BTCTS_MD);
 	pxa_gpio_mode(GPIO45_BTRTS_MD);
+
+	GPSR(GPIO48_nPOE) =
+		GPIO_bit(GPIO48_nPOE) |
+		GPIO_bit(GPIO49_nPWE) |
+		GPIO_bit(GPIO50_nPIOR) |
+		GPIO_bit(GPIO51_nPIOW) |
+		GPIO_bit(GPIO52_nPCE_1) |
+		GPIO_bit(GPIO53_nPCE_2);
+
+	pxa_gpio_mode(GPIO48_nPOE_MD);
+	pxa_gpio_mode(GPIO49_nPWE_MD);
+	pxa_gpio_mode(GPIO50_nPIOR_MD);
+	pxa_gpio_mode(GPIO51_nPIOW_MD);
+	pxa_gpio_mode(GPIO52_nPCE_1_MD);
+	pxa_gpio_mode(GPIO53_nPCE_2_MD);
+	pxa_gpio_mode(GPIO54_pSKTSEL_MD);
+	pxa_gpio_mode(GPIO55_nPREG_MD);
+	pxa_gpio_mode(GPIO56_nPWAIT_MD);
+	pxa_gpio_mode(GPIO57_nIOIS16_MD);
 
 	/* This is for the SMC chip select */
 	pxa_gpio_mode(GPIO79_nCS_3_MD);

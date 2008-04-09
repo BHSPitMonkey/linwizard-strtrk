@@ -1,6 +1,4 @@
 /*
- *  linux/drivers/ide/legacy/umc8672.c		Version 0.05	Jul 31, 1996
- *
  *  Copyright (C) 1995-1996  Linus Torvalds & author (see below)
  */
 
@@ -105,12 +103,11 @@ static void umc_set_speeds (u8 speeds[])
 		speeds[0], speeds[1], speeds[2], speeds[3]);
 }
 
-static void tune_umc (ide_drive_t *drive, u8 pio)
+static void umc_set_pio_mode(ide_drive_t *drive, const u8 pio)
 {
 	unsigned long flags;
 	ide_hwgroup_t *hwgroup = ide_hwifs[HWIF(drive)->index^1].hwgroup;
 
-	pio = ide_get_best_pio_mode(drive, pio, 4);
 	printk("%s: setting umc8672 to PIO mode%d (speed %d)\n",
 		drive->name, pio, pio_to_umc[pio]);
 	spin_lock_irqsave(&ide_lock, flags);
@@ -123,10 +120,16 @@ static void tune_umc (ide_drive_t *drive, u8 pio)
 	spin_unlock_irqrestore(&ide_lock, flags);
 }
 
+static const struct ide_port_info umc8672_port_info __initdata = {
+	.chipset		= ide_umc8672,
+	.host_flags		= IDE_HFLAG_NO_DMA | IDE_HFLAG_NO_AUTOTUNE,
+	.pio_mask		= ATA_PIO4,
+};
+
 static int __init umc8672_probe(void)
 {
 	unsigned long flags;
-	ide_hwif_t *hwif, *mate;
+	static u8 idx[4] = { 0, 1, 0xff, 0xff };
 
 	if (!request_region(0x108, 2, "umc8672")) {
 		printk(KERN_ERR "umc8672: ports 0x108-0x109 already in use.\n");
@@ -145,25 +148,10 @@ static int __init umc8672_probe(void)
 	umc_set_speeds (current_speeds);
 	local_irq_restore(flags);
 
-	hwif = &ide_hwifs[0];
-	mate = &ide_hwifs[1];
+	ide_hwifs[0].set_pio_mode = &umc_set_pio_mode;
+	ide_hwifs[1].set_pio_mode = &umc_set_pio_mode;
 
-	hwif->chipset = ide_umc8672;
-	hwif->pio_mask = ATA_PIO4;
-	hwif->tuneproc = &tune_umc;
-	hwif->mate = mate;
-
-	mate->chipset = ide_umc8672;
-	mate->pio_mask = ATA_PIO4;
-	mate->tuneproc = &tune_umc;
-	mate->mate = hwif;
-	mate->channel = 1;
-
-	probe_hwif_init(hwif);
-	probe_hwif_init(mate);
-
-	ide_proc_register_port(hwif);
-	ide_proc_register_port(mate);
+	ide_device_add(idx, &umc8672_port_info);
 
 	return 0;
 }
@@ -173,8 +161,7 @@ int probe_umc8672 = 0;
 module_param_named(probe, probe_umc8672, bool, 0);
 MODULE_PARM_DESC(probe, "probe for UMC8672 chipset");
 
-/* Can be called directly from ide.c. */
-int __init umc8672_init(void)
+static int __init umc8672_init(void)
 {
 	if (probe_umc8672 == 0)
 		goto out;
@@ -185,9 +172,7 @@ out:
 	return -ENODEV;;
 }
 
-#ifdef MODULE
 module_init(umc8672_init);
-#endif
 
 MODULE_AUTHOR("Wolfram Podien");
 MODULE_DESCRIPTION("Support for UMC 8672 IDE chipset");

@@ -21,7 +21,6 @@
  */
 
 #include <linux/module.h>
-#include <linux/moduleparam.h>
 #include <linux/string.h>
 #include <linux/jiffies.h>
 #include <media/ir-common.h>
@@ -259,7 +258,7 @@ int ir_decode_biphase(u32 *samples, int count, int low, int high)
  * saa7134 */
 
 /* decode raw bit pattern to RC5 code */
-u32 ir_rc5_decode(unsigned int code)
+static u32 ir_rc5_decode(unsigned int code)
 {
 	unsigned int org_code = code;
 	unsigned int pair;
@@ -372,7 +371,6 @@ EXPORT_SYMBOL_GPL(ir_dump_samples);
 EXPORT_SYMBOL_GPL(ir_decode_biphase);
 EXPORT_SYMBOL_GPL(ir_decode_pulsedistance);
 
-EXPORT_SYMBOL_GPL(ir_rc5_decode);
 EXPORT_SYMBOL_GPL(ir_rc5_timer_end);
 EXPORT_SYMBOL_GPL(ir_rc5_timer_keyup);
 

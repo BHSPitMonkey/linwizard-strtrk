@@ -16,11 +16,14 @@
 
 #include <linux/types.h>
 #include <linux/socket.h>
+#include <linux/in.h>
+#include <linux/in6.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
 
 #include <linux/sunrpc/clnt.h>
 #include <linux/sunrpc/sched.h>
+#include <linux/sunrpc/xprtsock.h>
 
 #ifdef RPC_DEBUG
 # define RPCDBG_FACILITY	RPCDBG_BIND
@@ -52,65 +55,6 @@ enum {
 #define RPCB_HIGHPROC_4		RPCBPROC_GETSTAT
 
 /*
- * r_addr
- *
- * Quoting RFC 3530, section 2.2:
- *
- * For TCP over IPv4 and for UDP over IPv4, the format of r_addr is the
- * US-ASCII string:
- *
- *	h1.h2.h3.h4.p1.p2
- *
- * The prefix, "h1.h2.h3.h4", is the standard textual form for
- * representing an IPv4 address, which is always four octets long.
- * Assuming big-endian ordering, h1, h2, h3, and h4, are respectively,
- * the first through fourth octets each converted to ASCII-decimal.
- * Assuming big-endian ordering, p1 and p2 are, respectively, the first
- * and second octets each converted to ASCII-decimal.  For example, if a
- * host, in big-endian order, has an address of 0x0A010307 and there is
- * a service listening on, in big endian order, port 0x020F (decimal
- * 527), then the complete universal address is "10.1.3.7.2.15".
- *
- * ...
- *
- * For TCP over IPv6 and for UDP over IPv6, the format of r_addr is the
- * US-ASCII string:
- *
- *	x1:x2:x3:x4:x5:x6:x7:x8.p1.p2
- *
- * The suffix "p1.p2" is the service port, and is computed the same way
- * as with universal addresses for TCP and UDP over IPv4.  The prefix,
- * "x1:x2:x3:x4:x5:x6:x7:x8", is the standard textual form for
- * representing an IPv6 address as defined in Section 2.2 of [RFC2373].
- * Additionally, the two alternative forms specified in Section 2.2 of
- * [RFC2373] are also acceptable.
- *
- * XXX: Currently this implementation does not explicitly convert the
- *      stored address to US-ASCII on non-ASCII systems.
- */
-#define RPCB_MAXADDRLEN		(128u)
-
-/*
- * r_netid
- *
- * Quoting RFC 3530, section 2.2:
- *
- * For TCP over IPv4 the value of r_netid is the string "tcp".  For UDP
- * over IPv4 the value of r_netid is the string "udp".
- *
- * ...
- *
- * For TCP over IPv6 the value of r_netid is the string "tcp6".  For UDP
- * over IPv6 the value of r_netid is the string "udp6".
- */
-#define RPCB_NETID_UDP	"\165\144\160"		/* "udp" */
-#define RPCB_NETID_TCP	"\164\143\160"		/* "tcp" */
-#define RPCB_NETID_UDP6	"\165\144\160\066"	/* "udp6" */
-#define RPCB_NETID_TCP6	"\164\143\160\066"	/* "tcp6" */
-
-#define RPCB_MAXNETIDLEN	(4u)
-
-/*
  * r_owner
  *
  * The "owner" is allowed to unset a service in the rpcbind database.
@@ -120,7 +64,7 @@ enum {
 #define RPCB_MAXOWNERLEN	sizeof(RPCB_OWNER_STRING)
 
 static void			rpcb_getport_done(struct rpc_task *, void *);
-extern struct rpc_program	rpcb_program;
+static struct rpc_program	rpcb_program;
 
 struct rpcbind_args {
 	struct rpc_xprt *	r_xprt;
@@ -129,31 +73,21 @@ struct rpcbind_args {
 	u32			r_vers;
 	u32			r_prot;
 	unsigned short		r_port;
-	char *			r_netid;
-	char			r_addr[RPCB_MAXADDRLEN];
-	char *			r_owner;
+	const char *		r_netid;
+	const char *		r_addr;
+	const char *		r_owner;
 };
 
 static struct rpc_procinfo rpcb_procedures2[];
 static struct rpc_procinfo rpcb_procedures3[];
 
-static struct rpcb_info {
+struct rpcb_info {
 	int			rpc_vers;
 	struct rpc_procinfo *	rpc_proc;
-} rpcb_next_version[];
+};
 
-static void rpcb_getport_prepare(struct rpc_task *task, void *calldata)
-{
-	struct rpcbind_args *map = calldata;
-	struct rpc_xprt *xprt = map->r_xprt;
-	struct rpc_message msg = {
-		.rpc_proc	= rpcb_next_version[xprt->bind_index].rpc_proc,
-		.rpc_argp	= map,
-		.rpc_resp	= &map->r_port,
-	};
-
-	rpc_call_setup(task, &msg, 0);
-}
+static struct rpcb_info rpcb_next_version[];
+static struct rpcb_info rpcb_next_version6[];
 
 static void rpcb_map_release(void *data)
 {
@@ -164,7 +98,6 @@ static void rpcb_map_release(void *data)
 }
 
 static const struct rpc_call_ops rpcb_getport_ops = {
-	.rpc_call_prepare	= rpcb_getport_prepare,
 	.rpc_call_done		= rpcb_getport_done,
 	.rpc_release		= rpcb_map_release,
 };
@@ -176,21 +109,31 @@ static void rpcb_wake_rpcbind_waiters(struct rpc_xprt *xprt, int status)
 }
 
 static struct rpc_clnt *rpcb_create(char *hostname, struct sockaddr *srvaddr,
-					int proto, int version, int privileged)
+				    size_t salen, int proto, u32 version,
+				    int privileged)
 {
 	struct rpc_create_args args = {
 		.protocol	= proto,
 		.address	= srvaddr,
-		.addrsize	= sizeof(struct sockaddr_in),
+		.addrsize	= salen,
 		.servername	= hostname,
 		.program	= &rpcb_program,
 		.version	= version,
 		.authflavor	= RPC_AUTH_UNIX,
-		.flags		= (RPC_CLNT_CREATE_NOPING |
-				   RPC_CLNT_CREATE_INTR),
+		.flags		= RPC_CLNT_CREATE_NOPING,
 	};
 
-	((struct sockaddr_in *)srvaddr)->sin_port = htons(RPCBIND_PORT);
+	switch (srvaddr->sa_family) {
+	case AF_INET:
+		((struct sockaddr_in *)srvaddr)->sin_port = htons(RPCBIND_PORT);
+		break;
+	case AF_INET6:
+		((struct sockaddr_in6 *)srvaddr)->sin6_port = htons(RPCBIND_PORT);
+		break;
+	default:
+		return NULL;
+	}
+
 	if (!privileged)
 		args.flags |= RPC_CLNT_CREATE_NONPRIVPORT;
 	return rpc_create(&args);
@@ -234,7 +177,7 @@ int rpcb_register(u32 prog, u32 vers, int prot, unsigned short port, int *okay)
 			prog, vers, prot, port);
 
 	rpcb_clnt = rpcb_create("localhost", (struct sockaddr *) &sin,
-					IPPROTO_UDP, 2, 1);
+				sizeof(sin), XPRT_TRANSPORT_UDP, 2, 1);
 	if (IS_ERR(rpcb_clnt))
 		return PTR_ERR(rpcb_clnt);
 
@@ -256,13 +199,15 @@ int rpcb_register(u32 prog, u32 vers, int prot, unsigned short port, int *okay)
  * @vers: RPC version number to bind
  * @prot: transport protocol to use to make this request
  *
+ * Return value is the requested advertised port number,
+ * or a negative errno value.
+ *
  * Called from outside the RPC client in a synchronous task context.
  * Uses default timeout parameters specified by underlying transport.
  *
- * XXX: Needs to support IPv6, and rpcbind versions 3 and 4
+ * XXX: Needs to support IPv6
  */
-int rpcb_getport_sync(struct sockaddr_in *sin, __u32 prog,
-		      __u32 vers, int prot)
+int rpcb_getport_sync(struct sockaddr_in *sin, u32 prog, u32 vers, int prot)
 {
 	struct rpcbind_args map = {
 		.r_prog		= prog,
@@ -276,14 +221,13 @@ int rpcb_getport_sync(struct sockaddr_in *sin, __u32 prog,
 		.rpc_resp	= &map.r_port,
 	};
 	struct rpc_clnt	*rpcb_clnt;
-	char hostname[40];
 	int status;
 
 	dprintk("RPC:       %s(" NIPQUAD_FMT ", %u, %u, %d)\n",
 		__FUNCTION__, NIPQUAD(sin->sin_addr.s_addr), prog, vers, prot);
 
-	sprintf(hostname, NIPQUAD_FMT, NIPQUAD(sin->sin_addr.s_addr));
-	rpcb_clnt = rpcb_create(hostname, (struct sockaddr *)sin, prot, 2, 0);
+	rpcb_clnt = rpcb_create(NULL, (struct sockaddr *)sin,
+				sizeof(*sin), prot, 2, 0);
 	if (IS_ERR(rpcb_clnt))
 		return PTR_ERR(rpcb_clnt);
 
@@ -299,6 +243,24 @@ int rpcb_getport_sync(struct sockaddr_in *sin, __u32 prog,
 }
 EXPORT_SYMBOL_GPL(rpcb_getport_sync);
 
+static struct rpc_task *rpcb_call_async(struct rpc_clnt *rpcb_clnt, struct rpcbind_args *map, int version)
+{
+	struct rpc_message msg = {
+		.rpc_proc = rpcb_next_version[version].rpc_proc,
+		.rpc_argp = map,
+		.rpc_resp = &map->r_port,
+	};
+	struct rpc_task_setup task_setup_data = {
+		.rpc_client = rpcb_clnt,
+		.rpc_message = &msg,
+		.callback_ops = &rpcb_getport_ops,
+		.callback_data = map,
+		.flags = RPC_TASK_ASYNC,
+	};
+
+	return rpc_run_task(&task_setup_data);
+}
+
 /**
  * rpcb_getport_async - obtain the port for a given RPC service on a given host
  * @task: task that is waiting for portmapper request
@@ -309,13 +271,16 @@ EXPORT_SYMBOL_GPL(rpcb_getport_sync);
 void rpcb_getport_async(struct rpc_task *task)
 {
 	struct rpc_clnt *clnt = task->tk_client;
-	int bind_version;
+	u32 bind_version;
 	struct rpc_xprt *xprt = task->tk_xprt;
 	struct rpc_clnt	*rpcb_clnt;
 	static struct rpcbind_args *map;
 	struct rpc_task	*child;
-	struct sockaddr addr;
+	struct sockaddr_storage addr;
+	struct sockaddr *sap = (struct sockaddr *)&addr;
+	size_t salen;
 	int status;
+	struct rpcb_info *info;
 
 	dprintk("RPC: %5u %s(%s, %u, %u, %d)\n",
 		task->tk_pid, __FUNCTION__,
@@ -325,7 +290,7 @@ void rpcb_getport_async(struct rpc_task *task)
 	BUG_ON(clnt->cl_parent != clnt);
 
 	if (xprt_test_and_set_binding(xprt)) {
-		status = -EACCES;		/* tell caller to check again */
+		status = -EAGAIN;	/* tell caller to check again */
 		dprintk("RPC: %5u %s: waiting for another binder\n",
 			task->tk_pid, __FUNCTION__);
 		goto bailout_nowake;
@@ -343,17 +308,42 @@ void rpcb_getport_async(struct rpc_task *task)
 		goto bailout_nofree;
 	}
 
-	if (rpcb_next_version[xprt->bind_index].rpc_proc == NULL) {
+	salen = rpc_peeraddr(clnt, sap, sizeof(addr));
+
+	/* Don't ever use rpcbind v2 for AF_INET6 requests */
+	switch (sap->sa_family) {
+	case AF_INET:
+		info = rpcb_next_version;
+		break;
+	case AF_INET6:
+		info = rpcb_next_version6;
+		break;
+	default:
+		status = -EAFNOSUPPORT;
+		dprintk("RPC: %5u %s: bad address family\n",
+				task->tk_pid, __FUNCTION__);
+		goto bailout_nofree;
+	}
+	if (info[xprt->bind_index].rpc_proc == NULL) {
 		xprt->bind_index = 0;
-		status = -EACCES;	/* tell caller to try again later */
+		status = -EPFNOSUPPORT;
 		dprintk("RPC: %5u %s: no more getport versions available\n",
 			task->tk_pid, __FUNCTION__);
 		goto bailout_nofree;
 	}
-	bind_version = rpcb_next_version[xprt->bind_index].rpc_vers;
+	bind_version = info[xprt->bind_index].rpc_vers;
 
 	dprintk("RPC: %5u %s: trying rpcbind version %u\n",
 		task->tk_pid, __FUNCTION__, bind_version);
+
+	rpcb_clnt = rpcb_create(clnt->cl_server, sap, salen, xprt->prot,
+				bind_version, 0);
+	if (IS_ERR(rpcb_clnt)) {
+		status = PTR_ERR(rpcb_clnt);
+		dprintk("RPC: %5u %s: rpcb_create failed, error %ld\n",
+			task->tk_pid, __FUNCTION__, PTR_ERR(rpcb_clnt));
+		goto bailout_nofree;
+	}
 
 	map = kzalloc(sizeof(struct rpcbind_args), GFP_ATOMIC);
 	if (!map) {
@@ -367,28 +357,17 @@ void rpcb_getport_async(struct rpc_task *task)
 	map->r_prot = xprt->prot;
 	map->r_port = 0;
 	map->r_xprt = xprt_get(xprt);
-	map->r_netid = (xprt->prot == IPPROTO_TCP) ? RPCB_NETID_TCP :
-						   RPCB_NETID_UDP;
-	memcpy(&map->r_addr, rpc_peeraddr2str(clnt, RPC_DISPLAY_ADDR),
-			sizeof(map->r_addr));
+	map->r_netid = rpc_peeraddr2str(clnt, RPC_DISPLAY_NETID);
+	map->r_addr = rpc_peeraddr2str(rpcb_clnt, RPC_DISPLAY_UNIVERSAL_ADDR);
 	map->r_owner = RPCB_OWNER_STRING;	/* ignored for GETADDR */
 
-	rpc_peeraddr(clnt, (void *)&addr, sizeof(addr));
-	rpcb_clnt = rpcb_create(clnt->cl_server, &addr, xprt->prot, bind_version, 0);
-	if (IS_ERR(rpcb_clnt)) {
-		status = PTR_ERR(rpcb_clnt);
-		dprintk("RPC: %5u %s: rpcb_create failed, error %ld\n",
-			task->tk_pid, __FUNCTION__, PTR_ERR(rpcb_clnt));
-		goto bailout;
-	}
-
-	child = rpc_run_task(rpcb_clnt, RPC_TASK_ASYNC, &rpcb_getport_ops, map);
+	child = rpcb_call_async(rpcb_clnt, map, xprt->bind_index);
 	rpc_release_client(rpcb_clnt);
 	if (IS_ERR(child)) {
 		status = -EIO;
 		dprintk("RPC: %5u %s: rpc_run_task failed\n",
 			task->tk_pid, __FUNCTION__);
-		goto bailout_nofree;
+		goto bailout;
 	}
 	rpc_put_task(child);
 
@@ -403,6 +382,7 @@ bailout_nofree:
 bailout_nowake:
 	task->tk_status = status;
 }
+EXPORT_SYMBOL_GPL(rpcb_getport_async);
 
 /*
  * Rpcbind child task calls this callback via tk_exit.
@@ -412,6 +392,10 @@ static void rpcb_getport_done(struct rpc_task *child, void *data)
 	struct rpcbind_args *map = data;
 	struct rpc_xprt *xprt = map->r_xprt;
 	int status = child->tk_status;
+
+	/* Garbage reply: retry with a lesser rpcbind version */
+	if (status == -EIO)
+		status = -EPROTONOSUPPORT;
 
 	/* rpcbind server doesn't support this rpcbind protocol version */
 	if (status == -EPROTONOSUPPORT)
@@ -490,16 +474,24 @@ static int rpcb_decode_getaddr(struct rpc_rqst *req, __be32 *p,
 			       unsigned short *portp)
 {
 	char *addr;
-	int addr_len, c, i, f, first, val;
+	u32 addr_len;
+	int c, i, f, first, val;
 
 	*portp = 0;
-	addr_len = (unsigned int) ntohl(*p++);
-	if (addr_len > RPCB_MAXADDRLEN)			/* sanity */
-		return -EINVAL;
+	addr_len = ntohl(*p++);
 
-	dprintk("RPC:       rpcb_decode_getaddr returned string: '%s'\n",
-			(char *) p);
+	/*
+	 * Simple sanity check.  The smallest possible universal
+	 * address is an IPv4 address string containing 11 bytes.
+	 */
+	if (addr_len < 11 || addr_len > RPCBIND_MAXUADDRLEN)
+		goto out_err;
 
+	/*
+	 * Start at the end and walk backwards until the first dot
+	 * is encountered.  When the second dot is found, we have
+	 * both parts of the port number.
+	 */
 	addr = (char *)p;
 	val = 0;
 	first = 1;
@@ -521,8 +513,19 @@ static int rpcb_decode_getaddr(struct rpc_rqst *req, __be32 *p,
 		}
 	}
 
+	/*
+	 * Simple sanity check.  If we never saw a dot in the reply,
+	 * then this was probably just garbage.
+	 */
+	if (first)
+		goto out_err;
+
 	dprintk("RPC:       rpcb_decode_getaddr port=%u\n", *portp);
 	return 0;
+
+out_err:
+	dprintk("RPC:       rpcbind server returned malformed reply\n");
+	return -EIO;
 }
 
 #define RPCB_program_sz		(1u)
@@ -531,8 +534,8 @@ static int rpcb_decode_getaddr(struct rpc_rqst *req, __be32 *p,
 #define RPCB_port_sz		(1u)
 #define RPCB_boolean_sz		(1u)
 
-#define RPCB_netid_sz		(1+XDR_QUADLEN(RPCB_MAXNETIDLEN))
-#define RPCB_addr_sz		(1+XDR_QUADLEN(RPCB_MAXADDRLEN))
+#define RPCB_netid_sz		(1+XDR_QUADLEN(RPCBIND_MAXNETIDLEN))
+#define RPCB_addr_sz		(1+XDR_QUADLEN(RPCBIND_MAXUADDRLEN))
 #define RPCB_ownerstring_sz	(1+XDR_QUADLEN(RPCB_MAXOWNERLEN))
 
 #define RPCB_mappingargs_sz	RPCB_program_sz+RPCB_version_sz+	\
@@ -593,6 +596,14 @@ static struct rpcb_info rpcb_next_version[] = {
 	{ 0, NULL },
 };
 
+static struct rpcb_info rpcb_next_version6[] = {
+#ifdef CONFIG_SUNRPC_BIND34
+	{ 4, &rpcb_procedures4[RPCBPROC_GETVERSADDR] },
+	{ 3, &rpcb_procedures3[RPCBPROC_GETADDR] },
+#endif
+	{ 0, NULL },
+};
+
 static struct rpc_version rpcb_version2 = {
 	.number		= 2,
 	.nrprocs	= RPCB_HIGHPROC_2,
@@ -621,7 +632,7 @@ static struct rpc_version *rpcb_version[] = {
 
 static struct rpc_stat rpcb_stats;
 
-struct rpc_program rpcb_program = {
+static struct rpc_program rpcb_program = {
 	.name		= "rpcbind",
 	.number		= RPCBIND_PROGRAM,
 	.nrvers		= ARRAY_SIZE(rpcb_version),

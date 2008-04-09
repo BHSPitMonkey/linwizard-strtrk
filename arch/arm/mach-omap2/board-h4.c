@@ -268,31 +268,6 @@ static struct platform_device *h4_devices[] __initdata = {
 	&h4_lcd_device,
 };
 
-/* 2420 Sysboot setup (2430 is different) */
-static u32 get_sysboot_value(void)
-{
-	return (omap_readl(OMAP2_CONTROL_STATUS) & 0xFFF);
-}
-
-/* FIXME: This function should be moved to some other file, gpmc.c? */
-
-/* H4-2420's always used muxed mode, H4-2422's always use non-muxed
- *
- * Note: OMAP-GIT doesn't correctly do is_cpu_omap2422 and is_cpu_omap2423
- *  correctly.  The macro needs to look at production_id not just hawkeye.
- */
-static u32 is_gpmc_muxed(void)
-{
-	u32 mux;
-	mux = get_sysboot_value();
-	if ((mux & 0xF) == 0xd)
-		return 1;	/* NAND config (could be either) */
-	if (mux & 0x2)		/* if mux'ed */
-		return 1;
-	else
-		return 0;
-}
-
 static inline void __init h4_init_debug(void)
 {
 	int eth_cs;
@@ -349,24 +324,11 @@ static inline void __init h4_init_debug(void)
 		gpmc_cs_free(eth_cs);
 }
 
-static void __init h4_init_flash(void)
-{
-	unsigned long base;
-
-	if (gpmc_cs_request(H4_FLASH_CS, SZ_64M, &base) < 0) {
-		printk("Can't request GPMC CS for flash\n");
-		return;
-	}
-	h4_flash_resource.start	= base;
-	h4_flash_resource.end	= base + SZ_64M - 1;
-}
-
 static void __init omap_h4_init_irq(void)
 {
 	omap2_init_common_hw();
 	omap_init_irq();
 	omap_gpio_init();
-	h4_init_flash();
 }
 
 static struct omap_uart_config h4_uart_config __initdata = {

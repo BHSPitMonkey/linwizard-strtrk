@@ -15,9 +15,6 @@
 
 XXXX add flash parts, rtc, ??
 
-build with: "dtc -f -I dts -O dtb -o kuroboxHG.dtb -V 16 kuroboxHG.dts"
-
-
  */
 
 / {
@@ -25,6 +22,12 @@ build with: "dtc -f -I dts -O dtb -o kuroboxHG.dtb -V 16 kuroboxHG.dts"
 	compatible = "linkstation";
 	#address-cells = <1>;
 	#size-cells = <1>;
+
+	aliases {
+		serial0 = &serial0;
+		serial1 = &serial1;
+		pci0 = &pci0;
+	};
 
 	cpus {
 		#address-cells = <1>;
@@ -50,7 +53,6 @@ build with: "dtc -f -I dts -O dtb -o kuroboxHG.dtb -V 16 kuroboxHG.dts"
 	soc10x { /* AFAICT need to make soc for 8245's uarts to be defined */
 		#address-cells = <1>;
 		#size-cells = <1>;
-		#interrupt-cells = <2>;
 		device_type = "soc";
 		compatible = "mpc10x";
 		store-gathering = <0>; /* 0 == off, !0 == on */
@@ -64,7 +66,7 @@ build with: "dtc -f -I dts -O dtb -o kuroboxHG.dtb -V 16 kuroboxHG.dts"
 		i2c@80003000 {
 			#address-cells = <1>;
 			#size-cells = <0>;
-			device_type = "i2c";
+			cell-index = <0>;
 			compatible = "fsl-i2c";
 			reg = <80003000 1000>;
 			interrupts = <5 2>;
@@ -72,22 +74,24 @@ build with: "dtc -f -I dts -O dtb -o kuroboxHG.dtb -V 16 kuroboxHG.dts"
 
 			rtc@32 {
 				device_type = "rtc";
-				compatible = "ricoh,rs5c372b";
+				compatible = "ricoh,rs5c372a";
 				reg = <32>;
 			};
 		};
 
-		serial@80004500 {
+		serial0: serial@80004500 {
+			cell-index = <0>;
 			device_type = "serial";
 			compatible = "ns16550";
 			reg = <80004500 8>;
 			clock-frequency = <7c044a8>;
 			current-speed = <2580>;
-			interrupts = <9 2>;
+			interrupts = <9 0>;
 			interrupt-parent = <&mpic>;
 		};
 
-		serial@80004600 {
+		serial1: serial@80004600 {
+			cell-index = <1>;
 			device_type = "serial";
 			compatible = "ns16550";
 			reg = <80004600 8>;
@@ -104,10 +108,9 @@ build with: "dtc -f -I dts -O dtb -o kuroboxHG.dtb -V 16 kuroboxHG.dts"
 			compatible = "chrp,open-pic";
 			interrupt-controller;
 			reg = <80040000 40000>;
-			built-in;
 		};
 
-		pci@fec00000 {
+		pci0: pci@fec00000 {
 			#address-cells = <3>;
 			#size-cells = <2>;
 			#interrupt-cells = <1>;

@@ -26,9 +26,56 @@
 				    * send and receive non-IEEE 802.1X frames
 				    */
 #define WLAN_STA_SHORT_PREAMBLE BIT(7)
+/* whether this is an AP that we are associated with as a client */
+#define WLAN_STA_ASSOC_AP BIT(8)
 #define WLAN_STA_WME BIT(9)
 #define WLAN_STA_WDS BIT(27)
 
+#define STA_TID_NUM 16
+#define ADDBA_RESP_INTERVAL HZ
+
+#define HT_AGG_STATE_INITIATOR_SHIFT	(4)
+
+#define HT_AGG_STATE_REQ_STOP_BA_MSK	BIT(3)
+
+#define HT_AGG_STATE_IDLE		(0x0)
+#define HT_AGG_STATE_OPERATIONAL	(0x7)
+
+/**
+ * struct tid_ampdu_rx - TID aggregation information (Rx).
+ *
+ * @state: TID's state in session state machine.
+ * @dialog_token: dialog token for aggregation session
+ * @ssn: Starting Sequence Number expected to be aggregated.
+ * @buf_size: buffer size for incoming A-MPDUs
+ * @timeout: reset timer value.
+ * @head_seq_num: head sequence number in reordering buffer.
+ * @stored_mpdu_num: number of MPDUs in reordering buffer
+ * @reorder_buf: buffer to reorder incoming aggregated MPDUs
+ * @session_timer: check if peer keeps Tx-ing on the TID (by timeout value)
+ */
+struct tid_ampdu_rx {
+	u8 state;
+	u8 dialog_token;
+	u16 ssn;
+	u16 buf_size;
+	u16 timeout;
+	u16 head_seq_num;
+	u16 stored_mpdu_num;
+	struct sk_buff **reorder_buf;
+	struct timer_list session_timer;
+};
+
+/**
+ * struct sta_ampdu_mlme - STA aggregation information.
+ *
+ * @tid_agg_info_rx: aggregation info for Rx per TID
+ * @ampdu_rx: for locking sections in aggregation Rx flow
+ */
+struct sta_ampdu_mlme {
+	struct tid_ampdu_rx tid_rx[STA_TID_NUM];
+	spinlock_t ampdu_rx;
+};
 
 struct sta_info {
 	struct kref kref;
@@ -90,28 +137,17 @@ struct sta_info {
 	int channel_use;
 	int channel_use_raw;
 
-	u8 antenna_sel_tx;
-	u8 antenna_sel_rx;
-
-
-	int key_idx_compression; /* key table index for compression and TX
-				  * filtering; used only if sta->key is not
-				  * set */
-
-#ifdef CONFIG_MAC80211_DEBUGFS
-	int debugfs_registered;
-#endif
-	int assoc_ap; /* whether this is an AP that we are
-		       * associated with as a client */
-
 #ifdef CONFIG_MAC80211_DEBUG_COUNTERS
 	unsigned int wme_rx_queue[NUM_RX_DATA_QUEUES];
 	unsigned int wme_tx_queue[NUM_RX_DATA_QUEUES];
 #endif /* CONFIG_MAC80211_DEBUG_COUNTERS */
 
-	int vlan_id;
-
 	u16 listen_interval;
+
+	struct ieee80211_ht_info ht_info; /* 802.11n HT capabilities
+					     of this STA */
+	struct sta_ampdu_mlme ampdu_mlme;
+	u8 timer_to_tid[STA_TID_NUM];	/* convert timer id to tid */
 
 #ifdef CONFIG_MAC80211_DEBUGFS
 	struct sta_info_debugfsdentries {
@@ -149,12 +185,18 @@ struct sta_info {
  */
 #define STA_INFO_CLEANUP_INTERVAL (10 * HZ)
 
+static inline void __sta_info_get(struct sta_info *sta)
+{
+	kref_get(&sta->kref);
+}
+
 struct sta_info * sta_info_get(struct ieee80211_local *local, u8 *addr);
 int sta_info_min_txrate_get(struct ieee80211_local *local);
 void sta_info_put(struct sta_info *sta);
 struct sta_info * sta_info_add(struct ieee80211_local *local,
 			       struct net_device *dev, u8 *addr, gfp_t gfp);
-void sta_info_free(struct sta_info *sta, int locked);
+void sta_info_remove(struct sta_info *sta);
+void sta_info_free(struct sta_info *sta);
 void sta_info_init(struct ieee80211_local *local);
 int sta_info_start(struct ieee80211_local *local);
 void sta_info_stop(struct ieee80211_local *local);

@@ -286,7 +286,7 @@ static ssize_t rtas_flash_read(struct file *file, char __user *buf,
 }
 
 /* constructor for flash_block_cache */
-void rtas_block_ctor(void *ptr, struct kmem_cache *cache, unsigned long flags)
+void rtas_block_ctor(struct kmem_cache *cache, void *ptr)
 {
 	memset(ptr, 0, RTAS_BLK_SIZE);
 }
@@ -356,7 +356,7 @@ static int rtas_excl_open(struct inode *inode, struct file *file)
 
 	/* Enforce exclusive open with use count of PDE */
 	spin_lock(&flash_file_open_lock);
-	if (atomic_read(&dp->count) > 1) {
+	if (atomic_read(&dp->count) > 2) {
 		spin_unlock(&flash_file_open_lock);
 		return -EBUSY;
 	}

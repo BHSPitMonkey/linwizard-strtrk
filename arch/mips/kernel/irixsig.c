@@ -24,8 +24,12 @@
 
 #define _BLOCKABLE (~(_S(SIGKILL) | _S(SIGSTOP)))
 
+#define _IRIX_NSIG		128
+#define _IRIX_NSIG_BPW		BITS_PER_LONG
+#define _IRIX_NSIG_WORDS	(_IRIX_NSIG / _IRIX_NSIG_BPW)
+
 typedef struct {
-	unsigned long sig[4];
+	unsigned long sig[_IRIX_NSIG_WORDS];
 } irix_sigset_t;
 
 struct sigctx_irix5 {
@@ -163,9 +167,9 @@ static inline int handle_signal(unsigned long sig, siginfo_t *info,
 		ret = setup_irix_frame(ka, regs, sig, oldset);
 
 	spin_lock_irq(&current->sighand->siglock);
-	sigorsets(&current->blocked,&current->blocked,&ka->sa.sa_mask);
+	sigorsets(&current->blocked, &current->blocked, &ka->sa.sa_mask);
 	if (!(ka->sa.sa_flags & SA_NODEFER))
-		sigaddset(&current->blocked,sig);
+		sigaddset(&current->blocked, sig);
 	recalc_sigpending();
 	spin_unlock_irq(&current->sighand->siglock);
 
@@ -426,6 +430,7 @@ asmlinkage int irix_sigprocmask(int how, irix_sigset_t __user *new,
 			break;
 
 		default:
+			spin_unlock_irq(&current->sighand->siglock);
 			return -EINVAL;
 		}
 		recalc_sigpending();
@@ -527,7 +532,7 @@ asmlinkage int irix_sigpoll_sys(unsigned long __user *set,
 
 		expire = schedule_timeout_interruptible(expire);
 
-		for (i=0; i<=4; i++)
+		for (i=0; i < _IRIX_NSIG_WORDS; i++)
 			tmp |= (current->pending.signal.sig[i] & kset.sig[i]);
 
 		if (tmp)
@@ -573,10 +578,11 @@ out:
 
 #define W_MASK      (W_EXITED | W_TRAPPED | W_STOPPED | W_CONT | W_NOHANG)
 
-asmlinkage int irix_waitsys(int type, int pid,
+asmlinkage int irix_waitsys(int type, int upid,
 	struct irix5_siginfo __user *info, int options,
 	struct rusage __user *ru)
 {
+	struct pid *pid = NULL;
 	int flag, retval;
 	DECLARE_WAITQUEUE(wait, current);
 	struct task_struct *tsk;
@@ -599,17 +605,19 @@ asmlinkage int irix_waitsys(int type, int pid,
 	if (type != IRIX_P_PID && type != IRIX_P_PGID && type != IRIX_P_ALL)
 		return -EINVAL;
 
+	if (type != IRIX_P_ALL)
+		pid = find_get_pid(upid);
 	add_wait_queue(&current->signal->wait_chldexit, &wait);
 repeat:
 	flag = 0;
 	current->state = TASK_INTERRUPTIBLE;
 	read_lock(&tasklist_lock);
 	tsk = current;
-	list_for_each(_p,&tsk->children) {
-		p = list_entry(_p,struct task_struct,sibling);
-		if ((type == IRIX_P_PID) && p->pid != pid)
+	list_for_each(_p, &tsk->children) {
+		p = list_entry(_p, struct task_struct, sibling);
+		if ((type == IRIX_P_PID) && task_pid(p) != pid)
 			continue;
-		if ((type == IRIX_P_PGID) && process_group(p) != pid)
+		if ((type == IRIX_P_PGID) && task_pgrp(p) != pid)
 			continue;
 		if ((p->exit_signal != SIGCHLD))
 			continue;
@@ -634,7 +642,7 @@ repeat:
 
 			retval = __put_user(SIGCHLD, &info->sig);
 			retval |= __put_user(0, &info->code);
-			retval |= __put_user(p->pid, &info->stuff.procinfo.pid);
+			retval |= __put_user(task_pid_vnr(p), &info->stuff.procinfo.pid);
 			retval |= __put_user((p->exit_code >> 8) & 0xff,
 			           &info->stuff.procinfo.procdata.child.status);
 			retval |= __put_user(p->utime, &info->stuff.procinfo.procdata.child.utime);
@@ -652,7 +660,7 @@ repeat:
 				getrusage(p, RUSAGE_BOTH, ru);
 			retval = __put_user(SIGCHLD, &info->sig);
 			retval |= __put_user(1, &info->code);      /* CLD_EXITED */
-			retval |= __put_user(p->pid, &info->stuff.procinfo.pid);
+			retval |= __put_user(task_pid_vnr(p), &info->stuff.procinfo.pid);
 			retval |= __put_user((p->exit_code >> 8) & 0xff,
 			           &info->stuff.procinfo.procdata.child.status);
 			retval |= __put_user(p->utime,
@@ -660,7 +668,7 @@ repeat:
 			retval |= __put_user(p->stime,
 			           &info->stuff.procinfo.procdata.child.stime);
 			if (retval)
-				return retval;
+				goto end_waitsys;
 
 			if (p->real_parent != p->parent) {
 				write_lock_irq(&tasklist_lock);
@@ -693,6 +701,7 @@ repeat:
 end_waitsys:
 	current->state = TASK_RUNNING;
 	remove_wait_queue(&current->signal->wait_chldexit, &wait);
+	put_pid(pid);
 
 	return retval;
 }

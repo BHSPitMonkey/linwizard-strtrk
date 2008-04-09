@@ -169,7 +169,7 @@ static int ipath_get_base_info(struct file *fp,
 		kinfo->spi_piocnt = dd->ipath_pbufsport;
 		kinfo->spi_piobufbase = (u64) pd->port_piobufs;
 		kinfo->__spi_uregbase = (u64) dd->ipath_uregbase +
-			dd->ipath_palign * pd->port_port;
+			dd->ipath_ureg_align * pd->port_port;
 	} else if (master) {
 		kinfo->spi_piocnt = (dd->ipath_pbufsport / subport_cnt) +
 				    (dd->ipath_pbufsport % subport_cnt);
@@ -186,7 +186,7 @@ static int ipath_get_base_info(struct file *fp,
 	}
 	if (shared) {
 		kinfo->spi_port_uregbase = (u64) dd->ipath_uregbase +
-			dd->ipath_palign * pd->port_port;
+			dd->ipath_ureg_align * pd->port_port;
 		kinfo->spi_port_rcvegrbuf = kinfo->spi_rcv_egrbufs;
 		kinfo->spi_port_rcvhdr_base = kinfo->spi_rcvhdr_base;
 		kinfo->spi_port_rcvhdr_tailaddr = kinfo->spi_rcvhdr_tailaddr;
@@ -538,6 +538,9 @@ static int ipath_tid_free(struct ipath_portdata *pd, unsigned subport,
 			continue;
 		cnt++;
 		if (dd->ipath_pageshadow[porttid + tid]) {
+			struct page *p;
+			p = dd->ipath_pageshadow[porttid + tid];
+			dd->ipath_pageshadow[porttid + tid] = NULL;
 			ipath_cdbg(VERBOSE, "PID %u freeing TID %u\n",
 				   pd->port_pid, tid);
 			dd->ipath_f_put_tid(dd, &tidbase[tid],
@@ -546,9 +549,7 @@ static int ipath_tid_free(struct ipath_portdata *pd, unsigned subport,
 			pci_unmap_page(dd->pcidev,
 				dd->ipath_physshadow[porttid + tid],
 				PAGE_SIZE, PCI_DMA_FROMDEVICE);
-			ipath_release_user_pages(
-				&dd->ipath_pageshadow[porttid + tid], 1);
-			dd->ipath_pageshadow[porttid + tid] = NULL;
+			ipath_release_user_pages(&p, 1);
 			ipath_stats.sps_pageunlocks++;
 		} else
 			ipath_dbg("Unused tid %u, ignoring\n", tid);
@@ -741,11 +742,12 @@ static int ipath_manage_rcvq(struct ipath_portdata *pd, unsigned subport,
 		 * updated and correct itself, even in the face of software
 		 * bugs.
 		 */
-		*(volatile u64 *)pd->port_rcvhdrtail_kvaddr = 0;
-		set_bit(INFINIPATH_R_PORTENABLE_SHIFT + pd->port_port,
+		if (pd->port_rcvhdrtail_kvaddr)
+			ipath_clear_rcvhdrtail(pd);
+		set_bit(dd->ipath_r_portenable_shift + pd->port_port,
 			&dd->ipath_rcvctrl);
 	} else
-		clear_bit(INFINIPATH_R_PORTENABLE_SHIFT + pd->port_port,
+		clear_bit(dd->ipath_r_portenable_shift + pd->port_port,
 			  &dd->ipath_rcvctrl);
 	ipath_write_kreg(dd, dd->ipath_kregs->kr_rcvctrl,
 			 dd->ipath_rcvctrl);
@@ -880,7 +882,7 @@ static int ipath_create_user_egr(struct ipath_portdata *pd)
 
 	egrcnt = dd->ipath_rcvegrcnt;
 	/* TID number offset for this port */
-	egroff = pd->port_port * egrcnt;
+	egroff = (pd->port_port - 1) * egrcnt + dd->ipath_p0_rcvegrcnt;
 	egrsize = dd->ipath_rcvegrbufsize;
 	ipath_cdbg(VERBOSE, "Allocating %d egr buffers, at egrtid "
 		   "offset %x, egrsize %u\n", egrcnt, egroff, egrsize);
@@ -1048,11 +1050,6 @@ static int mmap_piobufs(struct vm_area_struct *vma,
 
 	phys = dd->ipath_physaddr + piobufs;
 
-	/*
-	 * Don't mark this as non-cached, or we don't get the
-	 * write combining behavior we want on the PIO buffers!
-	 */
-
 #if defined(__powerpc__)
 	/* There isn't a generic way to specify writethrough mappings */
 	pgprot_val(vma->vm_page_prot) |= _PAGE_NO_CACHE;
@@ -1119,33 +1116,24 @@ bail:
 }
 
 /*
- * ipath_file_vma_nopage - handle a VMA page fault.
+ * ipath_file_vma_fault - handle a VMA page fault.
  */
-static struct page *ipath_file_vma_nopage(struct vm_area_struct *vma,
-					  unsigned long address, int *type)
+static int ipath_file_vma_fault(struct vm_area_struct *vma,
+					struct vm_fault *vmf)
 {
-	unsigned long offset = address - vma->vm_start;
-	struct page *page = NOPAGE_SIGBUS;
-	void *pageptr;
+	struct page *page;
 
-	/*
-	 * Convert the vmalloc address into a struct page.
-	 */
-	pageptr = (void *)(offset + (vma->vm_pgoff << PAGE_SHIFT));
-	page = vmalloc_to_page(pageptr);
+	page = vmalloc_to_page((void *)(vmf->pgoff << PAGE_SHIFT));
 	if (!page)
-		goto out;
-
-	/* Increment the reference count. */
+		return VM_FAULT_SIGBUS;
 	get_page(page);
-	if (type)
-		*type = VM_FAULT_MINOR;
-out:
-	return page;
+	vmf->page = page;
+
+	return 0;
 }
 
 static struct vm_operations_struct ipath_file_vm_ops = {
-	.nopage = ipath_file_vma_nopage,
+	.fault = ipath_file_vma_fault,
 };
 
 static int mmap_kvaddr(struct vm_area_struct *vma, u64 pgaddr,
@@ -1283,7 +1271,7 @@ static int ipath_mmap(struct file *fp, struct vm_area_struct *vma)
 		goto bail;
 	}
 
-	ureg = dd->ipath_uregbase + dd->ipath_palign * pd->port_port;
+	ureg = dd->ipath_uregbase + dd->ipath_ureg_align * pd->port_port;
 	if (!pd->port_subport_cnt) {
 		/* port is not shared */
 		piocnt = dd->ipath_pbufsport;
@@ -1341,6 +1329,19 @@ bail:
 	return ret;
 }
 
+static unsigned ipath_poll_hdrqfull(struct ipath_portdata *pd)
+{
+	unsigned pollflag = 0;
+
+	if ((pd->poll_type & IPATH_POLL_TYPE_OVERFLOW) &&
+	    pd->port_hdrqfull != pd->port_hdrqfull_poll) {
+		pollflag |= POLLIN | POLLRDNORM;
+		pd->port_hdrqfull_poll = pd->port_hdrqfull;
+	}
+
+	return pollflag;
+}
+
 static unsigned int ipath_poll_urgent(struct ipath_portdata *pd,
 				      struct file *fp,
 				      struct poll_table_struct *pt)
@@ -1350,22 +1351,20 @@ static unsigned int ipath_poll_urgent(struct ipath_portdata *pd,
 
 	dd = pd->port_dd;
 
-	if (test_bit(IPATH_PORT_WAITING_OVERFLOW, &pd->int_flag)) {
-		pollflag |= POLLERR;
-		clear_bit(IPATH_PORT_WAITING_OVERFLOW, &pd->int_flag);
-	}
+	/* variable access in ipath_poll_hdrqfull() needs this */
+	rmb();
+	pollflag = ipath_poll_hdrqfull(pd);
 
-	if (test_bit(IPATH_PORT_WAITING_URG, &pd->int_flag)) {
+	if (pd->port_urgent != pd->port_urgent_poll) {
 		pollflag |= POLLIN | POLLRDNORM;
-		clear_bit(IPATH_PORT_WAITING_URG, &pd->int_flag);
+		pd->port_urgent_poll = pd->port_urgent;
 	}
 
 	if (!pollflag) {
+		/* this saves a spin_lock/unlock in interrupt handler... */
 		set_bit(IPATH_PORT_WAITING_URG, &pd->port_flag);
-		if (pd->poll_type & IPATH_POLL_TYPE_OVERFLOW)
-			set_bit(IPATH_PORT_WAITING_OVERFLOW,
-				&pd->port_flag);
-
+		/* flush waiting flag so don't miss an event... */
+		wmb();
 		poll_wait(fp, &pd->port_wait, pt);
 	}
 
@@ -1376,33 +1375,32 @@ static unsigned int ipath_poll_next(struct ipath_portdata *pd,
 				    struct file *fp,
 				    struct poll_table_struct *pt)
 {
-	u32 head, tail;
+	u32 head;
+	u32 tail;
 	unsigned pollflag = 0;
 	struct ipath_devdata *dd;
 
 	dd = pd->port_dd;
 
+	/* variable access in ipath_poll_hdrqfull() needs this */
+	rmb();
+	pollflag = ipath_poll_hdrqfull(pd);
+
 	head = ipath_read_ureg32(dd, ur_rcvhdrhead, pd->port_port);
-	tail = *(volatile u64 *)pd->port_rcvhdrtail_kvaddr;
+	if (pd->port_rcvhdrtail_kvaddr)
+		tail = ipath_get_rcvhdrtail(pd);
+	else
+		tail = ipath_read_ureg32(dd, ur_rcvhdrtail, pd->port_port);
 
-	if (test_bit(IPATH_PORT_WAITING_OVERFLOW, &pd->int_flag)) {
-		pollflag |= POLLERR;
-		clear_bit(IPATH_PORT_WAITING_OVERFLOW, &pd->int_flag);
-	}
-
-	if (tail != head ||
-	    test_bit(IPATH_PORT_WAITING_RCV, &pd->int_flag)) {
+	if (head != tail)
 		pollflag |= POLLIN | POLLRDNORM;
-		clear_bit(IPATH_PORT_WAITING_RCV, &pd->int_flag);
-	}
-
-	if (!pollflag) {
+	else {
+		/* this saves a spin_lock/unlock in interrupt handler */
 		set_bit(IPATH_PORT_WAITING_RCV, &pd->port_flag);
-		if (pd->poll_type & IPATH_POLL_TYPE_OVERFLOW)
-			set_bit(IPATH_PORT_WAITING_OVERFLOW,
-				&pd->port_flag);
+		/* flush waiting flag so we don't miss an event */
+		wmb();
 
-		set_bit(pd->port_port + INFINIPATH_R_INTRAVAIL_SHIFT,
+		set_bit(pd->port_port + dd->ipath_r_intravail_shift,
 			&dd->ipath_rcvctrl);
 
 		ipath_write_kreg(dd, dd->ipath_kregs->kr_rcvctrl,
@@ -1782,6 +1780,7 @@ static int find_shared_port(struct file *fp,
 			}
 			port_fp(fp) = pd;
 			subport_fp(fp) = pd->port_cnt++;
+			pd->port_subpid[subport_fp(fp)] = current->pid;
 			tidcursor_fp(fp) = 0;
 			pd->active_slaves |= 1 << subport_fp(fp);
 			ipath_cdbg(PROC,
@@ -1912,11 +1911,16 @@ static int ipath_do_user_init(struct file *fp,
 	 */
 	head32 = ipath_read_ureg32(dd, ur_rcvegrindextail, pd->port_port);
 	ipath_write_ureg(dd, ur_rcvegrindexhead, head32, pd->port_port);
-	dd->ipath_lastegrheads[pd->port_port] = -1;
-	dd->ipath_lastrcvhdrqtails[pd->port_port] = -1;
+	pd->port_lastrcvhdrqtail = -1;
 	ipath_cdbg(VERBOSE, "Wrote port%d egrhead %x from tail regs\n",
 		pd->port_port, head32);
 	pd->port_tidcursor = 0;	/* start at beginning after open */
+
+	/* initialize poll variables... */
+	pd->port_urgent = 0;
+	pd->port_urgent_poll = 0;
+	pd->port_hdrqfull_poll = pd->port_hdrqfull;
+
 	/*
 	 * now enable the port; the tail registers will be written to memory
 	 * by the chip as soon as it sees the write to
@@ -1927,11 +1931,13 @@ static int ipath_do_user_init(struct file *fp,
 	 * We explictly set the in-memory copy to 0 beforehand, so we don't
 	 * have to wait to be sure the DMA update has happened.
 	 */
-	*(volatile u64 *)pd->port_rcvhdrtail_kvaddr = 0ULL;
-	set_bit(INFINIPATH_R_PORTENABLE_SHIFT + pd->port_port,
+	if (pd->port_rcvhdrtail_kvaddr)
+		ipath_clear_rcvhdrtail(pd);
+	set_bit(dd->ipath_r_portenable_shift + pd->port_port,
 		&dd->ipath_rcvctrl);
 	ipath_write_kreg(dd, dd->ipath_kregs->kr_rcvctrl,
-			 dd->ipath_rcvctrl & ~INFINIPATH_R_TAILUPD);
+			dd->ipath_rcvctrl &
+			~(1ULL << dd->ipath_r_tailupd_shift));
 	ipath_write_kreg(dd, dd->ipath_kregs->kr_rcvctrl,
 			 dd->ipath_rcvctrl);
 	/* Notify any waiting slaves */
@@ -2008,6 +2014,7 @@ static int ipath_close(struct inode *in, struct file *fp)
 		 * the slave(s) don't wait for receive data forever.
 		 */
 		pd->active_slaves &= ~(1 << fd->subport);
+		pd->port_subpid[fd->subport] = 0;
 		mutex_unlock(&ipath_mutex);
 		goto bail;
 	}
@@ -2039,8 +2046,10 @@ static int ipath_close(struct inode *in, struct file *fp)
 
 	if (dd->ipath_kregbase) {
 		int i;
-		/* atomically clear receive enable port. */
-		clear_bit(INFINIPATH_R_PORTENABLE_SHIFT + port,
+		/* atomically clear receive enable port and intr avail. */
+		clear_bit(dd->ipath_r_portenable_shift + port,
+			  &dd->ipath_rcvctrl);
+		clear_bit(pd->port_port + dd->ipath_r_intravail_shift,
 			  &dd->ipath_rcvctrl);
 		ipath_write_kreg( dd, dd->ipath_kregs->kr_rcvctrl,
 			dd->ipath_rcvctrl);
@@ -2133,11 +2142,15 @@ static int ipath_get_slave_info(struct ipath_portdata *pd,
 
 static int ipath_force_pio_avail_update(struct ipath_devdata *dd)
 {
-	u64 reg = dd->ipath_sendctrl;
+	unsigned long flags;
 
-	clear_bit(IPATH_S_PIOBUFAVAILUPD, &reg);
-	ipath_write_kreg(dd, dd->ipath_kregs->kr_sendctrl, reg);
+	spin_lock_irqsave(&dd->ipath_sendctrl_lock, flags);
+	ipath_write_kreg(dd, dd->ipath_kregs->kr_sendctrl,
+		dd->ipath_sendctrl & ~INFINIPATH_S_PIOBUFAVAILUPD);
+	ipath_read_kreg64(dd, dd->ipath_kregs->kr_scratch);
 	ipath_write_kreg(dd, dd->ipath_kregs->kr_sendctrl, dd->ipath_sendctrl);
+	ipath_read_kreg64(dd, dd->ipath_kregs->kr_scratch);
+	spin_unlock_irqrestore(&dd->ipath_sendctrl_lock, flags);
 
 	return 0;
 }
@@ -2210,6 +2223,11 @@ static ssize_t ipath_write(struct file *fp, const char __user *data,
 		copy = sizeof(cmd.cmd.poll_type);
 		dest = &cmd.cmd.poll_type;
 		src = &ucmd->cmd.poll_type;
+		break;
+	case IPATH_CMD_ARMLAUNCH_CTRL:
+		copy = sizeof(cmd.cmd.armlaunch_ctrl);
+		dest = &cmd.cmd.armlaunch_ctrl;
+		src = &ucmd->cmd.armlaunch_ctrl;
 		break;
 	default:
 		ret = -EINVAL;
@@ -2285,6 +2303,12 @@ static ssize_t ipath_write(struct file *fp, const char __user *data,
 		break;
 	case IPATH_CMD_POLL_TYPE:
 		pd->poll_type = cmd.cmd.poll_type;
+		break;
+	case IPATH_CMD_ARMLAUNCH_CTRL:
+		if (cmd.cmd.armlaunch_ctrl)
+			ipath_enable_armlaunch(pd->port_dd);
+		else
+			ipath_disable_armlaunch(pd->port_dd);
 		break;
 	}
 

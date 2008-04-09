@@ -8,6 +8,10 @@
  * for more details.
  */
 
+#ifndef _LINUX_BITOPS_H
+#error only <linux/bitops.h> can be included directly
+#endif
+
 #include <linux/compiler.h>
 
 /*
@@ -314,6 +318,7 @@ static inline int fls(int x)
 #include <asm-generic/bitops/fls64.h>
 #include <asm-generic/bitops/sched.h>
 #include <asm-generic/bitops/hweight.h>
+#include <asm-generic/bitops/lock.h>
 
 /* Bitmap functions for the minix filesystem */
 
@@ -405,6 +410,8 @@ static inline int ext2_find_next_zero_bit(const void *vaddr, unsigned size,
 	res = ext2_find_first_zero_bit (p, size - 32 * (p - addr));
 	return (p - addr) * 32 + res;
 }
+#define ext2_find_next_bit(addr, size, off) \
+	generic_find_next_le_bit((unsigned long *)(addr), (size), (off))
 
 #endif /* __KERNEL__ */
 

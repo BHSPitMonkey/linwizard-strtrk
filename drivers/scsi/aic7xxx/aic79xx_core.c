@@ -7175,7 +7175,7 @@ ahd_pause_and_flushwork(struct ahd_softc *ahd)
 	ahd->flags &= ~AHD_ALL_INTERRUPTS;
 }
 
-#if 0
+#ifdef CONFIG_PM
 int
 ahd_suspend(struct ahd_softc *ahd)
 {
@@ -7189,19 +7189,16 @@ ahd_suspend(struct ahd_softc *ahd)
 	ahd_shutdown(ahd);
 	return (0);
 }
-#endif  /*  0  */
 
-#if 0
-int
+void
 ahd_resume(struct ahd_softc *ahd)
 {
 
 	ahd_reset(ahd, /*reinit*/TRUE);
 	ahd_intr_enable(ahd, TRUE); 
 	ahd_restart(ahd);
-	return (0);
 }
-#endif  /*  0  */
+#endif
 
 /************************** Busy Target Table *********************************/
 /*

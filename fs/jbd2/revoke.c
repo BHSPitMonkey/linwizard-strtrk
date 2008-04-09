@@ -171,14 +171,16 @@ int __init jbd2_journal_init_revoke_caches(void)
 {
 	jbd2_revoke_record_cache = kmem_cache_create("jbd2_revoke_record",
 					   sizeof(struct jbd2_revoke_record_s),
-					   0, SLAB_HWCACHE_ALIGN, NULL);
-	if (jbd2_revoke_record_cache == 0)
+					   0,
+					   SLAB_HWCACHE_ALIGN|SLAB_TEMPORARY,
+					   NULL);
+	if (!jbd2_revoke_record_cache)
 		return -ENOMEM;
 
 	jbd2_revoke_table_cache = kmem_cache_create("jbd2_revoke_table",
 					   sizeof(struct jbd2_revoke_table_s),
-					   0, 0, NULL);
-	if (jbd2_revoke_table_cache == 0) {
+					   0, SLAB_TEMPORARY, NULL);
+	if (!jbd2_revoke_table_cache) {
 		kmem_cache_destroy(jbd2_revoke_record_cache);
 		jbd2_revoke_record_cache = NULL;
 		return -ENOMEM;
@@ -352,7 +354,7 @@ int jbd2_journal_revoke(handle_t *handle, unsigned long long blocknr,
 		if (bh)
 			BUFFER_TRACE(bh, "found on hash");
 	}
-#ifdef JBD_EXPENSIVE_CHECKING
+#ifdef JBD2_EXPENSIVE_CHECKING
 	else {
 		struct buffer_head *bh2;
 
@@ -453,7 +455,7 @@ int jbd2_journal_cancel_revoke(handle_t *handle, struct journal_head *jh)
 		}
 	}
 
-#ifdef JBD_EXPENSIVE_CHECKING
+#ifdef JBD2_EXPENSIVE_CHECKING
 	/* There better not be one left behind by now! */
 	record = find_revoke_record(journal, bh->b_blocknr);
 	J_ASSERT_JH(jh, record == NULL);

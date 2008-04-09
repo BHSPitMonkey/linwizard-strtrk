@@ -288,45 +288,6 @@ xfs_qm_rele_quotafs_ref(
 }
 
 /*
- * This is called at mount time from xfs_mountfs to initialize the quotainfo
- * structure and start the global quota manager (xfs_Gqm) if it hasn't done
- * so already.	Note that the superblock has not been read in yet.
- */
-void
-xfs_qm_mount_quotainit(
-	xfs_mount_t	*mp,
-	uint		flags)
-{
-	/*
-	 * User, projects or group quotas has to be on.
-	 */
-	ASSERT(flags & (XFSMNT_UQUOTA | XFSMNT_PQUOTA | XFSMNT_GQUOTA));
-
-	/*
-	 * Initialize the flags in the mount structure. From this point
-	 * onwards we look at m_qflags to figure out if quotas's ON/OFF, etc.
-	 * Note that we enforce nothing if accounting is off.
-	 * ie.	XFSMNT_*QUOTA must be ON for XFSMNT_*QUOTAENF.
-	 * It isn't necessary to take the quotaoff lock to do this; this is
-	 * called from mount.
-	 */
-	if (flags & XFSMNT_UQUOTA) {
-		mp->m_qflags |= (XFS_UQUOTA_ACCT | XFS_UQUOTA_ACTIVE);
-		if (flags & XFSMNT_UQUOTAENF)
-			mp->m_qflags |= XFS_UQUOTA_ENFD;
-	}
-	if (flags & XFSMNT_GQUOTA) {
-		mp->m_qflags |= (XFS_GQUOTA_ACCT | XFS_GQUOTA_ACTIVE);
-		if (flags & XFSMNT_GQUOTAENF)
-			mp->m_qflags |= XFS_OQUOTA_ENFD;
-	} else if (flags & XFSMNT_PQUOTA) {
-		mp->m_qflags |= (XFS_PQUOTA_ACCT | XFS_PQUOTA_ACTIVE);
-		if (flags & XFSMNT_PQUOTAENF)
-			mp->m_qflags |= XFS_OQUOTA_ENFD;
-	}
-}
-
-/*
  * Just destroy the quotainfo structure.
  */
 void
@@ -349,7 +310,6 @@ xfs_qm_mount_quotas(
 	xfs_mount_t	*mp,
 	int		mfsi_flags)
 {
-	unsigned long	s;
 	int		error = 0;
 	uint		sbf;
 
@@ -406,13 +366,13 @@ xfs_qm_mount_quotas(
 
  write_changes:
 	/*
-	 * We actually don't have to acquire the SB_LOCK at all.
+	 * We actually don't have to acquire the m_sb_lock at all.
 	 * This can only be called from mount, and that's single threaded. XXX
 	 */
-	s = XFS_SB_LOCK(mp);
+	spin_lock(&mp->m_sb_lock);
 	sbf = mp->m_sb.sb_qflags;
 	mp->m_sb.sb_qflags = mp->m_qflags & XFS_MOUNT_QUOTA_ALL;
-	XFS_SB_UNLOCK(mp, s);
+	spin_unlock(&mp->m_sb_lock);
 
 	if (sbf != (mp->m_qflags & XFS_MOUNT_QUOTA_ALL)) {
 		if (xfs_qm_write_sb_changes(mp, XFS_SB_QFLAGS)) {
@@ -1039,13 +999,16 @@ xfs_qm_dqdetach(
 int
 xfs_qm_sync(
 	xfs_mount_t	*mp,
-	short		flags)
+	int		flags)
 {
 	int		recl, restarts;
 	xfs_dquot_t	*dqp;
 	uint		flush_flags;
 	boolean_t	nowait;
 	int		error;
+
+	if (! XFS_IS_QUOTA_ON(mp))
+		return 0;
 
 	restarts = 0;
 	/*
@@ -1175,7 +1138,7 @@ xfs_qm_init_quotainfo(
 		return error;
 	}
 
-	spinlock_init(&qinf->qi_pinlock, "xfs_qinf_pin");
+	spin_lock_init(&qinf->qi_pinlock);
 	xfs_qm_list_init(&qinf->qi_dqlist, "mpdqlist", 0);
 	qinf->qi_dqreclaims = 0;
 
@@ -1406,7 +1369,6 @@ xfs_qm_qino_alloc(
 {
 	xfs_trans_t	*tp;
 	int		error;
-	unsigned long	s;
 	int		committed;
 
 	tp = xfs_trans_alloc(mp, XFS_TRANS_QM_QINOCREATE);
@@ -1438,7 +1400,7 @@ xfs_qm_qino_alloc(
 	 * sbfields arg may contain fields other than *QUOTINO;
 	 * VERSIONNUM for example.
 	 */
-	s = XFS_SB_LOCK(mp);
+	spin_lock(&mp->m_sb_lock);
 	if (flags & XFS_QMOPT_SBVERSION) {
 #if defined(DEBUG) && defined(XFS_LOUD_RECOVERY)
 		unsigned oldv = mp->m_sb.sb_versionnum;
@@ -1465,7 +1427,7 @@ xfs_qm_qino_alloc(
 		mp->m_sb.sb_uquotino = (*ip)->i_ino;
 	else
 		mp->m_sb.sb_gquotino = (*ip)->i_ino;
-	XFS_SB_UNLOCK(mp, s);
+	spin_unlock(&mp->m_sb_lock);
 	xfs_mod_sb(tp, sbfields);
 
 	if ((error = xfs_trans_commit(tp, XFS_TRANS_RELEASE_LOG_RES))) {
@@ -1686,14 +1648,14 @@ xfs_qm_quotacheck_dqadjust(
 	 * Adjust the inode count and the block count to reflect this inode's
 	 * resource usage.
 	 */
-	be64_add(&dqp->q_core.d_icount, 1);
+	be64_add_cpu(&dqp->q_core.d_icount, 1);
 	dqp->q_res_icount++;
 	if (nblks) {
-		be64_add(&dqp->q_core.d_bcount, nblks);
+		be64_add_cpu(&dqp->q_core.d_bcount, nblks);
 		dqp->q_res_bcount += nblks;
 	}
 	if (rtblks) {
-		be64_add(&dqp->q_core.d_rtbcount, rtblks);
+		be64_add_cpu(&dqp->q_core.d_rtbcount, rtblks);
 		dqp->q_res_rtbcount += rtblks;
 	}
 
@@ -1717,7 +1679,6 @@ xfs_qm_get_rtblks(
 	xfs_extnum_t	idx;			/* extent record index */
 	xfs_ifork_t	*ifp;			/* inode fork pointer */
 	xfs_extnum_t	nextents;		/* number of extent entries */
-	xfs_bmbt_rec_t	*ep;			/* pointer to an extent entry */
 	int		error;
 
 	ASSERT(XFS_IS_REALTIME_INODE(ip));
@@ -1728,10 +1689,8 @@ xfs_qm_get_rtblks(
 	}
 	rtblks = 0;
 	nextents = ifp->if_bytes / (uint)sizeof(xfs_bmbt_rec_t);
-	for (idx = 0; idx < nextents; idx++) {
-		ep = xfs_iext_get_ext(ifp, idx);
-		rtblks += xfs_bmbt_get_blockcount(ep);
-	}
+	for (idx = 0; idx < nextents; idx++)
+		rtblks += xfs_bmbt_get_blockcount(xfs_iext_get_ext(ifp, idx));
 	*O_rtblks = (xfs_qcnt_t)rtblks;
 	return 0;
 }
@@ -2459,8 +2418,7 @@ xfs_qm_vop_dqalloc(
 	lockflags = XFS_ILOCK_EXCL;
 	xfs_ilock(ip, lockflags);
 
-	if ((flags & XFS_QMOPT_INHERIT) &&
-	    XFS_INHERIT_GID(ip, XFS_MTOVFS(mp)))
+	if ((flags & XFS_QMOPT_INHERIT) && XFS_INHERIT_GID(ip))
 		gid = ip->i_d.di_gid;
 
 	/*

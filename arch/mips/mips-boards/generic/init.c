@@ -166,15 +166,15 @@ static void __init console_config(void)
 			bits = '8';
 		if (flow == '\0')
 			flow = 'r';
-		sprintf (console_string, " console=ttyS0,%d%c%c%c", baud, parity, bits, flow);
-		strcat (prom_getcmdline(), console_string);
+		sprintf(console_string, " console=ttyS0,%d%c%c%c", baud, parity, bits, flow);
+		strcat(prom_getcmdline(), console_string);
 		pr_info("Config serial console:%s\n", console_string);
 	}
 }
 #endif
 
 #ifdef CONFIG_KGDB
-void __init kgdb_config (void)
+void __init kgdb_config(void)
 {
 	extern int (*generic_putDebugChar)(char);
 	extern char (*generic_getDebugChar)(void);
@@ -218,7 +218,7 @@ void __init kgdb_config (void)
 		{
 			char *s;
 			for (s = "Please connect GDB to this port\r\n"; *s; )
-				generic_putDebugChar (*s++);
+				generic_putDebugChar(*s++);
 		}
 
 		/* Breakpoint is invoked after interrupts are initialised */
@@ -226,7 +226,7 @@ void __init kgdb_config (void)
 }
 #endif
 
-void __init mips_nmi_setup (void)
+void __init mips_nmi_setup(void)
 {
 	void *base;
 	extern char except_vec_nmi;
@@ -238,7 +238,7 @@ void __init mips_nmi_setup (void)
 	flush_icache_range((unsigned long)base, (unsigned long)base + 0x80);
 }
 
-void __init mips_ejtag_setup (void)
+void __init mips_ejtag_setup(void)
 {
 	void *base;
 	extern char except_vec_ejtag_debug;
@@ -249,6 +249,8 @@ void __init mips_ejtag_setup (void)
 	memcpy(base, &except_vec_ejtag_debug, 0x80);
 	flush_icache_range((unsigned long)base, (unsigned long)base + 0x80);
 }
+
+extern struct plat_smp_ops msmtc_smp_ops;
 
 void __init prom_init(void)
 {
@@ -415,5 +417,11 @@ void __init prom_init(void)
 	prom_meminit();
 #ifdef CONFIG_SERIAL_8250_CONSOLE
 	console_config();
+#endif
+#ifdef CONFIG_MIPS_MT_SMP
+	register_smp_ops(&vsmp_smp_ops);
+#endif
+#ifdef CONFIG_MIPS_MT_SMTC
+	register_smp_ops(&msmtc_smp_ops);
 #endif
 }

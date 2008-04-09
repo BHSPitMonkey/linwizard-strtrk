@@ -12,10 +12,12 @@
 *.s
 *.ko
 *.so
+*.so.dbg
 *.mod.c
 *.i
 *.lst
 *.symtypes
+*.order
 
 #
 # Top-level generic files
@@ -26,6 +28,7 @@ vmlinux*
 !vmlinux.lds.S
 System.map
 Module.symvers
+!.gitignore
 
 #
 # Generated include files
@@ -50,3 +53,5 @@ cscope.*
 
 *.orig
 *.rej
+*~
+\#*#

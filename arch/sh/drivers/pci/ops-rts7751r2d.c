@@ -19,10 +19,10 @@
 #include "pci-sh4.h"
 
 static u8 rts7751r2d_irq_tab[] __initdata = {
-	IRQ_PCISLOT1,
-	IRQ_PCISLOT2,
-	IRQ_PCMCIA,
-	IRQ_PCIETH,
+	IRQ_PCI_INTA,
+	IRQ_PCI_INTB,
+	IRQ_PCI_INTC,
+	IRQ_PCI_INTD,
 };
 
 int __init pcibios_map_platform_irq(struct pci_dev *pdev, u8 slot, u8 pin)
@@ -33,7 +33,7 @@ int __init pcibios_map_platform_irq(struct pci_dev *pdev, u8 slot, u8 pin)
 static struct resource sh7751_io_resource = {
 	.name	= "SH7751_IO",
 	.start	= 0x4000,
-	.end	= 0x4000 + SH7751_PCI_IO_SIZE - 1,
+	.end	= SH7751_PCI_IO_SIZE - 1,
 	.flags	= IORESOURCE_IO
 };
 
@@ -68,6 +68,7 @@ static struct sh4_pci_address_map sh7751_pci_map = {
 
 int __init pcibios_init_platform(void)
 {
+	__set_io_port_base(SH7751_PCI_IO_BASE);
 	return sh7751_pcic_init(&sh7751_pci_map);
 }
 

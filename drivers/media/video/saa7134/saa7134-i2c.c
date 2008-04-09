@@ -23,7 +23,6 @@
 #include <linux/init.h>
 #include <linux/list.h>
 #include <linux/module.h>
-#include <linux/moduleparam.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/delay.h>
@@ -315,12 +314,6 @@ static int saa7134_i2c_xfer(struct i2c_adapter *i2c_adap,
 
 /* ----------------------------------------------------------- */
 
-static int algo_control(struct i2c_adapter *adapter,
-			unsigned int cmd, unsigned long arg)
-{
-	return 0;
-}
-
 static u32 functionality(struct i2c_adapter *adap)
 {
 	return I2C_FUNC_SMBUS_EMUL;
@@ -330,7 +323,6 @@ static int attach_inform(struct i2c_client *client)
 {
 	struct saa7134_dev *dev = client->adapter->algo_data;
 	int tuner = dev->tuner_type;
-	int conf  = dev->tda9887_conf;
 	struct tuner_setup tun_setup;
 
 	d1printk( "%s i2c attach [addr=0x%x,client=%s]\n",
@@ -342,6 +334,7 @@ static int attach_inform(struct i2c_client *client)
 		case 0x7a:
 		case 0x47:
 		case 0x71:
+		case 0x2d:
 		{
 			struct IR_i2c *ir = i2c_get_clientdata(client);
 			d1printk("%s i2c IR detected (%s).\n",
@@ -367,7 +360,6 @@ static int attach_inform(struct i2c_client *client)
 	}
 
 	if (tuner != UNSET) {
-
 		tun_setup.type = tuner;
 		tun_setup.addr = saa7134_boards[dev->board].tuner_addr;
 		tun_setup.config = saa7134_boards[dev->board].tuner_config;
@@ -379,16 +371,24 @@ static int attach_inform(struct i2c_client *client)
 
 			client->driver->command(client,TUNER_SET_TYPE_ADDR, &tun_setup);
 		}
+
+		if (tuner == TUNER_TDA9887) {
+			struct v4l2_priv_tun_config tda9887_cfg;
+
+			tda9887_cfg.tuner = TUNER_TDA9887;
+			tda9887_cfg.priv = &dev->tda9887_conf;
+
+			client->driver->command(client, TUNER_SET_CONFIG,
+						&tda9887_cfg);
+		}
 	}
 
-	client->driver->command(client, TDA9887_SET_CONFIG, &conf);
 
 	return 0;
 }
 
 static struct i2c_algorithm saa7134_algo = {
 	.master_xfer   = saa7134_i2c_xfer,
-	.algo_control  = algo_control,
 	.functionality = functionality,
 };
 
@@ -440,6 +440,7 @@ static char *i2c_devs[128] = {
 	[ 0xa0 >> 1 ] = "eeprom",
 	[ 0xc0 >> 1 ] = "tuner (analog)",
 	[ 0x86 >> 1 ] = "tda9887",
+	[ 0x5a >> 1 ] = "remote control",
 };
 
 static void do_i2c_scan(char *name, struct i2c_client *c)

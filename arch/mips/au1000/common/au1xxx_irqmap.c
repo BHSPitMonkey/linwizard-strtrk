@@ -25,27 +25,10 @@
  *  with this program; if not, write  to the Free Software Foundation, Inc.,
  *  675 Mass Ave, Cambridge, MA 02139, USA.
  */
-#include <linux/errno.h>
 #include <linux/init.h>
-#include <linux/irq.h>
-#include <linux/kernel_stat.h>
-#include <linux/module.h>
-#include <linux/signal.h>
-#include <linux/sched.h>
-#include <linux/types.h>
-#include <linux/interrupt.h>
-#include <linux/ioport.h>
-#include <linux/timex.h>
-#include <linux/slab.h>
-#include <linux/random.h>
-#include <linux/delay.h>
-#include <linux/bitops.h>
+#include <linux/kernel.h>
 
-#include <asm/bootinfo.h>
-#include <asm/io.h>
-#include <asm/mipsregs.h>
-#include <asm/system.h>
-#include <asm/mach-au1x00/au1000.h>
+#include <au1000.h>
 
 /* The IC0 interrupt table.  This is processor, rather than
  * board dependent, so no reason to keep this info in the board
@@ -54,7 +37,7 @@
  * Careful if you change match 2 request!
  * The interrupt handler is called directly from the low level dispatch code.
  */
-au1xxx_irq_map_t __initdata au1xxx_ic0_map[] = {
+struct au1xxx_irqmap __initdata au1xxx_ic0_map[] = {
 
 #if defined(CONFIG_SOC_AU1000)
 	{ AU1000_UART0_INT, INTC_INT_HIGH_LEVEL, 0},

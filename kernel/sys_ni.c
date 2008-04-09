@@ -4,6 +4,10 @@
 
 #include <asm/unistd.h>
 
+/*  we can't #include <linux/syscalls.h> here,
+    but tell gcc to not warn with -Wmissing-prototypes  */
+asmlinkage long sys_ni_syscall(void);
+
 /*
  * Non-implemented system calls get redirected here.
  */
@@ -36,10 +40,14 @@ cond_syscall(sys_recvfrom);
 cond_syscall(sys_recv);
 cond_syscall(sys_socket);
 cond_syscall(sys_setsockopt);
+cond_syscall(compat_sys_setsockopt);
 cond_syscall(sys_getsockopt);
+cond_syscall(compat_sys_getsockopt);
 cond_syscall(sys_shutdown);
 cond_syscall(sys_sendmsg);
+cond_syscall(compat_sys_sendmsg);
 cond_syscall(sys_recvmsg);
+cond_syscall(compat_sys_recvmsg);
 cond_syscall(sys_socketcall);
 cond_syscall(sys_futex);
 cond_syscall(compat_sys_futex);
@@ -123,6 +131,7 @@ cond_syscall(sys32_sysctl);
 cond_syscall(ppc_rtas);
 cond_syscall(sys_spu_run);
 cond_syscall(sys_spu_create);
+cond_syscall(sys_subpage_prot);
 
 /* mmu depending weak syscall entries */
 cond_syscall(sys_mprotect);
@@ -145,7 +154,10 @@ cond_syscall(sys_ioprio_get);
 
 /* New file descriptors */
 cond_syscall(sys_signalfd);
-cond_syscall(sys_timerfd);
 cond_syscall(compat_sys_signalfd);
-cond_syscall(compat_sys_timerfd);
+cond_syscall(sys_timerfd_create);
+cond_syscall(sys_timerfd_settime);
+cond_syscall(sys_timerfd_gettime);
+cond_syscall(compat_sys_timerfd_settime);
+cond_syscall(compat_sys_timerfd_gettime);
 cond_syscall(sys_eventfd);

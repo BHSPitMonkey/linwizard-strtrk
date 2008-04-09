@@ -36,6 +36,15 @@
 
 #define DEBUG_SCATTER 0
 
+static inline void *drm_vmalloc_dma(unsigned long size)
+{
+#if defined(__powerpc__) && defined(CONFIG_NOT_COHERENT_CACHE)
+	return __vmalloc(size, GFP_KERNEL, PAGE_KERNEL | _PAGE_NO_CACHE);
+#else
+	return vmalloc_32(size);
+#endif
+}
+
 void drm_sg_cleanup(struct drm_sg_mem * entry)
 {
 	struct page *page;
@@ -62,17 +71,12 @@ void drm_sg_cleanup(struct drm_sg_mem * entry)
 # define ScatterHandle(x) (unsigned int)(x)
 #endif
 
-int drm_sg_alloc(struct inode *inode, struct file *filp,
-		 unsigned int cmd, unsigned long arg)
+int drm_sg_alloc(struct drm_device *dev, struct drm_scatter_gather * request)
 {
-	struct drm_file *priv = filp->private_data;
-	struct drm_device *dev = priv->head->dev;
-	struct drm_scatter_gather __user *argp = (void __user *)arg;
-	struct drm_scatter_gather request;
 	struct drm_sg_mem *entry;
 	unsigned long pages, i, j;
 
-	DRM_DEBUG("%s\n", __FUNCTION__);
+	DRM_DEBUG("\n");
 
 	if (!drm_core_check_feature(dev, DRIVER_SG))
 		return -EINVAL;
@@ -80,17 +84,13 @@ int drm_sg_alloc(struct inode *inode, struct file *filp,
 	if (dev->sg)
 		return -EINVAL;
 
-	if (copy_from_user(&request, argp, sizeof(request)))
-		return -EFAULT;
-
 	entry = drm_alloc(sizeof(*entry), DRM_MEM_SGLISTS);
 	if (!entry)
 		return -ENOMEM;
 
 	memset(entry, 0, sizeof(*entry));
-
-	pages = (request.size + PAGE_SIZE - 1) / PAGE_SIZE;
-	DRM_DEBUG("sg size=%ld pages=%ld\n", request.size, pages);
+	pages = (request->size + PAGE_SIZE - 1) / PAGE_SIZE;
+	DRM_DEBUG("size=%ld pages=%ld\n", request->size, pages);
 
 	entry->pages = pages;
 	entry->pagelist = drm_alloc(pages * sizeof(*entry->pagelist),
@@ -113,7 +113,7 @@ int drm_sg_alloc(struct inode *inode, struct file *filp,
 	}
 	memset((void *)entry->busaddr, 0, pages * sizeof(*entry->busaddr));
 
-	entry->virtual = vmalloc_32(pages << PAGE_SHIFT);
+	entry->virtual = drm_vmalloc_dma(pages << PAGE_SHIFT);
 	if (!entry->virtual) {
 		drm_free(entry->busaddr,
 			 entry->pages * sizeof(*entry->busaddr), DRM_MEM_PAGES);
@@ -131,8 +131,8 @@ int drm_sg_alloc(struct inode *inode, struct file *filp,
 
 	entry->handle = ScatterHandle((unsigned long)entry->virtual);
 
-	DRM_DEBUG("sg alloc handle  = %08lx\n", entry->handle);
-	DRM_DEBUG("sg alloc virtual = %p\n", entry->virtual);
+	DRM_DEBUG("handle  = %08lx\n", entry->handle);
+	DRM_DEBUG("virtual = %p\n", entry->virtual);
 
 	for (i = (unsigned long)entry->virtual, j = 0; j < pages;
 	     i += PAGE_SIZE, j++) {
@@ -142,12 +142,7 @@ int drm_sg_alloc(struct inode *inode, struct file *filp,
 		SetPageReserved(entry->pagelist[j]);
 	}
 
-	request.handle = entry->handle;
-
-	if (copy_to_user(argp, &request, sizeof(request))) {
-		drm_sg_cleanup(entry);
-		return -EFAULT;
-	}
+	request->handle = entry->handle;
 
 	dev->sg = entry;
 
@@ -197,30 +192,34 @@ int drm_sg_alloc(struct inode *inode, struct file *filp,
 	drm_sg_cleanup(entry);
 	return -ENOMEM;
 }
+EXPORT_SYMBOL(drm_sg_alloc);
 
-int drm_sg_free(struct inode *inode, struct file *filp,
-		unsigned int cmd, unsigned long arg)
+
+int drm_sg_alloc_ioctl(struct drm_device *dev, void *data,
+		       struct drm_file *file_priv)
 {
-	struct drm_file *priv = filp->private_data;
-	struct drm_device *dev = priv->head->dev;
-	struct drm_scatter_gather request;
+	struct drm_scatter_gather *request = data;
+
+	return drm_sg_alloc(dev, request);
+
+}
+
+int drm_sg_free(struct drm_device *dev, void *data,
+		struct drm_file *file_priv)
+{
+	struct drm_scatter_gather *request = data;
 	struct drm_sg_mem *entry;
 
 	if (!drm_core_check_feature(dev, DRIVER_SG))
 		return -EINVAL;
 
-	if (copy_from_user(&request,
-			   (struct drm_scatter_gather __user *) arg,
-			   sizeof(request)))
-		return -EFAULT;
-
 	entry = dev->sg;
 	dev->sg = NULL;
 
-	if (!entry || entry->handle != request.handle)
+	if (!entry || entry->handle != request->handle)
 		return -EINVAL;
 
-	DRM_DEBUG("sg free virtual  = %p\n", entry->virtual);
+	DRM_DEBUG("virtual  = %p\n", entry->virtual);
 
 	drm_sg_cleanup(entry);
 

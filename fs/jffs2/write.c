@@ -177,7 +177,7 @@ struct jffs2_full_dnode *jffs2_write_dnode(struct jffs2_sb_info *c, struct jffs2
 		void *hold_err = fn->raw;
 		/* Release the full_dnode which is now useless, and return */
 		jffs2_free_full_dnode(fn);
-		return ERR_PTR(PTR_ERR(hold_err));
+		return ERR_CAST(hold_err);
 	}
 	fn->ofs = je32_to_cpu(ri->offset);
 	fn->size = je32_to_cpu(ri->dsize);
@@ -215,6 +215,17 @@ struct jffs2_full_dirent *jffs2_write_dirent(struct jffs2_sb_info *c, struct jff
 		BUG();
 	   });
 
+	if (strnlen(name, namelen) != namelen) {
+		/* This should never happen, but seems to have done on at least one
+		   occasion: https://dev.laptop.org/ticket/4184 */
+		printk(KERN_CRIT "Error in jffs2_write_dirent() -- name contains zero bytes!\n");
+		printk(KERN_CRIT "Directory inode #%u, name at *0x%p \"%s\"->ino #%u, name_crc 0x%08x\n",
+		       je32_to_cpu(rd->pino), name, name, je32_to_cpu(rd->ino),
+		       je32_to_cpu(rd->name_crc));
+		WARN_ON(1);
+		return ERR_PTR(-EIO);
+	}
+
 	vecs[0].iov_base = rd;
 	vecs[0].iov_len = sizeof(*rd);
 	vecs[1].iov_base = (unsigned char *)name;
@@ -226,7 +237,7 @@ struct jffs2_full_dirent *jffs2_write_dirent(struct jffs2_sb_info *c, struct jff
 
 	fd->version = je32_to_cpu(rd->version);
 	fd->ino = je32_to_cpu(rd->ino);
-	fd->nhash = full_name_hash(name, strlen(name));
+	fd->nhash = full_name_hash(name, namelen);
 	fd->type = rd->type;
 	memcpy(fd->name, name, namelen);
 	fd->name[namelen]=0;
@@ -302,7 +313,7 @@ struct jffs2_full_dirent *jffs2_write_dirent(struct jffs2_sb_info *c, struct jff
 		void *hold_err = fd->raw;
 		/* Release the full_dirent which is now useless, and return */
 		jffs2_free_full_dirent(fd);
-		return ERR_PTR(PTR_ERR(hold_err));
+		return ERR_CAST(hold_err);
 	}
 
 	if (retried) {
@@ -454,6 +465,14 @@ int jffs2_do_create(struct jffs2_sb_info *c, struct jffs2_inode_info *dir_f, str
 
 	up(&f->sem);
 	jffs2_complete_reservation(c);
+
+	ret = jffs2_init_security(&f->vfs_inode, &dir_f->vfs_inode);
+	if (ret)
+		return ret;
+	ret = jffs2_init_acl_post(&f->vfs_inode);
+	if (ret)
+		return ret;
+
 	ret = jffs2_reserve_space(c, sizeof(*rd)+namelen, &alloclen,
 				ALLOC_NORMAL, JFFS2_SUMMARY_DIRENT_SIZE(namelen));
 
@@ -563,7 +582,7 @@ int jffs2_do_unlink(struct jffs2_sb_info *c, struct jffs2_inode_info *dir_f,
 		jffs2_add_fd_to_list(c, fd, &dir_f->dents);
 		up(&dir_f->sem);
 	} else {
-		struct jffs2_full_dirent **prev = &dir_f->dents;
+		struct jffs2_full_dirent *fd = dir_f->dents;
 		uint32_t nhash = full_name_hash(name, namelen);
 
 		/* We don't actually want to reserve any space, but we do
@@ -571,21 +590,22 @@ int jffs2_do_unlink(struct jffs2_sb_info *c, struct jffs2_inode_info *dir_f,
 		down(&c->alloc_sem);
 		down(&dir_f->sem);
 
-		while ((*prev) && (*prev)->nhash <= nhash) {
-			if ((*prev)->nhash == nhash &&
-			    !memcmp((*prev)->name, name, namelen) &&
-			    !(*prev)->name[namelen]) {
-				struct jffs2_full_dirent *this = *prev;
+		for (fd = dir_f->dents; fd; fd = fd->next) {
+			if (fd->nhash == nhash &&
+			    !memcmp(fd->name, name, namelen) &&
+			    !fd->name[namelen]) {
 
 				D1(printk(KERN_DEBUG "Marking old dirent node (ino #%u) @%08x obsolete\n",
-					  this->ino, ref_offset(this->raw)));
-
-				*prev = this->next;
-				jffs2_mark_node_obsolete(c, (this->raw));
-				jffs2_free_full_dirent(this);
+					  fd->ino, ref_offset(fd->raw)));
+				jffs2_mark_node_obsolete(c, fd->raw);
+				/* We don't want to remove it from the list immediately,
+				   because that screws up getdents()/seek() semantics even
+				   more than they're screwed already. Turn it into a
+				   node-less deletion dirent instead -- a placeholder */
+				fd->raw = NULL;
+				fd->ino = 0;
 				break;
 			}
-			prev = &((*prev)->next);
 		}
 		up(&dir_f->sem);
 	}
@@ -611,7 +631,8 @@ int jffs2_do_unlink(struct jffs2_sb_info *c, struct jffs2_inode_info *dir_f,
 					D1(printk(KERN_DEBUG "Removing deletion dirent for \"%s\" from dir ino #%u\n",
 						fd->name, dead_f->inocache->ino));
 				}
-				jffs2_mark_node_obsolete(c, fd->raw);
+				if (fd->raw)
+					jffs2_mark_node_obsolete(c, fd->raw);
 				jffs2_free_full_dirent(fd);
 			}
 		}

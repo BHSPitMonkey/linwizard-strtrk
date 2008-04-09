@@ -37,7 +37,7 @@ static struct omap_irq_bank {
 } __attribute__ ((aligned(4))) irq_banks[] = {
 	{
 		/* MPU INTC */
-		.base_reg	= 0,
+		.base_reg	= IO_ADDRESS(OMAP24XX_IC_BASE),
 		.nr_irqs	= 96,
 	},
 };

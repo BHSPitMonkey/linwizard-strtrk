@@ -61,6 +61,7 @@
 #include <linux/wireless.h>
 #include <linux/kernel.h>
 #include <linux/kmod.h>
+#include <net/net_namespace.h>
 #include <net/ip.h>
 #include <net/protocol.h>
 #include <linux/skbuff.h>
@@ -133,13 +134,6 @@ dev->hard_header == NULL (ll header is added by device, we cannot control it)
    We should set nh.raw on output to correct posistion,
    packet classifier depends on it.
  */
-
-/* List of all packet sockets. */
-static HLIST_HEAD(packet_sklist);
-static DEFINE_RWLOCK(packet_sklist_lock);
-
-static atomic_t packet_socks_nr;
-
 
 /* Private packet socket structures. */
 
@@ -235,10 +229,7 @@ static void packet_sock_destruct(struct sock *sk)
 		return;
 	}
 
-	atomic_dec(&packet_socks_nr);
-#ifdef PACKET_REFCNT_DEBUG
-	printk(KERN_DEBUG "PACKET socket %p is free, %d are alive\n", sk, atomic_read(&packet_socks_nr));
-#endif
+	sk_refcnt_debug_dec(sk);
 }
 
 
@@ -270,6 +261,9 @@ static int packet_rcv_spkt(struct sk_buff *skb, struct net_device *dev,  struct 
 	 */
 
 	if (skb->pkt_type == PACKET_LOOPBACK)
+		goto out;
+
+	if (dev->nd_net != sk->sk_net)
 		goto out;
 
 	if ((skb = skb_share_check(skb, GFP_ATOMIC)) == NULL)
@@ -343,7 +337,7 @@ static int packet_sendmsg_spkt(struct kiocb *iocb, struct socket *sock,
 	 */
 
 	saddr->spkt_device[13] = 0;
-	dev = dev_get_by_name(saddr->spkt_device);
+	dev = dev_get_by_name(sk->sk_net, saddr->spkt_device);
 	err = -ENODEV;
 	if (dev == NULL)
 		goto out_unlock;
@@ -385,7 +379,7 @@ static int packet_sendmsg_spkt(struct kiocb *iocb, struct socket *sock,
 	skb_reset_network_header(skb);
 
 	/* Try to align data part correctly */
-	if (dev->hard_header) {
+	if (dev->header_ops) {
 		skb->data -= dev->hard_header_len;
 		skb->tail -= dev->hard_header_len;
 		if (len < dev->hard_header_len)
@@ -457,9 +451,12 @@ static int packet_rcv(struct sk_buff *skb, struct net_device *dev, struct packet
 	sk = pt->af_packet_priv;
 	po = pkt_sk(sk);
 
+	if (dev->nd_net != sk->sk_net)
+		goto drop;
+
 	skb->dev = dev;
 
-	if (dev->hard_header) {
+	if (dev->header_ops) {
 		/* The device has an explicit notion of ll header,
 		   exported to higher levels.
 
@@ -508,14 +505,12 @@ static int packet_rcv(struct sk_buff *skb, struct net_device *dev, struct packet
 	sll->sll_hatype = dev->type;
 	sll->sll_protocol = skb->protocol;
 	sll->sll_pkttype = skb->pkt_type;
-	if (unlikely(po->origdev) && skb->pkt_type == PACKET_HOST)
+	if (unlikely(po->origdev))
 		sll->sll_ifindex = orig_dev->ifindex;
 	else
 		sll->sll_ifindex = dev->ifindex;
-	sll->sll_halen = 0;
 
-	if (dev->hard_header_parse)
-		sll->sll_halen = dev->hard_header_parse(skb, sll->sll_addr);
+	sll->sll_halen = dev_parse_header(skb, sll->sll_addr);
 
 	PACKET_SKB_CB(skb)->origlen = skb->len;
 
@@ -573,7 +568,10 @@ static int tpacket_rcv(struct sk_buff *skb, struct net_device *dev, struct packe
 	sk = pt->af_packet_priv;
 	po = pkt_sk(sk);
 
-	if (dev->hard_header) {
+	if (dev->nd_net != sk->sk_net)
+		goto drop;
+
+	if (dev->header_ops) {
 		if (sk->sk_type != SOCK_DGRAM)
 			skb_push(skb, skb->data - skb_mac_header(skb));
 		else if (skb->pkt_type == PACKET_OUTGOING) {
@@ -640,23 +638,20 @@ static int tpacket_rcv(struct sk_buff *skb, struct net_device *dev, struct packe
 	h->tp_snaplen = snaplen;
 	h->tp_mac = macoff;
 	h->tp_net = netoff;
-	if (skb->tstamp.tv64 == 0) {
-		__net_timestamp(skb);
-		sock_enable_timestamp(sk);
-	}
-	tv = ktime_to_timeval(skb->tstamp);
+	if (skb->tstamp.tv64)
+		tv = ktime_to_timeval(skb->tstamp);
+	else
+		do_gettimeofday(&tv);
 	h->tp_sec = tv.tv_sec;
 	h->tp_usec = tv.tv_usec;
 
 	sll = (struct sockaddr_ll*)((u8*)h + TPACKET_ALIGN(sizeof(*h)));
-	sll->sll_halen = 0;
-	if (dev->hard_header_parse)
-		sll->sll_halen = dev->hard_header_parse(skb, sll->sll_addr);
+	sll->sll_halen = dev_parse_header(skb, sll->sll_addr);
 	sll->sll_family = AF_PACKET;
 	sll->sll_hatype = dev->type;
 	sll->sll_protocol = skb->protocol;
 	sll->sll_pkttype = skb->pkt_type;
-	if (unlikely(po->origdev) && skb->pkt_type == PACKET_HOST)
+	if (unlikely(po->origdev))
 		sll->sll_ifindex = orig_dev->ifindex;
 	else
 		sll->sll_ifindex = dev->ifindex;
@@ -733,7 +728,7 @@ static int packet_sendmsg(struct kiocb *iocb, struct socket *sock,
 	}
 
 
-	dev = dev_get_by_index(ifindex);
+	dev = dev_get_by_index(sk->sk_net, ifindex);
 	err = -ENXIO;
 	if (dev == NULL)
 		goto out_unlock;
@@ -756,16 +751,10 @@ static int packet_sendmsg(struct kiocb *iocb, struct socket *sock,
 	skb_reserve(skb, LL_RESERVED_SPACE(dev));
 	skb_reset_network_header(skb);
 
-	if (dev->hard_header) {
-		int res;
-		err = -EINVAL;
-		res = dev->hard_header(skb, dev, ntohs(proto), addr, NULL, len);
-		if (sock->type != SOCK_DGRAM) {
-			skb_reset_tail_pointer(skb);
-			skb->len = 0;
-		} else if (res < 0)
-			goto out_free;
-	}
+	err = -EINVAL;
+	if (sock->type == SOCK_DGRAM &&
+	    dev_hard_header(skb, dev, ntohs(proto), addr, NULL, len) < 0)
+		goto out_free;
 
 	/* Returns -EFAULT on error */
 	err = memcpy_fromiovec(skb_put(skb,len), msg->msg_iov, len);
@@ -806,15 +795,17 @@ static int packet_release(struct socket *sock)
 {
 	struct sock *sk = sock->sk;
 	struct packet_sock *po;
+	struct net *net;
 
 	if (!sk)
 		return 0;
 
+	net = sk->sk_net;
 	po = pkt_sk(sk);
 
-	write_lock_bh(&packet_sklist_lock);
+	write_lock_bh(&net->packet.sklist_lock);
 	sk_del_node_init(sk);
-	write_unlock_bh(&packet_sklist_lock);
+	write_unlock_bh(&net->packet.sklist_lock);
 
 	/*
 	 *	Unhook packet receive handler.
@@ -850,6 +841,7 @@ static int packet_release(struct socket *sock)
 	/* Purge queues */
 
 	skb_queue_purge(&sk->sk_receive_queue);
+	sk_refcnt_debug_release(sk);
 
 	sock_put(sk);
 	return 0;
@@ -887,20 +879,14 @@ static int packet_do_bind(struct sock *sk, struct net_device *dev, __be16 protoc
 	if (protocol == 0)
 		goto out_unlock;
 
-	if (dev) {
-		if (dev->flags&IFF_UP) {
-			dev_add_pack(&po->prot_hook);
-			sock_hold(sk);
-			po->running = 1;
-		} else {
-			sk->sk_err = ENETDOWN;
-			if (!sock_flag(sk, SOCK_DEAD))
-				sk->sk_error_report(sk);
-		}
-	} else {
+	if (!dev || (dev->flags & IFF_UP)) {
 		dev_add_pack(&po->prot_hook);
 		sock_hold(sk);
 		po->running = 1;
+	} else {
+		sk->sk_err = ENETDOWN;
+		if (!sock_flag(sk, SOCK_DEAD))
+			sk->sk_error_report(sk);
 	}
 
 out_unlock:
@@ -928,7 +914,7 @@ static int packet_bind_spkt(struct socket *sock, struct sockaddr *uaddr, int add
 		return -EINVAL;
 	strlcpy(name,uaddr->sa_data,sizeof(name));
 
-	dev = dev_get_by_name(name);
+	dev = dev_get_by_name(sk->sk_net, name);
 	if (dev) {
 		err = packet_do_bind(sk, dev, pkt_sk(sk)->num);
 		dev_put(dev);
@@ -955,7 +941,7 @@ static int packet_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len
 
 	if (sll->sll_ifindex) {
 		err = -ENODEV;
-		dev = dev_get_by_index(sll->sll_ifindex);
+		dev = dev_get_by_index(sk->sk_net, sll->sll_ifindex);
 		if (dev == NULL)
 			goto out;
 	}
@@ -977,7 +963,7 @@ static struct proto packet_proto = {
  *	Create a packet of type SOCK_PACKET.
  */
 
-static int packet_create(struct socket *sock, int protocol)
+static int packet_create(struct net *net, struct socket *sock, int protocol)
 {
 	struct sock *sk;
 	struct packet_sock *po;
@@ -993,7 +979,7 @@ static int packet_create(struct socket *sock, int protocol)
 	sock->state = SS_UNCONNECTED;
 
 	err = -ENOBUFS;
-	sk = sk_alloc(PF_PACKET, GFP_KERNEL, &packet_proto, 1);
+	sk = sk_alloc(net, PF_PACKET, GFP_KERNEL, &packet_proto);
 	if (sk == NULL)
 		goto out;
 
@@ -1008,7 +994,7 @@ static int packet_create(struct socket *sock, int protocol)
 	po->num = proto;
 
 	sk->sk_destruct = packet_sock_destruct;
-	atomic_inc(&packet_socks_nr);
+	sk_refcnt_debug_inc(sk);
 
 	/*
 	 *	Attach a protocol block
@@ -1029,9 +1015,9 @@ static int packet_create(struct socket *sock, int protocol)
 		po->running = 1;
 	}
 
-	write_lock_bh(&packet_sklist_lock);
-	sk_add_node(sk, &packet_sklist);
-	write_unlock_bh(&packet_sklist_lock);
+	write_lock_bh(&net->packet.sklist_lock);
+	sk_add_node(sk, &net->packet.sklist);
+	write_unlock_bh(&net->packet.sklist_lock);
 	return(0);
 out:
 	return err;
@@ -1149,7 +1135,7 @@ static int packet_getname_spkt(struct socket *sock, struct sockaddr *uaddr,
 		return -EOPNOTSUPP;
 
 	uaddr->sa_family = AF_PACKET;
-	dev = dev_get_by_index(pkt_sk(sk)->ifindex);
+	dev = dev_get_by_index(sk->sk_net, pkt_sk(sk)->ifindex);
 	if (dev) {
 		strlcpy(uaddr->sa_data, dev->name, 15);
 		dev_put(dev);
@@ -1174,7 +1160,7 @@ static int packet_getname(struct socket *sock, struct sockaddr *uaddr,
 	sll->sll_family = AF_PACKET;
 	sll->sll_ifindex = po->ifindex;
 	sll->sll_protocol = po->num;
-	dev = dev_get_by_index(po->ifindex);
+	dev = dev_get_by_index(sk->sk_net, po->ifindex);
 	if (dev) {
 		sll->sll_hatype = dev->type;
 		sll->sll_halen = dev->addr_len;
@@ -1226,7 +1212,7 @@ static int packet_mc_add(struct sock *sk, struct packet_mreq_max *mreq)
 	rtnl_lock();
 
 	err = -ENODEV;
-	dev = __dev_get_by_index(mreq->mr_ifindex);
+	dev = __dev_get_by_index(sk->sk_net, mreq->mr_ifindex);
 	if (!dev)
 		goto done;
 
@@ -1280,7 +1266,7 @@ static int packet_mc_drop(struct sock *sk, struct packet_mreq_max *mreq)
 			if (--ml->count == 0) {
 				struct net_device *dev;
 				*mlp = ml->next;
-				dev = dev_get_by_index(ml->ifindex);
+				dev = dev_get_by_index(sk->sk_net, ml->ifindex);
 				if (dev) {
 					packet_dev_mc(dev, ml, -1);
 					dev_put(dev);
@@ -1308,7 +1294,7 @@ static void packet_flush_mclist(struct sock *sk)
 		struct net_device *dev;
 
 		po->mclist = ml->next;
-		if ((dev = dev_get_by_index(ml->ifindex)) != NULL) {
+		if ((dev = dev_get_by_index(sk->sk_net, ml->ifindex)) != NULL) {
 			packet_dev_mc(dev, ml, -1);
 			dev_put(dev);
 		}
@@ -1464,9 +1450,10 @@ static int packet_notifier(struct notifier_block *this, unsigned long msg, void 
 	struct sock *sk;
 	struct hlist_node *node;
 	struct net_device *dev = data;
+	struct net *net = dev->nd_net;
 
-	read_lock(&packet_sklist_lock);
-	sk_for_each(sk, node, &packet_sklist) {
+	read_lock(&net->packet.sklist_lock);
+	sk_for_each(sk, node, &net->packet.sklist) {
 		struct packet_sock *po = pkt_sk(sk);
 
 		switch (msg) {
@@ -1505,7 +1492,7 @@ static int packet_notifier(struct notifier_block *this, unsigned long msg, void 
 			break;
 		}
 	}
-	read_unlock(&packet_sklist_lock);
+	read_unlock(&net->packet.sklist_lock);
 	return NOTIFY_DONE;
 }
 
@@ -1553,6 +1540,8 @@ static int packet_ioctl(struct socket *sock, unsigned int cmd,
 		case SIOCGIFDSTADDR:
 		case SIOCSIFDSTADDR:
 		case SIOCSIFFLAGS:
+			if (sk->sk_net != &init_net)
+				return -ENOIOCTLCMD;
 			return inet_dgram_ops.ioctl(sock, cmd, arg);
 #endif
 
@@ -1617,11 +1606,6 @@ static struct vm_operations_struct packet_mmap_ops = {
 	.open =	packet_mm_open,
 	.close =packet_mm_close,
 };
-
-static inline struct page *pg_vec_endpage(char *one_pg_vec, unsigned int order)
-{
-	return virt_to_page(one_pg_vec + (PAGE_SIZE << order) - 1);
-}
 
 static void free_pg_vec(char **pg_vec, unsigned int order, unsigned int len)
 {
@@ -1873,12 +1857,12 @@ static struct notifier_block packet_netdev_notifier = {
 };
 
 #ifdef CONFIG_PROC_FS
-static inline struct sock *packet_seq_idx(loff_t off)
+static inline struct sock *packet_seq_idx(struct net *net, loff_t off)
 {
 	struct sock *s;
 	struct hlist_node *node;
 
-	sk_for_each(s, node, &packet_sklist) {
+	sk_for_each(s, node, &net->packet.sklist) {
 		if (!off--)
 			return s;
 	}
@@ -1886,22 +1870,27 @@ static inline struct sock *packet_seq_idx(loff_t off)
 }
 
 static void *packet_seq_start(struct seq_file *seq, loff_t *pos)
+	__acquires(seq_file_net(seq)->packet.sklist_lock)
 {
-	read_lock(&packet_sklist_lock);
-	return *pos ? packet_seq_idx(*pos - 1) : SEQ_START_TOKEN;
+	struct net *net = seq_file_net(seq);
+	read_lock(&net->packet.sklist_lock);
+	return *pos ? packet_seq_idx(net, *pos - 1) : SEQ_START_TOKEN;
 }
 
 static void *packet_seq_next(struct seq_file *seq, void *v, loff_t *pos)
 {
+	struct net *net = seq_file_net(seq);
 	++*pos;
 	return  (v == SEQ_START_TOKEN)
-		? sk_head(&packet_sklist)
+		? sk_head(&net->packet.sklist)
 		: sk_next((struct sock*)v) ;
 }
 
 static void packet_seq_stop(struct seq_file *seq, void *v)
+	__releases(seq_file_net(seq)->packet.sklist_lock)
 {
-	read_unlock(&packet_sklist_lock);
+	struct net *net = seq_file_net(seq);
+	read_unlock(&net->packet.sklist_lock);
 }
 
 static int packet_seq_show(struct seq_file *seq, void *v)
@@ -1937,7 +1926,8 @@ static const struct seq_operations packet_seq_ops = {
 
 static int packet_seq_open(struct inode *inode, struct file *file)
 {
-	return seq_open(file, &packet_seq_ops);
+	return seq_open_net(inode, file, &packet_seq_ops,
+			    sizeof(struct seq_net_private));
 }
 
 static const struct file_operations packet_seq_fops = {
@@ -1945,15 +1935,37 @@ static const struct file_operations packet_seq_fops = {
 	.open		= packet_seq_open,
 	.read		= seq_read,
 	.llseek		= seq_lseek,
-	.release	= seq_release,
+	.release	= seq_release_net,
 };
 
 #endif
 
+static int packet_net_init(struct net *net)
+{
+	rwlock_init(&net->packet.sklist_lock);
+	INIT_HLIST_HEAD(&net->packet.sklist);
+
+	if (!proc_net_fops_create(net, "packet", 0, &packet_seq_fops))
+		return -ENOMEM;
+
+	return 0;
+}
+
+static void packet_net_exit(struct net *net)
+{
+	proc_net_remove(net, "packet");
+}
+
+static struct pernet_operations packet_net_ops = {
+	.init = packet_net_init,
+	.exit = packet_net_exit,
+};
+
+
 static void __exit packet_exit(void)
 {
-	proc_net_remove("packet");
 	unregister_netdevice_notifier(&packet_netdev_notifier);
+	unregister_pernet_subsys(&packet_net_ops);
 	sock_unregister(PF_PACKET);
 	proto_unregister(&packet_proto);
 }
@@ -1966,8 +1978,8 @@ static int __init packet_init(void)
 		goto out;
 
 	sock_register(&packet_family_ops);
+	register_pernet_subsys(&packet_net_ops);
 	register_netdevice_notifier(&packet_netdev_notifier);
-	proc_net_fops_create("packet", 0, &packet_seq_fops);
 out:
 	return rc;
 }

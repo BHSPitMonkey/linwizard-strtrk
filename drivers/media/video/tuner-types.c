@@ -652,6 +652,7 @@ static struct tuner_params tuner_microtune_4049_fm5_params[] = {
 		.port1_invert_for_secam_lc = 1,
 		.default_pll_gating_18 = 1,
 		.fm_gain_normal=1,
+		.radio_if = 1, /* 33.3 MHz */
 	},
 };
 
@@ -670,6 +671,9 @@ static struct tuner_params tuner_panasonic_vp27_params[] = {
 		.count  = ARRAY_SIZE(tuner_panasonic_vp27_ntsc_ranges),
 		.has_tda9887 = 1,
 		.intercarrier_mode = 1,
+		.default_top_low = -3,
+		.default_top_mid = -3,
+		.default_top_high = -3,
 	},
 };
 
@@ -730,6 +734,7 @@ static struct tuner_params tuner_philips_fm1256_ih3_params[] = {
 		.type   = TUNER_PARAM_TYPE_PAL,
 		.ranges = tuner_fm1236_mk3_ntsc_ranges,
 		.count  = ARRAY_SIZE(tuner_fm1236_mk3_ntsc_ranges),
+		.radio_if = 1, /* 33.3 MHz */
 	},
 };
 
@@ -856,6 +861,9 @@ static struct tuner_params tuner_thomson_dtt761x_params[] = {
 		.type   = TUNER_PARAM_TYPE_NTSC,
 		.ranges = tuner_thomson_dtt761x_ntsc_ranges,
 		.count  = ARRAY_SIZE(tuner_thomson_dtt761x_ntsc_ranges),
+		.has_tda9887 = 1,
+		.fm_gain_normal = 1,
+		.radio_if = 2, /* 41.3 MHz */
 	},
 };
 
@@ -1358,7 +1366,7 @@ struct tunertype tuners[] = {
 		.count  = ARRAY_SIZE(tuner_philips_fq1286_params),
 	},
 	[TUNER_PHILIPS_TDA8290] = { /* Philips PAL|NTSC */
-		.name   = "tda8290+75",
+		.name   = "Philips/NXP TDA 8290/8295 + 8275/8275A/18271",
 		/* see tda8290.c for details */ },
 	[TUNER_TCL_2002MB] = { /* TCL PAL */
 		.name   = "TCL 2002MB",
@@ -1444,9 +1452,9 @@ struct tunertype tuners[] = {
 		.params = tuner_samsung_tcpn_2121p30a_params,
 		.count  = ARRAY_SIZE(tuner_samsung_tcpn_2121p30a_params),
 	},
-	[TUNER_XCEIVE_XC3028] = { /* Xceive 3028 */
-		.name	= "Xceive xc3028",
-		/* see xc3028.c for details */
+	[TUNER_XC2028] = { /* Xceive 2028 */
+		.name   = "Xceive xc2028/xc3028 tuner",
+		/* see tuner-xc2028.c for details */
 	},
 	[TUNER_THOMSON_FE6600] = { /* Thomson PAL / DVB-T */
 		.name   = "Thomson FE6600",
@@ -1466,6 +1474,10 @@ struct tunertype tuners[] = {
 	[TUNER_TEA5761] = { /* Philips RADIO */
 		.name   = "Philips TEA5761 FM Radio",
 		/* see tea5767.c for details */
+	},
+	[TUNER_XC5000] = { /* Xceive 5000 */
+		.name   = "Xceive 5000 tuner",
+		/* see xc5000.c for details */
 	},
 };
 

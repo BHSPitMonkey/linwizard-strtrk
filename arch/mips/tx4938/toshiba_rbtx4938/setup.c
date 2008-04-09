@@ -24,22 +24,18 @@
 
 #include <asm/wbflush.h>
 #include <asm/reboot.h>
-#include <asm/irq.h>
 #include <asm/time.h>
-#include <asm/uaccess.h>
+#include <asm/txx9tmr.h>
 #include <asm/io.h>
 #include <asm/bootinfo.h>
 #include <asm/tx4938/rbtx4938.h>
 #ifdef CONFIG_SERIAL_TXX9
-#include <linux/tty.h>
-#include <linux/serial.h>
 #include <linux/serial_core.h>
 #endif
 #include <linux/spi/spi.h>
 #include <asm/tx4938/spi.h>
 #include <asm/gpio.h>
 
-extern void rbtx4938_time_init(void) __init;
 extern char * __init prom_getcmdline(void);
 static inline void tx4938_report_pcic_status1(struct tx4938_pcic_reg *pcicptr);
 
@@ -458,9 +454,9 @@ extern struct pci_controller tx4938_pci_controller[];
 static int __init tx4938_pcibios_init(void)
 {
 	unsigned long mem_base[2];
-	unsigned long mem_size[2] = {TX4938_PCIMEM_SIZE_0,TX4938_PCIMEM_SIZE_1}; /* MAX 128M,64K */
+	unsigned long mem_size[2] = {TX4938_PCIMEM_SIZE_0, TX4938_PCIMEM_SIZE_1}; /* MAX 128M,64K */
 	unsigned long io_base[2];
-	unsigned long io_size[2] = {TX4938_PCIIO_SIZE_0,TX4938_PCIIO_SIZE_1}; /* MAX 16M,64K */
+	unsigned long io_size[2] = {TX4938_PCIIO_SIZE_0, TX4938_PCIIO_SIZE_1}; /* MAX 16M,64K */
 	/* TX4938 PCIC1: 64K MEM/IO is enough for ETH0,ETH1 */
 	int extarb = !(tx4938_ccfgptr->ccfg & TX4938_CCFG_PCIXARB);
 
@@ -598,8 +594,8 @@ static int __init rbtx4938_ethaddr_init(void)
 			printk(KERN_WARNING "seeprom: bad checksum.\n");
 	}
 	for (i = 0; i < 2; i++) {
-		unsigned int slot = TX4938_PCIC_IDSEL_AD_TO_SLOT(31 - i);
-		unsigned int id = (1 << 8) | PCI_DEVFN(slot, 0); /* bus 1 */
+		unsigned int id =
+			TXX9_IRQ_BASE + (i ? TX4938_IR_ETH1 : TX4938_IR_ETH0);
 		struct platform_device *pdev;
 		if (!(tx4938_ccfgptr->pcfg &
 		      (i ? TX4938_PCFG_ETH1_SEL : TX4938_PCFG_ETH0_SEL)))
@@ -728,6 +724,8 @@ void __init tx4938_board_setup(void)
 	/* CCFG */
 	/* clear WatchDogReset,BusErrorOnWrite flag (W1C) */
 	tx4938_ccfgptr->ccfg |= TX4938_CCFG_WDRST | TX4938_CCFG_BEOW;
+	/* do reset on watchdog */
+	tx4938_ccfgptr->ccfg |= TX4938_CCFG_WR;
 	/* clear PCIC1 reset */
 	if (tx4938_ccfgptr->clkctr & TX4938_CLKCTR_PCIC1RST)
 		tx4938_ccfgptr->clkctr &= ~TX4938_CLKCTR_PCIC1RST;
@@ -774,15 +772,8 @@ void __init tx4938_board_setup(void)
 	}
 
 	/* TMR */
-	/* disable all timers */
-	for (i = 0; i < TX4938_NR_TMR; i++) {
-		tx4938_tmrptr(i)->tcr  = 0x00000020;
-		tx4938_tmrptr(i)->tisr = 0;
-		tx4938_tmrptr(i)->cpra = 0xffffffff;
-		tx4938_tmrptr(i)->itmr = 0;
-		tx4938_tmrptr(i)->ccdr = 0;
-		tx4938_tmrptr(i)->pgmr = 0;
-	}
+	for (i = 0; i < TX4938_NR_TMR; i++)
+		txx9_tmr_init(TX4938_TMR_REG(i) & 0xfffffffffULL);
 
 	/* enable DMA */
 	TX4938_WR64(0xff1fb150, TX4938_DMA_MCR_MSTEN);
@@ -853,15 +844,16 @@ void tx4938_report_pcic_status(void)
 
 #endif /* CONFIG_PCI */
 
-/* We use onchip r4k counter or TMR timer as our system wide timer
- * interrupt running at 100HZ. */
-
-void __init rbtx4938_time_init(void)
+void __init plat_time_init(void)
 {
 	mips_hpt_frequency = txx9_cpu_clock / 2;
+	if (tx4938_ccfgptr->ccfg & TX4938_CCFG_TINTDIS)
+		txx9_clockevent_init(TX4938_TMR_REG(0) & 0xfffffffffULL,
+				     TXX9_IRQ_BASE + TX4938_IR_TMR(0),
+				     txx9_gbus_clock / 2);
 }
 
-void __init toshiba_rbtx4938_setup(void)
+void __init plat_mem_setup(void)
 {
 	unsigned long long pcfg;
 	char *argptr;
@@ -1131,12 +1123,35 @@ static int __init rbtx4938_spi_init(void)
 }
 arch_initcall(rbtx4938_spi_init);
 
+/* Watchdog support */
+
+static int __init txx9_wdt_init(unsigned long base)
+{
+	struct resource res = {
+		.start	= base,
+		.end	= base + 0x100 - 1,
+		.flags	= IORESOURCE_MEM,
+		.parent	= &tx4938_reg_resource,
+	};
+	struct platform_device *dev =
+		platform_device_register_simple("txx9wdt", -1, &res, 1);
+	return IS_ERR(dev) ? PTR_ERR(dev) : 0;
+}
+
+static int __init rbtx4938_wdt_init(void)
+{
+	return txx9_wdt_init(TX4938_TMR_REG(2) & 0xfffffffffULL);
+}
+device_initcall(rbtx4938_wdt_init);
+
 /* Minimum CLK support */
 
 struct clk *clk_get(struct device *dev, const char *id)
 {
 	if (!strcmp(id, "spi-baseclk"))
 		return (struct clk *)(txx9_gbus_clock / 2 / 4);
+	if (!strcmp(id, "imbus_clk"))
+		return (struct clk *)(txx9_gbus_clock / 2);
 	return ERR_PTR(-ENOENT);
 }
 EXPORT_SYMBOL(clk_get);

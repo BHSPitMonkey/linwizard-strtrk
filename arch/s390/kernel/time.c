@@ -145,12 +145,8 @@ void account_ticks(u64 time)
 	do_timer(ticks);
 #endif
 
-#ifdef CONFIG_VIRT_CPU_ACCOUNTING
-	account_tick_vtime(current);
-#else
 	while (ticks--)
 		update_process_times(user_mode(get_irq_regs()));
-#endif
 
 	s390_do_profile();
 }
@@ -213,8 +209,6 @@ static void stop_hz_timer(void)
  */
 static void start_hz_timer(void)
 {
-	BUG_ON(!in_interrupt());
-
 	if (!cpu_isset(smp_processor_id(), nohz_cpu_mask))
 		return;
 	account_ticks(get_clock());
@@ -307,7 +301,7 @@ static cycle_t read_tod_clock(void)
 
 static struct clocksource clocksource_tod = {
 	.name		= "tod",
-	.rating		= 100,
+	.rating		= 400,
 	.read		= read_tod_clock,
 	.mask		= -1ULL,
 	.mult		= 1000,
@@ -748,7 +742,6 @@ static void etr_adjust_time(unsigned long long clock, unsigned long long delay)
 	}
 }
 
-#ifdef CONFIG_SMP
 static void etr_sync_cpu_start(void *dummy)
 {
 	int *in_sync = dummy;
@@ -781,7 +774,6 @@ static void etr_sync_cpu_start(void *dummy)
 static void etr_sync_cpu_end(void *dummy)
 {
 }
-#endif /* CONFIG_SMP */
 
 /*
  * Sync the TOD clock using the port refered to by aibp. This port
@@ -1149,7 +1141,7 @@ static void etr_work_fn(struct work_struct *work)
  * Sysfs interface functions
  */
 static struct sysdev_class etr_sysclass = {
-	set_kset_name("etr")
+	.name	= "etr",
 };
 
 static struct sys_device etr_port0_dev = {

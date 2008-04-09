@@ -32,12 +32,8 @@
 #include <asm/arch/common.h>
 #include <asm/arch/dsp_common.h>
 #include <asm/arch/aic23.h>
-#include <asm/arch/gpio.h>
 #include <asm/arch/omapfb.h>
-#include <asm/arch/hwa742.h>
 #include <asm/arch/lcd_mipid.h>
-
-#include "../plat-omap/dsp/dsp_common.h"
 
 #define ADS7846_PENDOWN_GPIO	15
 
@@ -331,6 +327,7 @@ nokia770_audio_pwr_down_request(struct dsp_kfunc_device *kdev, int stage)
 	up(&audio_pwr_sem);
 	return 0;
 }
+#endif	/* CONFIG_OMAP_DSP */
 
 static struct dsp_kfunc_device nokia770_audio_device = {
 	.name	 = "audio",
@@ -360,6 +357,8 @@ static __init int omap_dsp_init(void)
  out:
 	return ret;
 }
+#else
+#define omap_dsp_init()		do {} while (0)
 #endif	/* CONFIG_OMAP_DSP */
 
 static void __init omap_nokia770_init(void)
@@ -373,8 +372,8 @@ static void __init omap_nokia770_init(void)
 	omap_board_config_size = ARRAY_SIZE(nokia770_config);
 	omap_gpio_init();
 	omap_serial_init();
+	omap_register_i2c_bus(1, 100, NULL, 0);
 	omap_dsp_init();
-	hwa742_dev_init();
 	ads7846_dev_init();
 	mipid_dev_init();
 }

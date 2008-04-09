@@ -195,7 +195,7 @@ skpinv:	addi	r4,r4,1				/* Increment */
 	li	r5,0
 	ori	r5,r5,(PPC44x_TLB_SW | PPC44x_TLB_SR | PPC44x_TLB_I | PPC44x_TLB_G)
 
-        li      r0,0                    /* TLB slot 0 */
+	li	r0,62			/* TLB slot 62 */
 
 	tlbwe	r3,r0,PPC44x_TLB_PAGEID	/* Load the pageid fields */
 	tlbwe	r4,r0,PPC44x_TLB_XLAT	/* Load the translation fields */
@@ -226,16 +226,6 @@ skpinv:	addi	r4,r4,1				/* Increment */
 	/* Establish the interrupt vector base */
 	lis	r4,interrupt_base@h	/* IVPR only uses the high 16-bits */
 	mtspr	SPRN_IVPR,r4
-
-#ifdef CONFIG_440EP
-	/* Clear DAPUIB flag in CCR0 (enable APU between CPU and FPU) */
-	mfspr	r2,SPRN_CCR0
-	lis	r3,0xffef
-	ori	r3,r3,0xffff
-	and	r2,r2,r3
-	mtspr	SPRN_CCR0,r2
-	isync
-#endif
 
 	/*
 	 * This is where the main kernel code starts.

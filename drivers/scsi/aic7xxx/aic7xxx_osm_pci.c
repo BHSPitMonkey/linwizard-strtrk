@@ -42,15 +42,6 @@
 #include "aic7xxx_osm.h"
 #include "aic7xxx_pci.h"
 
-static int	ahc_linux_pci_dev_probe(struct pci_dev *pdev,
-					const struct pci_device_id *ent);
-static int	ahc_linux_pci_reserve_io_region(struct ahc_softc *ahc,
-						u_long *base);
-static int	ahc_linux_pci_reserve_mem_region(struct ahc_softc *ahc,
-						 u_long *bus_addr,
-						 uint8_t __iomem **maddr);
-static void	ahc_linux_pci_dev_remove(struct pci_dev *pdev);
-
 /* Define the macro locally since it's different for different class of chips.
 */
 #define ID(x)	ID_C(x, PCI_CLASS_STORAGE_SCSI)
@@ -130,12 +121,47 @@ static struct pci_device_id ahc_linux_pci_id_table[] = {
 
 MODULE_DEVICE_TABLE(pci, ahc_linux_pci_id_table);
 
-static struct pci_driver aic7xxx_pci_driver = {
-	.name		= "aic7xxx",
-	.probe		= ahc_linux_pci_dev_probe,
-	.remove		= ahc_linux_pci_dev_remove,
-	.id_table	= ahc_linux_pci_id_table
-};
+#ifdef CONFIG_PM
+static int
+ahc_linux_pci_dev_suspend(struct pci_dev *pdev, pm_message_t mesg)
+{
+	struct ahc_softc *ahc = pci_get_drvdata(pdev);
+	int rc;
+
+	if ((rc = ahc_suspend(ahc)))
+		return rc;
+
+	pci_save_state(pdev);
+	pci_disable_device(pdev);
+
+	if (mesg.event & PM_EVENT_SLEEP)
+		pci_set_power_state(pdev, PCI_D3hot);
+
+	return rc;
+}
+
+static int
+ahc_linux_pci_dev_resume(struct pci_dev *pdev)
+{
+	struct ahc_softc *ahc = pci_get_drvdata(pdev);
+	int rc;
+
+	pci_set_power_state(pdev, PCI_D0);
+	pci_restore_state(pdev);
+
+	if ((rc = pci_enable_device(pdev))) {
+		dev_printk(KERN_ERR, &pdev->dev,
+			   "failed to enable device after resume (%d)\n", rc);
+		return rc;
+	}
+
+	pci_set_master(pdev);
+
+	ahc_pci_resume(ahc);
+
+	return (ahc_resume(ahc));
+}
+#endif
 
 static void
 ahc_linux_pci_dev_remove(struct pci_dev *pdev)
@@ -242,6 +268,17 @@ ahc_linux_pci_dev_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	ahc_linux_register_host(ahc, &aic7xxx_driver_template);
 	return (0);
 }
+
+static struct pci_driver aic7xxx_pci_driver = {
+	.name		= "aic7xxx",
+	.probe		= ahc_linux_pci_dev_probe,
+#ifdef CONFIG_PM
+	.suspend	= ahc_linux_pci_dev_suspend,
+	.resume		= ahc_linux_pci_dev_resume,
+#endif
+	.remove		= ahc_linux_pci_dev_remove,
+	.id_table	= ahc_linux_pci_id_table
+};
 
 int
 ahc_linux_pci_init(void)

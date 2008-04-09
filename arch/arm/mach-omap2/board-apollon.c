@@ -24,10 +24,6 @@
 #include <linux/mtd/onenand.h>
 #include <linux/delay.h>
 #include <linux/leds.h>
-#include <linux/err.h>
-#include <linux/clk.h>
-#include <linux/spi/spi.h>
-#include <linux/spi/tsc210x.h>
 
 #include <asm/hardware.h>
 #include <asm/mach-types.h>
@@ -41,6 +37,7 @@
 #include <asm/arch/board.h>
 #include <asm/arch/common.h>
 #include <asm/arch/gpmc.h>
+#include "prcm-regs.h"
 
 /* LED & Switch macros */
 #define LED0_GPIO13		13
@@ -48,6 +45,9 @@
 #define LED2_GPIO15		15
 #define LED3_GPIO92		92
 #define LED4_GPIO93		93
+
+#define APOLLON_FLASH_CS	0
+#define APOLLON_ETH_CS		1
 
 #define APOLLON_FLASH_CS	0
 #define APOLLON_ETH_CS		1
@@ -126,7 +126,7 @@ static struct resource apollon_smc91x_resources[] = {
 	[1] = {
 		.start	= OMAP_GPIO_IRQ(APOLLON_ETHR_GPIO_IRQ),
 		.end	= OMAP_GPIO_IRQ(APOLLON_ETHR_GPIO_IRQ),
-		.flags	= IORESOURCE_IRQ,
+		.flags	= IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHEDGE,
 	},
 };
 
@@ -161,20 +161,6 @@ static struct omap_led_config apollon_led_config[] = {
 		},
 		.gpio	= LED2_GPIO15,
 	},
-#ifdef CONFIG_MACH_OMAP_APOLLON_PLUS
-	{
-		.cdev	= {
-			.name	= "apollon:led3",
-		},
-		.gpio	= LED3_GPIO92,
-	},
-	{
-		.cdev	= {
-			.name	= "apollon:led4",
-		},
-		.gpio	= LED4_GPIO93,
-	},
-#endif
 };
 
 static struct omap_led_platform_data apollon_led_data = {
@@ -200,42 +186,16 @@ static struct platform_device *apollon_devices[] __initdata = {
 static inline void __init apollon_init_smc91x(void)
 {
 	unsigned long base;
-	unsigned int rate;
-	struct clk *l3ck;
-	int eth_cs;
-
-	l3ck = clk_get(NULL, "core_l3_ck");
-	if (IS_ERR(l3ck))
-		rate = 100000000;
-	else
-		rate = clk_get_rate(l3ck);
-
-	eth_cs = APOLLON_ETH_CS;
 
 	/* Make sure CS1 timings are correct */
-	gpmc_cs_write_reg(eth_cs, GPMC_CS_CONFIG1, 0x00011200);
+	GPMC_CONFIG1_1 = 0x00011203;
+	GPMC_CONFIG2_1 = 0x001f1f01;
+	GPMC_CONFIG3_1 = 0x00080803;
+	GPMC_CONFIG4_1 = 0x1c091c09;
+	GPMC_CONFIG5_1 = 0x041f1f1f;
+	GPMC_CONFIG6_1 = 0x000004c4;
 
-	if (rate >= 160000000) {
-		gpmc_cs_write_reg(eth_cs, GPMC_CS_CONFIG2, 0x001f1f01);
-		gpmc_cs_write_reg(eth_cs, GPMC_CS_CONFIG3, 0x00080803);
-		gpmc_cs_write_reg(eth_cs, GPMC_CS_CONFIG4, 0x1c0b1c0a);
-		gpmc_cs_write_reg(eth_cs, GPMC_CS_CONFIG5, 0x041f1F1F);
-		gpmc_cs_write_reg(eth_cs, GPMC_CS_CONFIG6, 0x000004C4);
-	} else if (rate >= 130000000) {
-		gpmc_cs_write_reg(eth_cs, GPMC_CS_CONFIG2, 0x001f1f00);
-		gpmc_cs_write_reg(eth_cs, GPMC_CS_CONFIG3, 0x00080802);
-		gpmc_cs_write_reg(eth_cs, GPMC_CS_CONFIG4, 0x1C091C09);
-		gpmc_cs_write_reg(eth_cs, GPMC_CS_CONFIG5, 0x041f1F1F);
-		gpmc_cs_write_reg(eth_cs, GPMC_CS_CONFIG6, 0x000004C4);
-	} else {/* rate = 100000000 */
-		gpmc_cs_write_reg(eth_cs, GPMC_CS_CONFIG2, 0x001f1f00);
-		gpmc_cs_write_reg(eth_cs, GPMC_CS_CONFIG3, 0x00080802);
-		gpmc_cs_write_reg(eth_cs, GPMC_CS_CONFIG4, 0x1C091C09);
-		gpmc_cs_write_reg(eth_cs, GPMC_CS_CONFIG5, 0x031A1F1F);
-		gpmc_cs_write_reg(eth_cs, GPMC_CS_CONFIG6, 0x000003C2);
-	}
-
-	if (gpmc_cs_request(eth_cs, SZ_16M, &base) < 0) {
+	if (gpmc_cs_request(APOLLON_ETH_CS, SZ_16M, &base) < 0) {
 		printk(KERN_ERR "Failed to request GPMC CS for smc91x\n");
 		return;
 	}
@@ -247,7 +207,7 @@ static inline void __init apollon_init_smc91x(void)
 	if (omap_request_gpio(APOLLON_ETHR_GPIO_IRQ) < 0) {
 		printk(KERN_ERR "Failed to request GPIO%d for smc91x IRQ\n",
 			APOLLON_ETHR_GPIO_IRQ);
-		gpmc_cs_free(eth_cs);
+		gpmc_cs_free(APOLLON_ETH_CS);
 		return;
 	}
 	omap_set_gpio_direction(APOLLON_ETHR_GPIO_IRQ, 1);
@@ -365,12 +325,28 @@ static void __init apollon_tsc_init(void)
 	omap_cfg_reg(W14_24XX_SYS_CLKOUT);	/* mclk */
 }
 
+static void __init apollon_usb_init(void)
+{
+	/* USB device */
+	/* DEVICE_SUSPEND */
+	omap_cfg_reg(P21_242X_GPIO12);
+	omap_request_gpio(12);
+	omap_set_gpio_direction(12, 0);		/* OUT */
+	omap_set_gpio_dataout(12, 0);
+}
+
 static void __init omap_apollon_init(void)
 {
 	apollon_led_init();
+	apollon_sw_init();
 	apollon_flash_init();
 	apollon_usb_init();
-	apollon_tsc_init();
+
+	/* REVISIT: where's the correct place */
+	omap_cfg_reg(W19_24XX_SYS_NIRQ);
+
+	/* Use Interal loop-back in MMC/SDIO Module Input Clock selection */
+	CONTROL_DEVCONF |= (1 << 24);
 
 	/*
  	 * Make sure the serial ports are muxed on at this point.

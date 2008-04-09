@@ -21,6 +21,8 @@
 #include <linux/module.h>
 #include <linux/wait.h>
 #include <linux/errno.h>
+#include <asm/bug.h>
+#include <asm/system.h>
 #include "fw-transaction.h"
 #include "fw-topology.h"
 
@@ -152,6 +154,10 @@ static void update_hop_count(struct fw_node *node)
 	node->max_hops = max(max_child_hops, depths[0] + depths[1] + 2);
 }
 
+static inline struct fw_node *fw_node(struct list_head *l)
+{
+	return list_entry(l, struct fw_node, link);
+}
 
 /**
  * build_tree - Build the tree representation of the topology
@@ -162,7 +168,7 @@ static void update_hop_count(struct fw_node *node)
  * This function builds the tree representation of the topology given
  * by the self IDs from the latest bus reset.  During the construction
  * of the tree, the function checks that the self IDs are valid and
- * internally consistent.  On succcess this funtions returns the
+ * internally consistent.  On succcess this function returns the
  * fw_node corresponding to the local card otherwise NULL.
  */
 static struct fw_node *build_tree(struct fw_card *card,
@@ -211,6 +217,10 @@ static struct fw_node *build_tree(struct fw_card *card,
 		 */
 		for (i = 0, h = &stack; i < child_port_count; i++)
 			h = h->prev;
+		/*
+		 * When the stack is empty, this yields an invalid value,
+		 * but that pointer will never be dereferenced.
+		 */
 		child = fw_node(h);
 
 		node = fw_node_create(q, port_count, card->color);
@@ -374,6 +384,7 @@ void fw_destroy_nodes(struct fw_card *card)
 	card->color++;
 	if (card->local_node != NULL)
 		for_each_fw_node(card, card->local_node, report_lost_node);
+	card->local_node = NULL;
 	spin_unlock_irqrestore(&card->lock, flags);
 }
 
@@ -414,8 +425,8 @@ update_tree(struct fw_card *card, struct fw_node *root)
 	node1 = fw_node(list1.next);
 
 	while (&node0->link != &list0) {
+		WARN_ON(node0->port_count != node1->port_count);
 
-		/* assert(node0->port_count == node1->port_count); */
 		if (node0->link_on && !node1->link_on)
 			event = FW_NODE_LINK_OFF;
 		else if (!node0->link_on && node1->link_on)
@@ -510,6 +521,11 @@ fw_core_handle_bus_reset(struct fw_card *card,
 		card->bm_retries = 0;
 
 	card->node_id = node_id;
+	/*
+	 * Update node_id before generation to prevent anybody from using
+	 * a stale node_id together with a current generation.
+	 */
+	smp_wmb();
 	card->generation = generation;
 	card->reset_jiffies = jiffies;
 	schedule_delayed_work(&card->work, 0);

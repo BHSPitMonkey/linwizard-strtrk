@@ -23,6 +23,7 @@
 #include <linux/interrupt.h>
 #include <linux/workqueue.h>
 #include <linux/firmware.h>
+#include <linux/aer.h>
 #include <asm/semaphore.h>
 
 #include <scsi/scsi.h>
@@ -184,8 +185,6 @@
  * SCSI Request Block
  */
 typedef struct srb {
-	struct list_head list;
-
 	struct scsi_qla_host *ha;	/* HA the SP is queued on */
 	struct fc_port *fcport;
 
@@ -316,7 +315,9 @@ struct device_reg_2xxx {
 	} u;
 
 	uint16_t fpm_diag_config;
-	uint16_t unused_5[0x6];		/* Gap */
+	uint16_t unused_5[0x4];		/* Gap */
+	uint16_t risc_hw;
+	uint16_t unused_5_1;		/* Gap */
 	uint16_t pcr;			/* Processor Control Register. */
 	uint16_t unused_6[0x5];		/* Gap */
 	uint16_t mctr;			/* Memory Configuration and Timing. */
@@ -622,9 +623,6 @@ typedef struct {
 #define MBC_GET_LINK_PRIV_STATS		0x6d	/* Get link & private data. */
 #define MBC_SET_VENDOR_ID		0x76	/* Set Vendor ID. */
 
-#define TC_ENABLE			4
-#define TC_DISABLE			5
-
 /* Firmware return data sizes */
 #define FCAL_MAP_SIZE	128
 
@@ -861,14 +859,20 @@ typedef struct {
 #define GLSO_SEND_RPS	BIT_0
 #define GLSO_USE_DID	BIT_3
 
-typedef struct {
-	uint32_t	link_fail_cnt;
-	uint32_t	loss_sync_cnt;
-	uint32_t	loss_sig_cnt;
-	uint32_t	prim_seq_err_cnt;
-	uint32_t	inval_xmit_word_cnt;
-	uint32_t	inval_crc_cnt;
-} link_stat_t;
+struct link_statistics {
+	uint32_t link_fail_cnt;
+	uint32_t loss_sync_cnt;
+	uint32_t loss_sig_cnt;
+	uint32_t prim_seq_err_cnt;
+	uint32_t inval_xmit_word_cnt;
+	uint32_t inval_crc_cnt;
+	uint32_t unused1[0x1b];
+	uint32_t tx_frames;
+	uint32_t rx_frames;
+	uint32_t dumped_frames;
+	uint32_t unused2[2];
+	uint32_t nos_rcvd;
+};
 
 /*
  * NVRAM Command values.
@@ -1702,7 +1706,7 @@ struct ct_fdmi_hba_attributes {
 /*
  * Port attribute types.
  */
-#define FDMI_PORT_ATTR_COUNT		5
+#define FDMI_PORT_ATTR_COUNT		6
 #define FDMI_PORT_FC4_TYPES		1
 #define FDMI_PORT_SUPPORT_SPEED		2
 #define FDMI_PORT_CURRENT_SPEED		3
@@ -2037,8 +2041,6 @@ typedef struct vport_params {
 #define VP_RET_CODE_NO_MEM		5
 #define VP_RET_CODE_NOT_FOUND		6
 
-#define to_qla_parent(x) (((x)->parent) ? (x)->parent : (x))
-
 /*
  * ISP operations
  */
@@ -2115,14 +2117,6 @@ struct qla_msix_entry {
 
 #define	WATCH_INTERVAL		1       /* number of seconds */
 
-/* NPIV */
-#define MAX_MULTI_ID_LOOP                     126
-#define MAX_MULTI_ID_FABRIC                    64
-#define MAX_NUM_VPORT_LOOP                      (MAX_MULTI_ID_LOOP - 1)
-#define MAX_NUM_VPORT_FABRIC                    (MAX_MULTI_ID_FABRIC - 1)
-#define MAX_NUM_VHBA_LOOP                       (MAX_MULTI_ID_LOOP - 1)
-#define MAX_NUM_VHBA_FABRIC                     (MAX_MULTI_ID_FABRIC - 1)
-
 /*
  * Linux Host Adapter structure
  */
@@ -2160,6 +2154,7 @@ typedef struct scsi_qla_host {
 		uint32_t	gpsc_supported		:1;
 		uint32_t        vsan_enabled            :1;
 		uint32_t	npiv_supported		:1;
+		uint32_t	fce_enabled		:1;
 	} flags;
 
 	atomic_t	loop_state;
@@ -2270,9 +2265,10 @@ typedef struct scsi_qla_host {
 
 	spinlock_t		hardware_lock ____cacheline_aligned;
 
+	int		bars;
+	int		mem_only;
 	device_reg_t __iomem *iobase;		/* Base I/O address */
-	unsigned long	pio_address;
-	unsigned long	pio_length;
+	resource_size_t pio_address;
 #define MIN_IOBASE_LEN		0x100
 
 	/* ISP ring lock, rings, and indexes */
@@ -2414,9 +2410,9 @@ typedef struct scsi_qla_host {
 #define MBX_INTR_WAIT	2
 #define MBX_UPDATE_FLASH_ACTIVE	3
 
-	struct semaphore mbx_cmd_sem;	/* Serialialize mbx access */
 	struct semaphore vport_sem;	/* Virtual port synchronization */
-	struct semaphore mbx_intr_sem;  /* Used for completion notification */
+	struct completion mbx_cmd_comp;	/* Serialize mbx access */
+	struct completion mbx_intr_comp;  /* Used for completion notification */
 
 	uint32_t	mbx_flags;
 #define  MBX_IN_PROGRESS	BIT_0
@@ -2453,6 +2449,15 @@ typedef struct scsi_qla_host {
 	dma_addr_t	eft_dma;
 	void		*eft;
 
+	struct dentry *dfs_dir;
+	struct dentry *dfs_fce;
+	dma_addr_t	fce_dma;
+	void		*fce;
+	uint32_t	fce_bufs;
+	uint16_t	fce_mb[8];
+	uint64_t	fce_wr, fce_rd;
+	struct mutex	fce_mutex;
+
 	uint8_t		host_str[16];
 	uint32_t	pci_attr;
 	uint16_t	chip_revision;
@@ -2476,6 +2481,8 @@ typedef struct scsi_qla_host {
 #define QLA_SWAITING	0
 #define QLA_SREADING	1
 #define QLA_SWRITING	2
+	uint32_t	optrom_region_start;
+	uint32_t	optrom_region_size;
 
         /* PCI expansion ROM image information. */
 #define ROM_CODE_TYPE_BIOS	0
@@ -2503,7 +2510,7 @@ typedef struct scsi_qla_host {
 
 	struct list_head	vp_list;	/* list of VP */
 	struct fc_vport	*fc_vport;	/* holds fc_vport * for each vport */
-	uint8_t		vp_idx_map[16];
+	unsigned long	vp_idx_map[(MAX_MULTI_ID_FABRIC / 8) / sizeof(unsigned long)];
 	uint16_t        num_vhosts;	/* number of vports created */
 	uint16_t        num_vsans;	/* number of vsan created */
 	uint16_t        vp_idx;		/* vport ID */
@@ -2529,7 +2536,7 @@ typedef struct scsi_qla_host {
 #define VP_ERR_FAB_NORESOURCES	3
 #define VP_ERR_FAB_LOGOUT	4
 #define VP_ERR_ADAP_NORESOURCES	5
-	int		max_npiv_vports;	/* 63 or 125 per topoloty */
+	uint16_t	max_npiv_vports;	/* 63 or 125 per topoloty */
 	int		cur_vport_count;
 } scsi_qla_host_t;
 
@@ -2541,8 +2548,6 @@ typedef struct scsi_qla_host {
 	(test_bit(ISP_ABORT_NEEDED, &ha->dpc_flags) || \
 	 test_bit(LOOP_RESYNC_NEEDED, &ha->dpc_flags) || \
 	 atomic_read(&ha->loop_state) == LOOP_DOWN)
-
-#define to_qla_host(x)		((scsi_qla_host_t *) (x)->hostdata)
 
 #define qla_printk(level, ha, format, arg...) \
 	dev_printk(level , &((ha)->pdev->dev) , format , ## arg)

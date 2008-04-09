@@ -11,6 +11,7 @@
 #include <linux/module.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
+#include <linux/smp_lock.h>
 #include <linux/capability.h>
 #include <asm/uaccess.h>
 #include <asm/byteorder.h>
@@ -60,7 +61,7 @@ proc_bus_pci_read(struct file *file, char __user *buf, size_t nbytes, loff_t *pp
 	 */
 
 	if (capable(CAP_SYS_ADMIN))
-		size = dev->cfg_size;
+		size = dp->size;
 	else if (dev->hdr_type == PCI_HEADER_TYPE_CARDBUS)
 		size = 128;
 	else
@@ -129,11 +130,11 @@ proc_bus_pci_read(struct file *file, char __user *buf, size_t nbytes, loff_t *pp
 static ssize_t
 proc_bus_pci_write(struct file *file, const char __user *buf, size_t nbytes, loff_t *ppos)
 {
-	const struct inode *ino = file->f_path.dentry->d_inode;
+	struct inode *ino = file->f_path.dentry->d_inode;
 	const struct proc_dir_entry *dp = PDE(ino);
 	struct pci_dev *dev = dp->data;
 	int pos = *ppos;
-	int size = dev->cfg_size;
+	int size = dp->size;
 	int cnt;
 
 	if (pos >= size)
@@ -193,6 +194,7 @@ proc_bus_pci_write(struct file *file, const char __user *buf, size_t nbytes, lof
 	}
 
 	*ppos = pos;
+	i_size_write(ino, dp->size);
 	return nbytes;
 }
 
@@ -201,14 +203,17 @@ struct pci_filp_private {
 	int write_combine;
 };
 
-static int proc_bus_pci_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long arg)
+static long proc_bus_pci_ioctl(struct file *file, unsigned int cmd,
+			       unsigned long arg)
 {
-	const struct proc_dir_entry *dp = PDE(inode);
+	const struct proc_dir_entry *dp = PDE(file->f_dentry->d_inode);
 	struct pci_dev *dev = dp->data;
 #ifdef HAVE_PCI_MMAP
 	struct pci_filp_private *fpriv = file->private_data;
 #endif /* HAVE_PCI_MMAP */
 	int ret = 0;
+
+	lock_kernel();
 
 	switch (cmd) {
 	case PCIIOC_CONTROLLER:
@@ -238,6 +243,7 @@ static int proc_bus_pci_ioctl(struct inode *inode, struct file *file, unsigned i
 		break;
 	};
 
+	unlock_kernel();
 	return ret;
 }
 
@@ -290,7 +296,7 @@ static const struct file_operations proc_bus_pci_operations = {
 	.llseek		= proc_bus_pci_lseek,
 	.read		= proc_bus_pci_read,
 	.write		= proc_bus_pci_write,
-	.ioctl		= proc_bus_pci_ioctl,
+	.unlocked_ioctl	= proc_bus_pci_ioctl,
 #ifdef HAVE_PCI_MMAP
 	.open		= proc_bus_pci_open,
 	.release	= proc_bus_pci_release,
@@ -369,7 +375,7 @@ static int show_device(struct seq_file *m, void *v)
 	return 0;
 }
 
-static struct seq_operations proc_bus_pci_devices_op = {
+static const struct seq_operations proc_bus_pci_devices_op = {
 	.start	= pci_seq_start,
 	.next	= pci_seq_next,
 	.stop	= pci_seq_stop,
@@ -416,7 +422,7 @@ int pci_proc_detach_device(struct pci_dev *dev)
 	struct proc_dir_entry *e;
 
 	if ((e = dev->procent)) {
-		if (atomic_read(&e->count))
+		if (atomic_read(&e->count) > 1)
 			return -EBUSY;
 		remove_proc_entry(e->name, dev->bus->procdir);
 		dev->procent = NULL;
@@ -478,8 +484,4 @@ static int __init pci_proc_init(void)
 }
 
 __initcall(pci_proc_init);
-
-#ifdef CONFIG_HOTPLUG
-EXPORT_SYMBOL(pci_proc_detach_bus);
-#endif
 

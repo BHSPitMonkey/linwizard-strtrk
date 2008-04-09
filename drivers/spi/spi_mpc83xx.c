@@ -436,11 +436,7 @@ static int __init mpc83xx_spi_probe(struct platform_device *dev)
 	mpc83xx_spi->qe_mode = pdata->qe_mode;
 	mpc83xx_spi->get_rx = mpc83xx_spi_rx_buf_u8;
 	mpc83xx_spi->get_tx = mpc83xx_spi_tx_buf_u8;
-
-	if (mpc83xx_spi->qe_mode)
-		mpc83xx_spi->spibrg = pdata->sysclk / 2;
-	else
-		mpc83xx_spi->spibrg = pdata->sysclk;
+	mpc83xx_spi->spibrg = pdata->sysclk;
 
 	mpc83xx_spi->rx_shift = 0;
 	mpc83xx_spi->tx_shift = 0;
@@ -511,7 +507,7 @@ err:
 	return ret;
 }
 
-static int __devexit mpc83xx_spi_remove(struct platform_device *dev)
+static int __exit mpc83xx_spi_remove(struct platform_device *dev)
 {
 	struct mpc83xx_spi *mpc83xx_spi;
 	struct spi_master *master;
@@ -529,8 +525,7 @@ static int __devexit mpc83xx_spi_remove(struct platform_device *dev)
 
 MODULE_ALIAS("mpc83xx_spi");			/* for platform bus hotplug */
 static struct platform_driver mpc83xx_spi_driver = {
-	.probe = mpc83xx_spi_probe,
-	.remove = __devexit_p(mpc83xx_spi_remove),
+	.remove = __exit_p(mpc83xx_spi_remove),
 	.driver = {
 		   .name = "mpc83xx_spi",
 	},
@@ -538,7 +533,7 @@ static struct platform_driver mpc83xx_spi_driver = {
 
 static int __init mpc83xx_spi_init(void)
 {
-	return platform_driver_register(&mpc83xx_spi_driver);
+	return platform_driver_probe(&mpc83xx_spi_driver, mpc83xx_spi_probe);
 }
 
 static void __exit mpc83xx_spi_exit(void)

@@ -37,23 +37,24 @@ static int check_node_data(struct jffs2_sb_info *c, struct jffs2_tmp_dnode_info 
 
 	BUG_ON(tn->csize == 0);
 
-	if (!jffs2_is_writebuffered(c))
-		goto adj_acc;
-
 	/* Calculate how many bytes were already checked */
 	ofs = ref_offset(ref) + sizeof(struct jffs2_raw_inode);
-	len = ofs % c->wbuf_pagesize;
-	if (likely(len))
-		len = c->wbuf_pagesize - len;
+	len = tn->csize;
 
-	if (len >= tn->csize) {
-		dbg_readinode("no need to check node at %#08x, data length %u, data starts at %#08x - it has already been checked.\n",
-			ref_offset(ref), tn->csize, ofs);
-		goto adj_acc;
+	if (jffs2_is_writebuffered(c)) {
+		int adj = ofs % c->wbuf_pagesize;
+		if (likely(adj))
+			adj = c->wbuf_pagesize - adj;
+
+		if (adj >= tn->csize) {
+			dbg_readinode("no need to check node at %#08x, data length %u, data starts at %#08x - it has already been checked.\n",
+				      ref_offset(ref), tn->csize, ofs);
+			goto adj_acc;
+		}
+
+		ofs += adj;
+		len -= adj;
 	}
-
-	ofs += len;
-	len = tn->csize - len;
 
 	dbg_readinode("check node at %#08x, data length %u, partial CRC %#08x, correct CRC %#08x, data starts at %#08x, start checking from %#08x - %u bytes.\n",
 		ref_offset(ref), tn->csize, tn->partial_crc, tn->data_crc, ofs - len, ofs, len);
@@ -63,9 +64,9 @@ static int check_node_data(struct jffs2_sb_info *c, struct jffs2_tmp_dnode_info 
 	 * adding and jffs2_flash_read_end() interface. */
 	if (c->mtd->point) {
 		err = c->mtd->point(c->mtd, ofs, len, &retlen, &buffer);
-		if (!err && retlen < tn->csize) {
+		if (!err && retlen < len) {
 			JFFS2_WARNING("MTD point returned len too short: %zu instead of %u.\n", retlen, tn->csize);
-			c->mtd->unpoint(c->mtd, buffer, ofs, len);
+			c->mtd->unpoint(c->mtd, buffer, ofs, retlen);
 		} else if (err)
 			JFFS2_WARNING("MTD point failed: error code %d.\n", err);
 		else
@@ -211,7 +212,7 @@ static void jffs2_kill_tn(struct jffs2_sb_info *c, struct jffs2_tmp_dnode_info *
  * ordering.
  *
  * Returns 0 if the node was handled (including marking it obsolete)
- *         < 0 an if error occurred
+ *	 < 0 an if error occurred
  */
 static int jffs2_add_tn_to_tree(struct jffs2_sb_info *c,
 				struct jffs2_readinode_info *rii,
@@ -741,7 +742,7 @@ static inline int read_dnode(struct jffs2_sb_info *c, struct jffs2_raw_node_ref 
 			 * are not obsolete.
 			 *
 			 * Of course, this optimization only makes sense in case
-			 * of NAND flashes (or other flashes whith
+			 * of NAND flashes (or other flashes with
 			 * !jffs2_can_mark_obsolete()), since on NOR flashes
 			 * nodes are marked obsolete physically.
 			 *
@@ -862,8 +863,8 @@ static inline int read_unknown(struct jffs2_sb_info *c, struct jffs2_raw_node_re
 		JFFS2_ERROR("REF_UNCHECKED but unknown node at %#08x\n",
 			    ref_offset(ref));
 		JFFS2_ERROR("Node is {%04x,%04x,%08x,%08x}. Please report this error.\n",
-                            je16_to_cpu(un->magic), je16_to_cpu(un->nodetype),
-                            je32_to_cpu(un->totlen), je32_to_cpu(un->hdr_crc));
+			    je16_to_cpu(un->magic), je16_to_cpu(un->nodetype),
+			    je32_to_cpu(un->totlen), je32_to_cpu(un->hdr_crc));
 		jffs2_mark_node_obsolete(c, ref);
 		return 0;
 	}

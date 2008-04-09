@@ -30,6 +30,7 @@
 #include <linux/console.h>
 #include <linux/mutex.h>
 #include <linux/memory_hotplug.h>
+#include <linux/of_platform.h>
 
 #include <asm/mmu.h>
 #include <asm/processor.h>
@@ -51,10 +52,9 @@
 #include <asm/spu_priv1.h>
 #include <asm/udbg.h>
 #include <asm/mpic.h>
-#include <asm/of_platform.h>
+#include <asm/cell-regs.h>
 
 #include "interrupt.h"
-#include "cbe_regs.h"
 #include "pervasive.h"
 #include "ras.h"
 
@@ -81,17 +81,60 @@ static void cell_progress(char *s, unsigned short hex)
 	printk("*** %04x : %s\n", hex, s ? s : "");
 }
 
+static void cell_fixup_pcie_rootcomplex(struct pci_dev *dev)
+{
+	struct pci_controller *hose;
+	const char *s;
+	int i;
+
+	if (!machine_is(cell))
+		return;
+
+	/* We're searching for a direct child of the PHB */
+	if (dev->bus->self != NULL || dev->devfn != 0)
+		return;
+
+	hose = pci_bus_to_host(dev->bus);
+	if (hose == NULL)
+		return;
+
+	/* Only on PCIE */
+	if (!of_device_is_compatible(hose->dn, "pciex"))
+		return;
+
+	/* And only on axon */
+	s = of_get_property(hose->dn, "model", NULL);
+	if (!s || strcmp(s, "Axon") != 0)
+		return;
+
+	for (i = 0; i < PCI_BRIDGE_RESOURCES; i++) {
+		dev->resource[i].start = dev->resource[i].end = 0;
+		dev->resource[i].flags = 0;
+	}
+
+	printk(KERN_DEBUG "PCI: Hiding resources on Axon PCIE RC %s\n",
+	       pci_name(dev));
+}
+DECLARE_PCI_FIXUP_HEADER(PCI_ANY_ID, PCI_ANY_ID, cell_fixup_pcie_rootcomplex);
+
 static int __init cell_publish_devices(void)
 {
-	if (!machine_is(cell))
-		return 0;
+	int node;
 
 	/* Publish OF platform devices for southbridge IOs */
 	of_platform_bus_probe(NULL, NULL, NULL);
 
+	/* There is no device for the MIC memory controller, thus we create
+	 * a platform device for it to attach the EDAC driver to.
+	 */
+	for_each_online_node(node) {
+		if (cbe_get_cpu_mic_tm_regs(cbe_node_to_cpu(node)) == NULL)
+			continue;
+		platform_device_register_simple("cbe-mic", node, NULL, 0);
+	}
 	return 0;
 }
-device_initcall(cell_publish_devices);
+machine_subsys_initcall(cell, cell_publish_devices);
 
 static void cell_mpic_cascade(unsigned int irq, struct irq_desc *desc)
 {
@@ -142,6 +185,11 @@ static void __init cell_init_irq(void)
 	mpic_init_IRQ();
 }
 
+static void __init cell_set_dabrx(void)
+{
+	mtspr(SPRN_DABRX, DABRX_KERNEL | DABRX_USER);
+}
+
 static void __init cell_setup_arch(void)
 {
 #ifdef CONFIG_SPU_BASE
@@ -150,6 +198,8 @@ static void __init cell_setup_arch(void)
 #endif
 
 	cbe_regs_init();
+
+	cell_set_dabrx();
 
 #ifdef CONFIG_CBE_RAS
 	cbe_ras_init();
@@ -160,11 +210,6 @@ static void __init cell_setup_arch(void)
 #endif
 	/* init to some ~sane value until calibrate_delay() runs */
 	loops_per_jiffy = 50000000;
-
-	if (ROOT_DEV == 0) {
-		printk("No ramdisk, default root is /dev/hda2\n");
-		ROOT_DEV = Root_HDA2;
-	}
 
 	/* Find and initialize PCI host bridges */
 	init_pci_config_tokens();

@@ -20,6 +20,18 @@ static inline int gfs2_is_jdata(const struct gfs2_inode *ip)
 	return ip->i_di.di_flags & GFS2_DIF_JDATA;
 }
 
+static inline int gfs2_is_writeback(const struct gfs2_inode *ip)
+{
+	const struct gfs2_sbd *sdp = GFS2_SB(&ip->i_inode);
+	return (sdp->sd_args.ar_data == GFS2_DATA_WRITEBACK) && !gfs2_is_jdata(ip);
+}
+
+static inline int gfs2_is_ordered(const struct gfs2_inode *ip)
+{
+	const struct gfs2_sbd *sdp = GFS2_SB(&ip->i_inode);
+	return (sdp->sd_args.ar_data == GFS2_DATA_ORDERED) && !gfs2_is_jdata(ip);
+}
+
 static inline int gfs2_is_dir(const struct gfs2_inode *ip)
 {
 	return S_ISDIR(ip->i_inode.i_mode);
@@ -49,7 +61,8 @@ static inline void gfs2_inum_out(const struct gfs2_inode *ip,
 void gfs2_inode_attr_in(struct gfs2_inode *ip);
 void gfs2_set_iop(struct inode *inode);
 struct inode *gfs2_inode_lookup(struct super_block *sb, unsigned type, 
-				u64 no_addr, u64 no_formal_ino);
+				u64 no_addr, u64 no_formal_ino,
+				int skip_freeing);
 struct inode *gfs2_ilookup(struct super_block *sb, u64 no_addr);
 
 int gfs2_inode_refresh(struct gfs2_inode *ip);

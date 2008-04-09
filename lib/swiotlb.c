@@ -35,7 +35,7 @@
 #define OFFSET(val,align) ((unsigned long)	\
 	                   ( (val) & ( (align) - 1)))
 
-#define SG_ENT_VIRT_ADDRESS(sg)	(page_address((sg)->page) + (sg)->offset)
+#define SG_ENT_VIRT_ADDRESS(sg)	(sg_virt((sg)))
 #define SG_ENT_PHYS_ADDRESS(sg)	virt_to_bus(SG_ENT_VIRT_ADDRESS(sg))
 
 /*
@@ -282,6 +282,15 @@ address_needs_mapping(struct device *hwdev, dma_addr_t addr)
 	return (addr & ~mask) != 0;
 }
 
+static inline unsigned int is_span_boundary(unsigned int index,
+					    unsigned int nslots,
+					    unsigned long offset_slots,
+					    unsigned long max_slots)
+{
+	unsigned long offset = (offset_slots + index) & (max_slots - 1);
+	return offset + nslots > max_slots;
+}
+
 /*
  * Allocates bounce buffer and returns its kernel virtual address.
  */
@@ -292,6 +301,18 @@ map_single(struct device *hwdev, char *buffer, size_t size, int dir)
 	char *dma_addr;
 	unsigned int nslots, stride, index, wrap;
 	int i;
+	unsigned long start_dma_addr;
+	unsigned long mask;
+	unsigned long offset_slots;
+	unsigned long max_slots;
+
+	mask = dma_get_seg_boundary(hwdev);
+	start_dma_addr = virt_to_bus(io_tlb_start) & mask;
+
+	offset_slots = ALIGN(start_dma_addr, 1 << IO_TLB_SHIFT) >> IO_TLB_SHIFT;
+	max_slots = mask + 1
+		    ? ALIGN(mask + 1, 1 << IO_TLB_SHIFT) >> IO_TLB_SHIFT
+		    : 1UL << (BITS_PER_LONG - IO_TLB_SHIFT);
 
 	/*
 	 * For mappings greater than a page, we limit the stride (and
@@ -311,12 +332,21 @@ map_single(struct device *hwdev, char *buffer, size_t size, int dir)
 	 */
 	spin_lock_irqsave(&io_tlb_lock, flags);
 	{
-		wrap = index = ALIGN(io_tlb_index, stride);
-
+		index = ALIGN(io_tlb_index, stride);
 		if (index >= io_tlb_nslabs)
-			wrap = index = 0;
+			index = 0;
+		wrap = index;
 
 		do {
+			while (is_span_boundary(index, nslots, offset_slots,
+						max_slots)) {
+				index += stride;
+				if (index >= io_tlb_nslabs)
+					index = 0;
+				if (index == wrap)
+					goto not_found;
+			}
+
 			/*
 			 * If we find a slot that indicates we have 'nslots'
 			 * number of contiguous buffers, we allocate the
@@ -346,6 +376,7 @@ map_single(struct device *hwdev, char *buffer, size_t size, int dir)
 				index = 0;
 		} while (index != wrap);
 
+  not_found:
 		spin_unlock_irqrestore(&io_tlb_lock, flags);
 		return NULL;
 	}
@@ -497,6 +528,7 @@ void
 swiotlb_free_coherent(struct device *hwdev, size_t size, void *vaddr,
 		      dma_addr_t dma_handle)
 {
+	WARN_ON(irqs_disabled());
 	if (!(vaddr >= (void *)io_tlb_start
                     && vaddr < (void *)io_tlb_end))
 		free_pages((unsigned long) vaddr, get_order(size));
@@ -676,16 +708,17 @@ swiotlb_sync_single_range_for_device(struct device *hwdev, dma_addr_t dev_addr,
  * same here.
  */
 int
-swiotlb_map_sg(struct device *hwdev, struct scatterlist *sg, int nelems,
+swiotlb_map_sg(struct device *hwdev, struct scatterlist *sgl, int nelems,
 	       int dir)
 {
+	struct scatterlist *sg;
 	void *addr;
 	dma_addr_t dev_addr;
 	int i;
 
 	BUG_ON(dir == DMA_NONE);
 
-	for (i = 0; i < nelems; i++, sg++) {
+	for_each_sg(sgl, sg, nelems, i) {
 		addr = SG_ENT_VIRT_ADDRESS(sg);
 		dev_addr = virt_to_bus(addr);
 		if (swiotlb_force || address_needs_mapping(hwdev, dev_addr)) {
@@ -694,8 +727,8 @@ swiotlb_map_sg(struct device *hwdev, struct scatterlist *sg, int nelems,
 				/* Don't panic here, we expect map_sg users
 				   to do proper error handling. */
 				swiotlb_full(hwdev, sg->length, dir, 0);
-				swiotlb_unmap_sg(hwdev, sg - i, i, dir);
-				sg[0].dma_length = 0;
+				swiotlb_unmap_sg(hwdev, sgl, i, dir);
+				sgl[0].dma_length = 0;
 				return 0;
 			}
 			sg->dma_address = virt_to_bus(map);
@@ -711,19 +744,21 @@ swiotlb_map_sg(struct device *hwdev, struct scatterlist *sg, int nelems,
  * concerning calls here are the same as for swiotlb_unmap_single() above.
  */
 void
-swiotlb_unmap_sg(struct device *hwdev, struct scatterlist *sg, int nelems,
+swiotlb_unmap_sg(struct device *hwdev, struct scatterlist *sgl, int nelems,
 		 int dir)
 {
+	struct scatterlist *sg;
 	int i;
 
 	BUG_ON(dir == DMA_NONE);
 
-	for (i = 0; i < nelems; i++, sg++)
+	for_each_sg(sgl, sg, nelems, i) {
 		if (sg->dma_address != SG_ENT_PHYS_ADDRESS(sg))
 			unmap_single(hwdev, bus_to_virt(sg->dma_address),
 				     sg->dma_length, dir);
 		else if (dir == DMA_FROM_DEVICE)
 			dma_mark_clean(SG_ENT_VIRT_ADDRESS(sg), sg->dma_length);
+	}
 }
 
 /*
@@ -734,19 +769,21 @@ swiotlb_unmap_sg(struct device *hwdev, struct scatterlist *sg, int nelems,
  * and usage.
  */
 static void
-swiotlb_sync_sg(struct device *hwdev, struct scatterlist *sg,
+swiotlb_sync_sg(struct device *hwdev, struct scatterlist *sgl,
 		int nelems, int dir, int target)
 {
+	struct scatterlist *sg;
 	int i;
 
 	BUG_ON(dir == DMA_NONE);
 
-	for (i = 0; i < nelems; i++, sg++)
+	for_each_sg(sgl, sg, nelems, i) {
 		if (sg->dma_address != SG_ENT_PHYS_ADDRESS(sg))
 			sync_single(hwdev, bus_to_virt(sg->dma_address),
 				    sg->dma_length, dir, target);
 		else if (dir == DMA_FROM_DEVICE)
 			dma_mark_clean(SG_ENT_VIRT_ADDRESS(sg), sg->dma_length);
+	}
 }
 
 void

@@ -115,14 +115,17 @@ extern u32 ieee80211_debug_level;
 do { if (ieee80211_debug_level & (level)) \
   printk(KERN_DEBUG "ieee80211: %c %s " fmt, \
          in_interrupt() ? 'I' : 'U', __FUNCTION__ , ## args); } while (0)
+static inline bool ieee80211_ratelimit_debug(u32 level)
+{
+	return (ieee80211_debug_level & level) && net_ratelimit();
+}
 #else
 #define IEEE80211_DEBUG(level, fmt, args...) do {} while (0)
+static inline bool ieee80211_ratelimit_debug(u32 level)
+{
+	return false;
+}
 #endif				/* CONFIG_IEEE80211_DEBUG */
-
-/* debug macros not dependent on CONFIG_IEEE80211_DEBUG */
-
-#define MAC_FMT "%02x:%02x:%02x:%02x:%02x:%02x"
-#define MAC_ARG(x) ((u8*)(x))[0],((u8*)(x))[1],((u8*)(x))[2],((u8*)(x))[3],((u8*)(x))[4],((u8*)(x))[5]
 
 /* escape_essid() is intended to be used in debug (and possibly error)
  * messages. It should never be used for passing essid to user space. */
@@ -674,7 +677,7 @@ struct ieee80211_probe_request {
 
 struct ieee80211_probe_response {
 	struct ieee80211_hdr_3addr header;
-	u32 time_stamp[2];
+	__le32 time_stamp[2];
 	__le16 beacon_interval;
 	__le16 capability;
 	/* SSID, supported rates, FH params, DS params,
@@ -715,8 +718,8 @@ struct ieee80211_txb {
 	u8 encrypted;
 	u8 rts_included;
 	u8 reserved;
-	__le16 frag_size;
-	__le16 payload_size;
+	u16 frag_size;
+	u16 payload_size;
 	struct sk_buff *fragments[0];
 };
 

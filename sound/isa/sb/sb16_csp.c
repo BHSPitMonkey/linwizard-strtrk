@@ -23,7 +23,6 @@
  *
  */
 
-#include <sound/driver.h>
 #include <linux/delay.h>
 #include <linux/init.h>
 #include <linux/slab.h>
@@ -118,7 +117,8 @@ static void info_read(struct snd_info_entry *entry, struct snd_info_buffer *buff
 int snd_sb_csp_new(struct snd_sb *chip, int device, struct snd_hwdep ** rhwdep)
 {
 	struct snd_sb_csp *p;
-	int version, err;
+	int uninitialized_var(version);
+	int err;
 	struct snd_hwdep *hw;
 
 	if (rhwdep)
@@ -979,14 +979,7 @@ static int snd_sb_csp_restart(struct snd_sb_csp * p)
  * QSound mixer control for PCM
  */
 
-static int snd_sb_qsound_switch_info(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_info *uinfo)
-{
-	uinfo->type = SNDRV_CTL_ELEM_TYPE_BOOLEAN;
-	uinfo->count = 1;
-	uinfo->value.integer.min = 0;
-	uinfo->value.integer.max = 1;
-	return 0;
-}
+#define snd_sb_qsound_switch_info	snd_ctl_boolean_mono_info
 
 static int snd_sb_qsound_switch_get(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
 {

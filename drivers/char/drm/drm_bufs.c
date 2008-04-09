@@ -92,7 +92,7 @@ static int drm_map_handle(struct drm_device *dev, struct drm_hash_item *hash,
  * Ioctl to specify a range of memory that is available for mapping by a non-root process.
  *
  * \param inode device inode.
- * \param filp file pointer.
+ * \param file_priv DRM file private.
  * \param cmd command.
  * \param arg pointer to a drm_map structure.
  * \return zero on success or a negative value on error.
@@ -184,7 +184,7 @@ static int drm_addmap_core(struct drm_device * dev, unsigned int offset,
 				return -ENOMEM;
 			}
 		}
-				
+
 		break;
 	case _DRM_SHM:
 		list = drm_find_matching_map(dev, map);
@@ -229,11 +229,17 @@ static int drm_addmap_core(struct drm_device * dev, unsigned int offset,
 #ifdef __alpha__
 		map->offset += dev->hose->mem_space->start;
 #endif
-		/* Note: dev->agp->base may actually be 0 when the DRM
-		 * is not in control of AGP space. But if user space is
-		 * it should already have added the AGP base itself.
+		/* In some cases (i810 driver), user space may have already
+		 * added the AGP base itself, because dev->agp->base previously
+		 * only got set during AGP enable.  So, only add the base
+		 * address if the map's offset isn't already within the
+		 * aperture.
 		 */
-		map->offset += dev->agp->base;
+		if (map->offset < dev->agp->base ||
+		    map->offset > dev->agp->base +
+		    dev->agp->agp_info.aper_size * 1024 * 1024 - 1) {
+			map->offset += dev->agp->base;
+		}
 		map->mtrr = dev->agp->agp_mtrr;	/* for getmap */
 
 		/* This assumes the DRM is in total control of AGP space.
@@ -332,38 +338,24 @@ int drm_addmap(struct drm_device * dev, unsigned int offset,
 
 EXPORT_SYMBOL(drm_addmap);
 
-int drm_addmap_ioctl(struct inode *inode, struct file *filp,
-		     unsigned int cmd, unsigned long arg)
+int drm_addmap_ioctl(struct drm_device *dev, void *data,
+		     struct drm_file *file_priv)
 {
-	struct drm_file *priv = filp->private_data;
-	struct drm_device *dev = priv->head->dev;
-	struct drm_map map;
+	struct drm_map *map = data;
 	struct drm_map_list *maplist;
-	struct drm_map __user *argp = (void __user *)arg;
 	int err;
 
-	if (!(filp->f_mode & 3))
-		return -EACCES;	/* Require read/write */
-
-	if (copy_from_user(&map, argp, sizeof(map))) {
-		return -EFAULT;
-	}
-
-	if (!(capable(CAP_SYS_ADMIN) || map.type == _DRM_AGP))
+	if (!(capable(CAP_SYS_ADMIN) || map->type == _DRM_AGP))
 		return -EPERM;
 
-	err = drm_addmap_core(dev, map.offset, map.size, map.type, map.flags,
-			      &maplist);
+	err = drm_addmap_core(dev, map->offset, map->size, map->type,
+			      map->flags, &maplist);
 
 	if (err)
 		return err;
 
-	if (copy_to_user(argp, maplist->map, sizeof(struct drm_map)))
-		return -EFAULT;
-
 	/* avoid a warning on 64-bit, this casting isn't very nice, but the API is set so too late */
-	if (put_user((void *)(unsigned long)maplist->user_token, &argp->handle))
-		return -EFAULT;
+	map->handle = (void *)(unsigned long)maplist->user_token;
 	return 0;
 }
 
@@ -372,7 +364,7 @@ int drm_addmap_ioctl(struct inode *inode, struct file *filp,
  * isn't in use.
  *
  * \param inode device inode.
- * \param filp file pointer.
+ * \param file_priv DRM file private.
  * \param cmd command.
  * \param arg pointer to a struct drm_map structure.
  * \return zero on success or a negative value on error.
@@ -443,6 +435,7 @@ int drm_rmmap(struct drm_device *dev, drm_local_map_t *map)
 
 	return ret;
 }
+EXPORT_SYMBOL(drm_rmmap);
 
 /* The rmmap ioctl appears to be unnecessary.  All mappings are torn down on
  * the last close of the device, and this is necessary for cleanup when things
@@ -453,24 +446,18 @@ int drm_rmmap(struct drm_device *dev, drm_local_map_t *map)
  * gets used by drivers that the server doesn't need to care about.  This seems
  * unlikely.
  */
-int drm_rmmap_ioctl(struct inode *inode, struct file *filp,
-		    unsigned int cmd, unsigned long arg)
+int drm_rmmap_ioctl(struct drm_device *dev, void *data,
+		    struct drm_file *file_priv)
 {
-	struct drm_file *priv = filp->private_data;
-	struct drm_device *dev = priv->head->dev;
-	struct drm_map request;
+	struct drm_map *request = data;
 	drm_local_map_t *map = NULL;
 	struct drm_map_list *r_list;
 	int ret;
 
-	if (copy_from_user(&request, (struct drm_map __user *) arg, sizeof(request))) {
-		return -EFAULT;
-	}
-
 	mutex_lock(&dev->struct_mutex);
 	list_for_each_entry(r_list, &dev->maplist, head) {
 		if (r_list->map &&
-		    r_list->user_token == (unsigned long)request.handle &&
+		    r_list->user_token == (unsigned long)request->handle &&
 		    r_list->map->flags & _DRM_REMOVABLE) {
 			map = r_list->map;
 			break;
@@ -661,7 +648,7 @@ int drm_addbufs_agp(struct drm_device * dev, struct drm_buf_desc * request)
 		buf->waiting = 0;
 		buf->pending = 0;
 		init_waitqueue_head(&buf->dma_wait);
-		buf->filp = NULL;
+		buf->file_priv = NULL;
 
 		buf->dev_priv_size = dev->driver->dev_priv_size;
 		buf->dev_private = drm_alloc(buf->dev_priv_size, DRM_MEM_BUFS);
@@ -834,9 +821,9 @@ int drm_addbufs_pci(struct drm_device * dev, struct drm_buf_desc * request)
 	page_count = 0;
 
 	while (entry->buf_count < count) {
-		
+
 		dmah = drm_pci_alloc(dev, PAGE_SIZE << page_order, 0x1000, 0xfffffffful);
-		
+
 		if (!dmah) {
 			/* Set count correctly so we free the proper amount. */
 			entry->buf_count = count;
@@ -872,7 +859,7 @@ int drm_addbufs_pci(struct drm_device * dev, struct drm_buf_desc * request)
 			buf->waiting = 0;
 			buf->pending = 0;
 			init_waitqueue_head(&buf->dma_wait);
-			buf->filp = NULL;
+			buf->file_priv = NULL;
 
 			buf->dev_priv_size = dev->driver->dev_priv_size;
 			buf->dev_private = drm_alloc(buf->dev_priv_size,
@@ -1050,7 +1037,7 @@ static int drm_addbufs_sg(struct drm_device * dev, struct drm_buf_desc * request
 		buf->waiting = 0;
 		buf->pending = 0;
 		init_waitqueue_head(&buf->dma_wait);
-		buf->filp = NULL;
+		buf->file_priv = NULL;
 
 		buf->dev_priv_size = dev->driver->dev_priv_size;
 		buf->dev_private = drm_alloc(buf->dev_priv_size, DRM_MEM_BUFS);
@@ -1211,7 +1198,7 @@ static int drm_addbufs_fb(struct drm_device * dev, struct drm_buf_desc * request
 		buf->waiting = 0;
 		buf->pending = 0;
 		init_waitqueue_head(&buf->dma_wait);
-		buf->filp = NULL;
+		buf->file_priv = NULL;
 
 		buf->dev_priv_size = dev->driver->dev_priv_size;
 		buf->dev_private = drm_alloc(buf->dev_priv_size, DRM_MEM_BUFS);
@@ -1275,7 +1262,7 @@ static int drm_addbufs_fb(struct drm_device * dev, struct drm_buf_desc * request
  * Add buffers for DMA transfers (ioctl).
  *
  * \param inode device inode.
- * \param filp file pointer.
+ * \param file_priv DRM file private.
  * \param cmd command.
  * \param arg pointer to a struct drm_buf_desc request.
  * \return zero on success or a negative number on failure.
@@ -1285,38 +1272,27 @@ static int drm_addbufs_fb(struct drm_device * dev, struct drm_buf_desc * request
  * addbufs_sg() or addbufs_pci() for AGP, scatter-gather or consistent
  * PCI memory respectively.
  */
-int drm_addbufs(struct inode *inode, struct file *filp,
-		unsigned int cmd, unsigned long arg)
+int drm_addbufs(struct drm_device *dev, void *data,
+		struct drm_file *file_priv)
 {
-	struct drm_buf_desc request;
-	struct drm_file *priv = filp->private_data;
-	struct drm_device *dev = priv->head->dev;
+	struct drm_buf_desc *request = data;
 	int ret;
 
 	if (!drm_core_check_feature(dev, DRIVER_HAVE_DMA))
 		return -EINVAL;
 
-	if (copy_from_user(&request, (struct drm_buf_desc __user *) arg,
-			   sizeof(request)))
-		return -EFAULT;
-
 #if __OS_HAS_AGP
-	if (request.flags & _DRM_AGP_BUFFER)
-		ret = drm_addbufs_agp(dev, &request);
+	if (request->flags & _DRM_AGP_BUFFER)
+		ret = drm_addbufs_agp(dev, request);
 	else
 #endif
-	if (request.flags & _DRM_SG_BUFFER)
-		ret = drm_addbufs_sg(dev, &request);
-	else if (request.flags & _DRM_FB_BUFFER)
-		ret = drm_addbufs_fb(dev, &request);
+	if (request->flags & _DRM_SG_BUFFER)
+		ret = drm_addbufs_sg(dev, request);
+	else if (request->flags & _DRM_FB_BUFFER)
+		ret = drm_addbufs_fb(dev, request);
 	else
-		ret = drm_addbufs_pci(dev, &request);
+		ret = drm_addbufs_pci(dev, request);
 
-	if (ret == 0) {
-		if (copy_to_user((void __user *)arg, &request, sizeof(request))) {
-			ret = -EFAULT;
-		}
-	}
 	return ret;
 }
 
@@ -1328,7 +1304,7 @@ int drm_addbufs(struct inode *inode, struct file *filp,
  * large buffers can be used for image transfer).
  *
  * \param inode device inode.
- * \param filp file pointer.
+ * \param file_priv DRM file private.
  * \param cmd command.
  * \param arg pointer to a drm_buf_info structure.
  * \return zero on success or a negative number on failure.
@@ -1337,14 +1313,11 @@ int drm_addbufs(struct inode *inode, struct file *filp,
  * lock, preventing of allocating more buffers after this call. Information
  * about each requested buffer is then copied into user space.
  */
-int drm_infobufs(struct inode *inode, struct file *filp,
-		 unsigned int cmd, unsigned long arg)
+int drm_infobufs(struct drm_device *dev, void *data,
+		 struct drm_file *file_priv)
 {
-	struct drm_file *priv = filp->private_data;
-	struct drm_device *dev = priv->head->dev;
 	struct drm_device_dma *dma = dev->dma;
-	struct drm_buf_info request;
-	struct drm_buf_info __user *argp = (void __user *)arg;
+	struct drm_buf_info *request = data;
 	int i;
 	int count;
 
@@ -1362,9 +1335,6 @@ int drm_infobufs(struct inode *inode, struct file *filp,
 	++dev->buf_use;		/* Can't allocate more after this call */
 	spin_unlock(&dev->count_lock);
 
-	if (copy_from_user(&request, argp, sizeof(request)))
-		return -EFAULT;
-
 	for (i = 0, count = 0; i < DRM_MAX_ORDER + 1; i++) {
 		if (dma->bufs[i].buf_count)
 			++count;
@@ -1372,11 +1342,11 @@ int drm_infobufs(struct inode *inode, struct file *filp,
 
 	DRM_DEBUG("count = %d\n", count);
 
-	if (request.count >= count) {
+	if (request->count >= count) {
 		for (i = 0, count = 0; i < DRM_MAX_ORDER + 1; i++) {
 			if (dma->bufs[i].buf_count) {
 				struct drm_buf_desc __user *to =
-				    &request.list[count];
+				    &request->list[count];
 				struct drm_buf_entry *from = &dma->bufs[i];
 				struct drm_freelist *list = &dma->bufs[i].freelist;
 				if (copy_to_user(&to->count,
@@ -1403,10 +1373,7 @@ int drm_infobufs(struct inode *inode, struct file *filp,
 			}
 		}
 	}
-	request.count = count;
-
-	if (copy_to_user(argp, &request, sizeof(request)))
-		return -EFAULT;
+	request->count = count;
 
 	return 0;
 }
@@ -1415,7 +1382,7 @@ int drm_infobufs(struct inode *inode, struct file *filp,
  * Specifies a low and high water mark for buffer allocation
  *
  * \param inode device inode.
- * \param filp file pointer.
+ * \param file_priv DRM file private.
  * \param cmd command.
  * \param arg a pointer to a drm_buf_desc structure.
  * \return zero on success or a negative number on failure.
@@ -1425,13 +1392,11 @@ int drm_infobufs(struct inode *inode, struct file *filp,
  *
  * \note This ioctl is deprecated and mostly never used.
  */
-int drm_markbufs(struct inode *inode, struct file *filp,
-		 unsigned int cmd, unsigned long arg)
+int drm_markbufs(struct drm_device *dev, void *data,
+		 struct drm_file *file_priv)
 {
-	struct drm_file *priv = filp->private_data;
-	struct drm_device *dev = priv->head->dev;
 	struct drm_device_dma *dma = dev->dma;
-	struct drm_buf_desc request;
+	struct drm_buf_desc *request = data;
 	int order;
 	struct drm_buf_entry *entry;
 
@@ -1441,24 +1406,20 @@ int drm_markbufs(struct inode *inode, struct file *filp,
 	if (!dma)
 		return -EINVAL;
 
-	if (copy_from_user(&request,
-			   (struct drm_buf_desc __user *) arg, sizeof(request)))
-		return -EFAULT;
-
 	DRM_DEBUG("%d, %d, %d\n",
-		  request.size, request.low_mark, request.high_mark);
-	order = drm_order(request.size);
+		  request->size, request->low_mark, request->high_mark);
+	order = drm_order(request->size);
 	if (order < DRM_MIN_ORDER || order > DRM_MAX_ORDER)
 		return -EINVAL;
 	entry = &dma->bufs[order];
 
-	if (request.low_mark < 0 || request.low_mark > entry->buf_count)
+	if (request->low_mark < 0 || request->low_mark > entry->buf_count)
 		return -EINVAL;
-	if (request.high_mark < 0 || request.high_mark > entry->buf_count)
+	if (request->high_mark < 0 || request->high_mark > entry->buf_count)
 		return -EINVAL;
 
-	entry->freelist.low_mark = request.low_mark;
-	entry->freelist.high_mark = request.high_mark;
+	entry->freelist.low_mark = request->low_mark;
+	entry->freelist.high_mark = request->high_mark;
 
 	return 0;
 }
@@ -1467,7 +1428,7 @@ int drm_markbufs(struct inode *inode, struct file *filp,
  * Unreserve the buffers in list, previously reserved using drmDMA.
  *
  * \param inode device inode.
- * \param filp file pointer.
+ * \param file_priv DRM file private.
  * \param cmd command.
  * \param arg pointer to a drm_buf_free structure.
  * \return zero on success or a negative number on failure.
@@ -1475,13 +1436,11 @@ int drm_markbufs(struct inode *inode, struct file *filp,
  * Calls free_buffer() for each used buffer.
  * This function is primarily used for debugging.
  */
-int drm_freebufs(struct inode *inode, struct file *filp,
-		 unsigned int cmd, unsigned long arg)
+int drm_freebufs(struct drm_device *dev, void *data,
+		 struct drm_file *file_priv)
 {
-	struct drm_file *priv = filp->private_data;
-	struct drm_device *dev = priv->head->dev;
 	struct drm_device_dma *dma = dev->dma;
-	struct drm_buf_free request;
+	struct drm_buf_free *request = data;
 	int i;
 	int idx;
 	struct drm_buf *buf;
@@ -1492,13 +1451,9 @@ int drm_freebufs(struct inode *inode, struct file *filp,
 	if (!dma)
 		return -EINVAL;
 
-	if (copy_from_user(&request,
-			   (struct drm_buf_free __user *) arg, sizeof(request)))
-		return -EFAULT;
-
-	DRM_DEBUG("%d\n", request.count);
-	for (i = 0; i < request.count; i++) {
-		if (copy_from_user(&idx, &request.list[i], sizeof(idx)))
+	DRM_DEBUG("%d\n", request->count);
+	for (i = 0; i < request->count; i++) {
+		if (copy_from_user(&idx, &request->list[i], sizeof(idx)))
 			return -EFAULT;
 		if (idx < 0 || idx >= dma->buf_count) {
 			DRM_ERROR("Index %d (of %d max)\n",
@@ -1506,9 +1461,9 @@ int drm_freebufs(struct inode *inode, struct file *filp,
 			return -EINVAL;
 		}
 		buf = dma->buflist[idx];
-		if (buf->filp != filp) {
+		if (buf->file_priv != file_priv) {
 			DRM_ERROR("Process %d freeing buffer not owned\n",
-				  current->pid);
+				  task_pid_nr(current));
 			return -EINVAL;
 		}
 		drm_free_buffer(dev, buf);
@@ -1521,7 +1476,7 @@ int drm_freebufs(struct inode *inode, struct file *filp,
  * Maps all of the DMA buffers into client-virtual space (ioctl).
  *
  * \param inode device inode.
- * \param filp file pointer.
+ * \param file_priv DRM file private.
  * \param cmd command.
  * \param arg pointer to a drm_buf_map structure.
  * \return zero on success or a negative number on failure.
@@ -1531,18 +1486,15 @@ int drm_freebufs(struct inode *inode, struct file *filp,
  * offset equal to 0, which drm_mmap() interpretes as PCI buffers and calls
  * drm_mmap_dma().
  */
-int drm_mapbufs(struct inode *inode, struct file *filp,
-		unsigned int cmd, unsigned long arg)
+int drm_mapbufs(struct drm_device *dev, void *data,
+	        struct drm_file *file_priv)
 {
-	struct drm_file *priv = filp->private_data;
-	struct drm_device *dev = priv->head->dev;
 	struct drm_device_dma *dma = dev->dma;
-	struct drm_buf_map __user *argp = (void __user *)arg;
 	int retcode = 0;
 	const int zero = 0;
 	unsigned long virtual;
 	unsigned long address;
-	struct drm_buf_map request;
+	struct drm_buf_map *request = data;
 	int i;
 
 	if (!drm_core_check_feature(dev, DRIVER_HAVE_DMA))
@@ -1559,10 +1511,7 @@ int drm_mapbufs(struct inode *inode, struct file *filp,
 	dev->buf_use++;		/* Can't allocate more after this call */
 	spin_unlock(&dev->count_lock);
 
-	if (copy_from_user(&request, argp, sizeof(request)))
-		return -EFAULT;
-
-	if (request.count >= dma->buf_count) {
+	if (request->count >= dma->buf_count) {
 		if ((drm_core_has_AGP(dev) && (dma->flags & _DRM_DMA_USE_AGP))
 		    || (drm_core_check_feature(dev, DRIVER_SG)
 			&& (dma->flags & _DRM_DMA_USE_SG))
@@ -1575,15 +1524,15 @@ int drm_mapbufs(struct inode *inode, struct file *filp,
 				retcode = -EINVAL;
 				goto done;
 			}
-
 			down_write(&current->mm->mmap_sem);
-			virtual = do_mmap(filp, 0, map->size,
+			virtual = do_mmap(file_priv->filp, 0, map->size,
 					  PROT_READ | PROT_WRITE,
-					  MAP_SHARED, token);
+					  MAP_SHARED,
+					  token);
 			up_write(&current->mm->mmap_sem);
 		} else {
 			down_write(&current->mm->mmap_sem);
-			virtual = do_mmap(filp, 0, dma->byte_count,
+			virtual = do_mmap(file_priv->filp, 0, dma->byte_count,
 					  PROT_READ | PROT_WRITE,
 					  MAP_SHARED, 0);
 			up_write(&current->mm->mmap_sem);
@@ -1593,28 +1542,28 @@ int drm_mapbufs(struct inode *inode, struct file *filp,
 			retcode = (signed long)virtual;
 			goto done;
 		}
-		request.virtual = (void __user *)virtual;
+		request->virtual = (void __user *)virtual;
 
 		for (i = 0; i < dma->buf_count; i++) {
-			if (copy_to_user(&request.list[i].idx,
+			if (copy_to_user(&request->list[i].idx,
 					 &dma->buflist[i]->idx,
-					 sizeof(request.list[0].idx))) {
+					 sizeof(request->list[0].idx))) {
 				retcode = -EFAULT;
 				goto done;
 			}
-			if (copy_to_user(&request.list[i].total,
+			if (copy_to_user(&request->list[i].total,
 					 &dma->buflist[i]->total,
-					 sizeof(request.list[0].total))) {
+					 sizeof(request->list[0].total))) {
 				retcode = -EFAULT;
 				goto done;
 			}
-			if (copy_to_user(&request.list[i].used,
+			if (copy_to_user(&request->list[i].used,
 					 &zero, sizeof(zero))) {
 				retcode = -EFAULT;
 				goto done;
 			}
 			address = virtual + dma->buflist[i]->offset;	/* *** */
-			if (copy_to_user(&request.list[i].address,
+			if (copy_to_user(&request->list[i].address,
 					 &address, sizeof(address))) {
 				retcode = -EFAULT;
 				goto done;
@@ -1622,11 +1571,8 @@ int drm_mapbufs(struct inode *inode, struct file *filp,
 		}
 	}
       done:
-	request.count = dma->buf_count;
-	DRM_DEBUG("%d buffers, retcode = %d\n", request.count, retcode);
-
-	if (copy_to_user(argp, &request, sizeof(request)))
-		return -EFAULT;
+	request->count = dma->buf_count;
+	DRM_DEBUG("%d buffers, retcode = %d\n", request->count, retcode);
 
 	return retcode;
 }
@@ -1653,5 +1599,3 @@ int drm_order(unsigned long size)
 	return order;
 }
 EXPORT_SYMBOL(drm_order);
-
-

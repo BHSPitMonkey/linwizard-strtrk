@@ -49,6 +49,7 @@
 #include <linux/mroute.h>
 #include <linux/init.h>
 #include <linux/if_ether.h>
+#include <net/net_namespace.h>
 #include <net/ip.h>
 #include <net/protocol.h>
 #include <linux/skbuff.h>
@@ -124,7 +125,7 @@ struct net_device *ipmr_new_tunnel(struct vifctl *v)
 {
 	struct net_device  *dev;
 
-	dev = __dev_get_by_name("tunl0");
+	dev = __dev_get_by_name(&init_net, "tunl0");
 
 	if (dev) {
 		int err;
@@ -140,7 +141,7 @@ struct net_device *ipmr_new_tunnel(struct vifctl *v)
 		p.iph.ihl = 5;
 		p.iph.protocol = IPPROTO_IPIP;
 		sprintf(p.name, "dvmrp%d", v->vifc_vifi);
-		ifr.ifr_ifru.ifru_data = (void*)&p;
+		ifr.ifr_ifru.ifru_data = (__force void __user *)&p;
 
 		oldfs = get_fs(); set_fs(KERNEL_DS);
 		err = dev->do_ioctl(dev, &ifr, SIOCADDTUNNEL);
@@ -148,7 +149,7 @@ struct net_device *ipmr_new_tunnel(struct vifctl *v)
 
 		dev = NULL;
 
-		if (err == 0 && (dev = __dev_get_by_name(p.name)) != NULL) {
+		if (err == 0 && (dev = __dev_get_by_name(&init_net, p.name)) != NULL) {
 			dev->flags |= IFF_MULTICAST;
 
 			in_dev = __in_dev_get_rtnl(dev);
@@ -320,7 +321,7 @@ static void ipmr_destroy_unres(struct mfc_cache *c)
 			e->error = -ETIMEDOUT;
 			memset(&e->msg, 0, sizeof(e->msg));
 
-			rtnl_unicast(skb, NETLINK_CB(skb).pid);
+			rtnl_unicast(skb, &init_net, NETLINK_CB(skb).pid);
 		} else
 			kfree_skb(skb);
 	}
@@ -422,7 +423,7 @@ static int vif_add(struct vifctl *vifc, int mrtsock)
 			return -ENOBUFS;
 		break;
 	case 0:
-		dev = ip_dev_find(vifc->vifc_lcl_addr.s_addr);
+		dev = ip_dev_find(&init_net, vifc->vifc_lcl_addr.s_addr);
 		if (!dev)
 			return -EADDRNOTAVAIL;
 		dev_put(dev);
@@ -532,7 +533,7 @@ static void ipmr_cache_resolve(struct mfc_cache *uc, struct mfc_cache *c)
 				memset(&e->msg, 0, sizeof(e->msg));
 			}
 
-			rtnl_unicast(skb, NETLINK_CB(skb).pid);
+			rtnl_unicast(skb, &init_net, NETLINK_CB(skb).pid);
 		} else
 			ip_mr_forward(skb, c, 0);
 	}
@@ -748,7 +749,7 @@ static int ipmr_mfc_add(struct mfcctl *mfc, int mrtsock)
 		return 0;
 	}
 
-	if (!MULTICAST(mfc->mfcc_mcastgrp.s_addr))
+	if (!ipv4_is_multicast(mfc->mfcc_mcastgrp.s_addr))
 		return -EINVAL;
 
 	c=ipmr_cache_alloc();
@@ -848,7 +849,7 @@ static void mrtsock_destruct(struct sock *sk)
 {
 	rtnl_lock();
 	if (sk == mroute_socket) {
-		IPV4_DEVCONF_ALL(MC_FORWARDING)--;
+		IPV4_DEVCONF_ALL(sk->sk_net, MC_FORWARDING)--;
 
 		write_lock_bh(&mrt_lock);
 		mroute_socket=NULL;
@@ -897,7 +898,7 @@ int ip_mroute_setsockopt(struct sock *sk,int optname,char __user *optval,int opt
 			mroute_socket=sk;
 			write_unlock_bh(&mrt_lock);
 
-			IPV4_DEVCONF_ALL(MC_FORWARDING)++;
+			IPV4_DEVCONF_ALL(sk->sk_net, MC_FORWARDING)++;
 		}
 		rtnl_unlock();
 		return ret;
@@ -953,10 +954,12 @@ int ip_mroute_setsockopt(struct sock *sk,int optname,char __user *optval,int opt
 #ifdef CONFIG_IP_PIMSM
 	case MRT_PIM:
 	{
-		int v, ret;
+		int v;
+
 		if (get_user(v,(int __user *)optval))
 			return -EFAULT;
-		v = (v)?1:0;
+		v = (v) ? 1 : 0;
+
 		rtnl_lock();
 		ret = 0;
 		if (v != mroute_do_pim) {
@@ -1082,13 +1085,18 @@ int ipmr_ioctl(struct sock *sk, int cmd, void __user *arg)
 
 static int ipmr_device_event(struct notifier_block *this, unsigned long event, void *ptr)
 {
+	struct net_device *dev = ptr;
 	struct vif_device *v;
 	int ct;
+
+	if (dev->nd_net != &init_net)
+		return NOTIFY_DONE;
+
 	if (event != NETDEV_UNREGISTER)
 		return NOTIFY_DONE;
 	v=&vif_table[0];
 	for (ct=0;ct<maxvif;ct++,v++) {
-		if (v->dev==ptr)
+		if (v->dev==dev)
 			vif_delete(ct);
 	}
 	return NOTIFY_DONE;
@@ -1177,7 +1185,7 @@ static void ipmr_queue_xmit(struct sk_buff *skb, struct mfc_cache *c, int vifi)
 						.saddr = vif->local,
 						.tos = RT_TOS(iph->tos) } },
 				    .proto = IPPROTO_IPIP };
-		if (ip_route_output_key(&rt, &fl))
+		if (ip_route_output_key(&init_net, &rt, &fl))
 			goto out_free;
 		encap = sizeof(struct iphdr);
 	} else {
@@ -1186,7 +1194,7 @@ static void ipmr_queue_xmit(struct sk_buff *skb, struct mfc_cache *c, int vifi)
 					      { .daddr = iph->daddr,
 						.tos = RT_TOS(iph->tos) } },
 				    .proto = IPPROTO_IPIP };
-		if (ip_route_output_key(&rt, &fl))
+		if (ip_route_output_key(&init_net, &rt, &fl))
 			goto out_free;
 	}
 
@@ -1239,7 +1247,7 @@ static void ipmr_queue_xmit(struct sk_buff *skb, struct mfc_cache *c, int vifi)
 	 * not mrouter) cannot join to more than one interface - it will
 	 * result in receiving multiple packets.
 	 */
-	NF_HOOK(PF_INET, NF_IP_FORWARD, skb, skb->dev, dev,
+	NF_HOOK(PF_INET, NF_INET_FORWARD, skb, skb->dev, dev,
 		ipmr_forward_finish);
 	return;
 
@@ -1455,7 +1463,7 @@ int pim_rcv_v1(struct sk_buff * skb)
 	   b. packet is not a NULL-REGISTER
 	   c. packet is not truncated
 	 */
-	if (!MULTICAST(encap->daddr) ||
+	if (!ipv4_is_multicast(encap->daddr) ||
 	    encap->tot_len == 0 ||
 	    ntohs(encap->tot_len) + sizeof(*pim) > skb->len)
 		goto drop;
@@ -1511,7 +1519,7 @@ static int pim_rcv(struct sk_buff * skb)
 	/* check if the inner packet is destined to mcast group */
 	encap = (struct iphdr *)(skb_transport_header(skb) +
 				 sizeof(struct pimreghdr));
-	if (!MULTICAST(encap->daddr) ||
+	if (!ipv4_is_multicast(encap->daddr) ||
 	    encap->tot_len == 0 ||
 	    ntohs(encap->tot_len) + sizeof(*pim) > skb->len)
 		goto drop;
@@ -1653,6 +1661,7 @@ static struct vif_device *ipmr_vif_seq_idx(struct ipmr_vif_iter *iter,
 }
 
 static void *ipmr_vif_seq_start(struct seq_file *seq, loff_t *pos)
+	__acquires(mrt_lock)
 {
 	read_lock(&mrt_lock);
 	return *pos ? ipmr_vif_seq_idx(seq->private, *pos - 1)
@@ -1676,6 +1685,7 @@ static void *ipmr_vif_seq_next(struct seq_file *seq, void *v, loff_t *pos)
 }
 
 static void ipmr_vif_seq_stop(struct seq_file *seq, void *v)
+	__releases(mrt_lock)
 {
 	read_unlock(&mrt_lock);
 }
@@ -1708,26 +1718,8 @@ static const struct seq_operations ipmr_vif_seq_ops = {
 
 static int ipmr_vif_open(struct inode *inode, struct file *file)
 {
-	struct seq_file *seq;
-	int rc = -ENOMEM;
-	struct ipmr_vif_iter *s = kmalloc(sizeof(*s), GFP_KERNEL);
-
-	if (!s)
-		goto out;
-
-	rc = seq_open(file, &ipmr_vif_seq_ops);
-	if (rc)
-		goto out_kfree;
-
-	s->ct = 0;
-	seq = file->private_data;
-	seq->private = s;
-out:
-	return rc;
-out_kfree:
-	kfree(s);
-	goto out;
-
+	return seq_open_private(file, &ipmr_vif_seq_ops,
+			sizeof(struct ipmr_vif_iter));
 }
 
 static const struct file_operations ipmr_vif_fops = {
@@ -1871,25 +1863,8 @@ static const struct seq_operations ipmr_mfc_seq_ops = {
 
 static int ipmr_mfc_open(struct inode *inode, struct file *file)
 {
-	struct seq_file *seq;
-	int rc = -ENOMEM;
-	struct ipmr_mfc_iter *s = kmalloc(sizeof(*s), GFP_KERNEL);
-
-	if (!s)
-		goto out;
-
-	rc = seq_open(file, &ipmr_mfc_seq_ops);
-	if (rc)
-		goto out_kfree;
-
-	seq = file->private_data;
-	seq->private = s;
-out:
-	return rc;
-out_kfree:
-	kfree(s);
-	goto out;
-
+	return seq_open_private(file, &ipmr_mfc_seq_ops,
+			sizeof(struct ipmr_mfc_iter));
 }
 
 static const struct file_operations ipmr_mfc_fops = {
@@ -1918,11 +1893,10 @@ void __init ip_mr_init(void)
 				       sizeof(struct mfc_cache),
 				       0, SLAB_HWCACHE_ALIGN|SLAB_PANIC,
 				       NULL);
-	init_timer(&ipmr_expire_timer);
-	ipmr_expire_timer.function=ipmr_expire_process;
+	setup_timer(&ipmr_expire_timer, ipmr_expire_process, 0);
 	register_netdevice_notifier(&ip_mr_notifier);
 #ifdef CONFIG_PROC_FS
-	proc_net_fops_create("ip_mr_vif", 0, &ipmr_vif_fops);
-	proc_net_fops_create("ip_mr_cache", 0, &ipmr_mfc_fops);
+	proc_net_fops_create(&init_net, "ip_mr_vif", 0, &ipmr_vif_fops);
+	proc_net_fops_create(&init_net, "ip_mr_cache", 0, &ipmr_mfc_fops);
 #endif
 }

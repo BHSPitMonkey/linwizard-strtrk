@@ -1,5 +1,3 @@
-/* $Id: system.h,v 1.86 2001/10/30 04:57:10 davem Exp $ */
-
 #ifndef __SPARC_SYSTEM_H
 #define __SPARC_SYSTEM_H
 
@@ -14,6 +12,8 @@
 #include <asm/smp.h>
 
 #ifndef __ASSEMBLY__
+
+#include <linux/irqflags.h>
 
 /*
  * Sparc (general) CPU types
@@ -44,6 +44,8 @@ extern enum sparc_cpu sparc_cpu_model;
 
 #define SUN4M_NCPUS            4              /* Architectural limit of sun4m. */
 
+extern char reboot_command[];
+
 extern struct thread_info *current_set[NR_CPUS];
 
 extern unsigned long empty_bad_page;
@@ -54,7 +56,7 @@ extern void sun_do_break(void);
 extern int serial_console;
 extern int stop_a_enabled;
 
-static __inline__ int con_is_present(void)
+static inline int con_is_present(void)
 {
 	return serial_console ? 0 : 1;
 }
@@ -164,26 +166,6 @@ extern void fpsave(unsigned long *fpregs, unsigned long *fsr,
 	  "o0", "o1", "o2", "o3",                   "o7");	\
 	} while(0)
 
-/*
- * Changing the IRQ level on the Sparc.
- */
-extern void local_irq_restore(unsigned long);
-extern unsigned long __local_irq_save(void);
-extern void local_irq_enable(void);
-
-static inline unsigned long getipl(void)
-{
-	unsigned long retval;
-
-	__asm__ __volatile__("rd	%%psr, %0" : "=r" (retval));
-	return retval;
-}
-
-#define local_save_flags(flags)	((flags) = getipl())
-#define local_irq_save(flags)	((flags) = __local_irq_save())
-#define local_irq_disable()	((void) __local_irq_save())
-#define irqs_disabled()		((getipl() & PSR_PIL) != 0)
-
 /* XXX Change this if we ever use a PSO mode kernel. */
 #define mb()	__asm__ __volatile__ ("" : : : "memory")
 #define rmb()	mb()
@@ -235,7 +217,7 @@ static inline unsigned long xchg_u32(__volatile__ unsigned long *m, unsigned lon
 
 extern void __xchg_called_with_bad_pointer(void);
 
-static __inline__ unsigned long __xchg(unsigned long x, __volatile__ void * ptr, int size)
+static inline unsigned long __xchg(unsigned long x, __volatile__ void * ptr, int size)
 {
 	switch (size) {
 	case 4:
@@ -244,6 +226,54 @@ static __inline__ unsigned long __xchg(unsigned long x, __volatile__ void * ptr,
 	__xchg_called_with_bad_pointer();
 	return x;
 }
+
+/* Emulate cmpxchg() the same way we emulate atomics,
+ * by hashing the object address and indexing into an array
+ * of spinlocks to get a bit of performance...
+ *
+ * See arch/sparc/lib/atomic32.c for implementation.
+ *
+ * Cribbed from <asm-parisc/atomic.h>
+ */
+#define __HAVE_ARCH_CMPXCHG	1
+
+/* bug catcher for when unsupported size is used - won't link */
+extern void __cmpxchg_called_with_bad_pointer(void);
+/* we only need to support cmpxchg of a u32 on sparc */
+extern unsigned long __cmpxchg_u32(volatile u32 *m, u32 old, u32 new_);
+
+/* don't worry...optimizer will get rid of most of this */
+static inline unsigned long
+__cmpxchg(volatile void *ptr, unsigned long old, unsigned long new_, int size)
+{
+	switch (size) {
+	case 4:
+		return __cmpxchg_u32((u32 *)ptr, (u32)old, (u32)new_);
+	default:
+		__cmpxchg_called_with_bad_pointer();
+		break;
+	}
+	return old;
+}
+
+#define cmpxchg(ptr, o, n)						\
+({									\
+	__typeof__(*(ptr)) _o_ = (o);					\
+	__typeof__(*(ptr)) _n_ = (n);					\
+	(__typeof__(*(ptr))) __cmpxchg((ptr), (unsigned long)_o_,	\
+			(unsigned long)_n_, sizeof(*(ptr)));		\
+})
+
+#include <asm-generic/cmpxchg-local.h>
+
+/*
+ * cmpxchg_local and cmpxchg64_local are atomic wrt current CPU. Always make
+ * them available.
+ */
+#define cmpxchg_local(ptr, o, n)				  	       \
+	((__typeof__(*(ptr)))__cmpxchg_local_generic((ptr), (unsigned long)(o),\
+			(unsigned long)(n), sizeof(*(ptr))))
+#define cmpxchg64_local(ptr, o, n) __cmpxchg64_local_generic((ptr), (o), (n))
 
 extern void die_if_kernel(char *str, struct pt_regs *regs) __attribute__ ((noreturn));
 

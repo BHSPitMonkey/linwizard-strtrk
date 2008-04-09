@@ -63,27 +63,9 @@
 #define DRM_IOC(dir, group, nr, size) _IOC(dir, group, nr, size)
 #endif
 
-#define XFREE86_VERSION(major,minor,patch,snap) \
-		((major << 16) | (minor << 8) | patch)
-
-#ifndef CONFIG_XFREE86_VERSION
-#define CONFIG_XFREE86_VERSION XFREE86_VERSION(4,1,0,0)
-#endif
-
-#if CONFIG_XFREE86_VERSION < XFREE86_VERSION(4,1,0,0)
-#define DRM_PROC_DEVICES "/proc/devices"
-#define DRM_PROC_MISC	 "/proc/misc"
-#define DRM_PROC_DRM	 "/proc/drm"
-#define DRM_DEV_DRM	 "/dev/drm"
-#define DRM_DEV_MODE	 (S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP)
-#define DRM_DEV_UID	 0
-#define DRM_DEV_GID	 0
-#endif
-
-#if CONFIG_XFREE86_VERSION >= XFREE86_VERSION(4,1,0,0)
 #define DRM_MAJOR       226
 #define DRM_MAX_MINOR   15
-#endif
+
 #define DRM_NAME	"drm"	  /**< Name in kernel, /dev, and /proc */
 #define DRM_MIN_ORDER	5	  /**< At least 2^5 bytes = 32 bytes */
 #define DRM_MAX_ORDER	22	  /**< Up to 2^22 bytes = 4MB */
@@ -220,7 +202,8 @@ enum drm_map_flags {
 	_DRM_KERNEL = 0x08,	     /**< kernel requires access */
 	_DRM_WRITE_COMBINING = 0x10, /**< use write-combining if available */
 	_DRM_CONTAINS_LOCK = 0x20,   /**< SHM page that contains lock */
-	_DRM_REMOVABLE = 0x40	     /**< Removable mapping */
+	_DRM_REMOVABLE = 0x40,	     /**< Removable mapping */
+	_DRM_DRIVER = 0x80	     /**< Managed by driver */
 };
 
 struct drm_ctx_priv_map {

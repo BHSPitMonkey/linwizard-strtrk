@@ -76,6 +76,9 @@ enum dma_chan_status {
 #define INTR_ON_BUF    2
 #define INTR_ON_ROW    3
 
+#define DMA_NOSYNC_KEEP_DMA_BUF	0
+#define DMA_SYNC_RESTART	1
+
 struct dmasg {
 	unsigned long next_desc_addr;
 	unsigned long start_addr;
@@ -109,9 +112,7 @@ struct dma_register {
 
 	unsigned long curr_desc_ptr;	/* DMA Current Descriptor Pointer
 					   register */
-	unsigned short curr_addr_ptr_lo;	/* DMA Current Address Pointer
-						   register */
-	unsigned short curr_addr_ptr_hi;	/* DMA Current Address Pointer
+	unsigned long curr_addr_ptr;	/* DMA Current Address Pointer
 						   register */
 	unsigned short irq_status;	/* DMA irq status register */
 	unsigned short dummy6;
@@ -152,18 +153,24 @@ struct dma_channel {
 /* functions to set register mode */
 void set_dma_start_addr(unsigned int channel, unsigned long addr);
 void set_dma_next_desc_addr(unsigned int channel, unsigned long addr);
+void set_dma_curr_desc_addr(unsigned int channel, unsigned long addr);
 void set_dma_x_count(unsigned int channel, unsigned short x_count);
 void set_dma_x_modify(unsigned int channel, short x_modify);
 void set_dma_y_count(unsigned int channel, unsigned short y_count);
 void set_dma_y_modify(unsigned int channel, short y_modify);
 void set_dma_config(unsigned int channel, unsigned short config);
 unsigned short set_bfin_dma_config(char direction, char flow_mode,
-				   char intr_mode, char dma_mode, char width);
+				   char intr_mode, char dma_mode, char width,
+				   char syncmode);
+void set_dma_curr_addr(unsigned int channel, unsigned long addr);
 
 /* get curr status for polling */
 unsigned short get_dma_curr_irqstat(unsigned int channel);
 unsigned short get_dma_curr_xcount(unsigned int channel);
 unsigned short get_dma_curr_ycount(unsigned int channel);
+unsigned long get_dma_next_desc_ptr(unsigned int channel);
+unsigned long get_dma_curr_desc_ptr(unsigned int channel);
+unsigned long get_dma_curr_addr(unsigned int channel);
 
 /* set large DMA mode descriptor */
 void set_dma_sg(unsigned int channel, struct dmasg *sg, int nr_sg);

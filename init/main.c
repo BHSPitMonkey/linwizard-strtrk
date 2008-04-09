@@ -39,6 +39,7 @@
 #include <linux/writeback.h>
 #include <linux/cpu.h>
 #include <linux/cpuset.h>
+#include <linux/cgroup.h>
 #include <linux/efi.h>
 #include <linux/tick.h>
 #include <linux/interrupt.h>
@@ -55,6 +56,8 @@
 #include <linux/pid_namespace.h>
 #include <linux/device.h>
 #include <linux/kthread.h>
+#include <linux/sched.h>
+#include <linux/signal.h>
 
 #include <asm/io.h>
 #include <asm/bugs.h>
@@ -73,15 +76,7 @@
 /*
  * This is one of the first .c files built. Error out early if we have compiler
  * trouble.
- *
- * Versions of gcc older than that listed below may actually compile and link
- * okay, but the end product can have subtle run time bugs.  To avoid associated
- * bogus bug reports, we flatly refuse to compile with a gcc that is known to be
- * too old from the very beginning.
  */
-#if (__GNUC__ < 3) || (__GNUC__ == 3 && __GNUC_MINOR__ < 2)
-#error Sorry, your GCC is too old. It builds incorrect kernels.
-#endif
 
 #if __GNUC__ == 4 && __GNUC_MINOR__ == 1 && __GNUC_PATCHLEVEL__ == 0
 #warning gcc-4.1.0 is known to miscompile the kernel.  A different compiler version is recommended.
@@ -93,7 +88,6 @@ extern void init_IRQ(void);
 extern void fork_init(unsigned long);
 extern void mca_init(void);
 extern void sbus_init(void);
-extern void signals_init(void);
 extern void pidhash_init(void);
 extern void pidmap_init(void);
 extern void prio_tree_init(void);
@@ -138,7 +132,7 @@ static char *ramdisk_execute_command;
 
 #ifdef CONFIG_SMP
 /* Setup configured maximum number of CPUs to activate */
-static unsigned int __initdata max_cpus = NR_CPUS;
+unsigned int __initdata setup_max_cpus = NR_CPUS;
 
 /*
  * Setup routine for controlling SMP activation
@@ -156,7 +150,7 @@ static inline void disable_ioapic_setup(void) {};
 
 static int __init nosmp(char *str)
 {
-	max_cpus = 0;
+	setup_max_cpus = 0;
 	disable_ioapic_setup();
 	return 0;
 }
@@ -165,8 +159,8 @@ early_param("nosmp", nosmp);
 
 static int __init maxcpus(char *str)
 {
-	get_option(&str, &max_cpus);
-	if (max_cpus == 0)
+	get_option(&str, &setup_max_cpus);
+	if (setup_max_cpus == 0)
 		disable_ioapic_setup();
 
 	return 0;
@@ -174,7 +168,7 @@ static int __init maxcpus(char *str)
 
 early_param("maxcpus", maxcpus);
 #else
-#define max_cpus NR_CPUS
+#define setup_max_cpus NR_CPUS
 #endif
 
 /*
@@ -242,30 +236,26 @@ EXPORT_SYMBOL(loops_per_jiffy);
 
 static int __init debug_kernel(char *str)
 {
-	if (*str)
-		return 0;
 	console_loglevel = 10;
-	return 1;
+	return 0;
 }
 
 static int __init quiet_kernel(char *str)
 {
-	if (*str)
-		return 0;
 	console_loglevel = 4;
-	return 1;
+	return 0;
 }
 
-__setup("debug", debug_kernel);
-__setup("quiet", quiet_kernel);
+early_param("debug", debug_kernel);
+early_param("quiet", quiet_kernel);
 
 static int __init loglevel(char *str)
 {
 	get_option(&str, &console_loglevel);
-	return 1;
+	return 0;
 }
 
-__setup("loglevel=", loglevel);
+early_param("loglevel", loglevel);
 
 /*
  * Unknown boot options get handed to init, unless they look like
@@ -291,7 +281,7 @@ static int __init unknown_bootoption(char *param, char *val)
 		return 0;
 
 	/*
-	 * Preemptive maintenance for "why didn't my mispelled command
+	 * Preemptive maintenance for "why didn't my misspelled command
 	 * line work?"
 	 */
 	if (strchr(param, '.') && (!val || strchr(param, '.') < val)) {
@@ -327,6 +317,10 @@ static int __init unknown_bootoption(char *param, char *val)
 	}
 	return 0;
 }
+
+#ifdef CONFIG_DEBUG_PAGEALLOC
+int __read_mostly debug_pagealloc_enabled = 0;
+#endif
 
 static int __init init_setup(char *str)
 {
@@ -373,7 +367,7 @@ static inline void smp_prepare_cpus(unsigned int maxcpus) { }
 
 #else
 
-#ifdef __GENERIC_PER_CPU
+#ifndef CONFIG_HAVE_SETUP_PER_CPU_AREA
 unsigned long __per_cpu_offset[NR_CPUS] __read_mostly;
 
 EXPORT_SYMBOL(__per_cpu_offset);
@@ -394,7 +388,7 @@ static void __init setup_per_cpu_areas(void)
 		ptr += size;
 	}
 }
-#endif /* !__GENERIC_PER_CPU */
+#endif /* CONFIG_HAVE_SETUP_PER_CPU_AREA */
 
 /* Called by boot processor to activate the rest. */
 static void __init smp_init(void)
@@ -403,7 +397,7 @@ static void __init smp_init(void)
 
 	/* FIXME: This should be done in userspace --RR */
 	for_each_present_cpu(cpu) {
-		if (num_online_cpus() >= max_cpus)
+		if (num_online_cpus() >= setup_max_cpus)
 			break;
 		if (!cpu_online(cpu))
 			cpu_up(cpu);
@@ -411,7 +405,7 @@ static void __init smp_init(void)
 
 	/* Any cleanup work */
 	printk(KERN_INFO "Brought up %ld CPUs\n", (long)num_online_cpus());
-	smp_cpus_done(max_cpus);
+	smp_cpus_done(setup_max_cpus);
 }
 
 #endif
@@ -527,6 +521,7 @@ asmlinkage void __init start_kernel(void)
 	 */
 	unwind_init();
 	lockdep_init();
+	cgroup_init_early();
 
 	local_irq_disable();
 	early_boot_irqs_off();
@@ -632,6 +627,8 @@ asmlinkage void __init start_kernel(void)
 	vfs_caches_init_early();
 	cpuset_init_early();
 	mem_init();
+	enable_debug_pagealloc();
+	cpu_hotplug_init();
 	kmem_cache_init();
 	setup_per_cpu_pageset();
 	numa_policy_init();
@@ -660,6 +657,7 @@ asmlinkage void __init start_kernel(void)
 #ifdef CONFIG_PROC_FS
 	proc_root_init();
 #endif
+	cgroup_init();
 	cpuset_init();
 	taskstats_init_early();
 	delayacct_init();
@@ -772,11 +770,8 @@ __setup("nosoftlockup", nosoftlockup_setup);
 static void __init do_pre_smp_initcalls(void)
 {
 	extern int spawn_ksoftirqd(void);
-#ifdef CONFIG_SMP
-	extern int migration_init(void);
 
 	migration_init();
-#endif
 	spawn_ksoftirqd();
 	if (!nosoftlockup)
 		spawn_softlockup_task();
@@ -847,10 +842,9 @@ static int __init kernel_init(void * unused)
 	 */
 	init_pid_ns.child_reaper = current;
 
-	__set_special_pids(1, 1);
 	cad_pid = task_pid(current);
 
-	smp_prepare_cpus(max_cpus);
+	smp_prepare_cpus(setup_max_cpus);
 
 	do_pre_smp_initcalls();
 

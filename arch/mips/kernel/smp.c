@@ -37,7 +37,7 @@
 #include <asm/processor.h>
 #include <asm/system.h>
 #include <asm/mmu_context.h>
-#include <asm/smp.h>
+#include <asm/time.h>
 
 #ifdef CONFIG_MIPS_MT_SMTC
 #include <asm/mipsmtregs.h>
@@ -52,8 +52,45 @@ int __cpu_logical_map[NR_CPUS];		/* Map logical to physical */
 EXPORT_SYMBOL(phys_cpu_present_map);
 EXPORT_SYMBOL(cpu_online_map);
 
-extern void __init calibrate_delay(void);
 extern void cpu_idle(void);
+
+/* Number of TCs (or siblings in Intel speak) per CPU core */
+int smp_num_siblings = 1;
+EXPORT_SYMBOL(smp_num_siblings);
+
+/* representing the TCs (or siblings in Intel speak) of each logical CPU */
+cpumask_t cpu_sibling_map[NR_CPUS] __read_mostly;
+EXPORT_SYMBOL(cpu_sibling_map);
+
+/* representing cpus for which sibling maps can be computed */
+static cpumask_t cpu_sibling_setup_map;
+
+static inline void set_cpu_sibling_map(int cpu)
+{
+	int i;
+
+	cpu_set(cpu, cpu_sibling_setup_map);
+
+	if (smp_num_siblings > 1) {
+		for_each_cpu_mask(i, cpu_sibling_setup_map) {
+			if (cpu_data[cpu].core == cpu_data[i].core) {
+				cpu_set(i, cpu_sibling_map[cpu]);
+				cpu_set(cpu, cpu_sibling_map[i]);
+			}
+		}
+	} else
+		cpu_set(cpu, cpu_sibling_map[cpu]);
+}
+
+struct plat_smp_ops *mp_ops;
+
+__cpuinit void register_smp_ops(struct plat_smp_ops *ops)
+{
+	if (ops)
+		printk(KERN_WARNING "Overriding previous set SMP ops\n");
+
+	mp_ops = ops;
+}
 
 /*
  * First C code run on the secondary CPUs after being started up by
@@ -70,7 +107,8 @@ asmlinkage __cpuinit void start_secondary(void)
 	cpu_probe();
 	cpu_report();
 	per_cpu_trap_init();
-	prom_init_secondary();
+	mips_clockevent_init();
+	mp_ops->init_secondary();
 
 	/*
 	 * XXX parity protection should be folded in here when it's converted
@@ -82,7 +120,8 @@ asmlinkage __cpuinit void start_secondary(void)
 	cpu = smp_processor_id();
 	cpu_data[cpu].udelay_val = loops_per_jiffy;
 
-	prom_smp_finish();
+	mp_ops->smp_finish();
+	set_cpu_sibling_map(cpu);
 
 	cpu_set(cpu, cpu_callin_map);
 
@@ -95,6 +134,8 @@ struct call_data_struct *call_data;
 
 /*
  * Run a function on all other CPUs.
+ *
+ *  <mask>	cpuset_t of all processors to run the function on.
  *  <func>      The function to run. This must be fast and non-blocking.
  *  <info>      An arbitrary pointer to pass to the function.
  *  <retry>     If true, keep retrying until ready.
@@ -119,18 +160,20 @@ struct call_data_struct *call_data;
  * Spin waiting for call_lock
  * Deadlock                            Deadlock
  */
-int smp_call_function (void (*func) (void *info), void *info, int retry,
-								int wait)
+int smp_call_function_mask(cpumask_t mask, void (*func) (void *info),
+	void *info, int retry, int wait)
 {
 	struct call_data_struct data;
-	int i, cpus = num_online_cpus() - 1;
 	int cpu = smp_processor_id();
+	int cpus;
 
 	/*
 	 * Can die spectacularly if this CPU isn't yet marked online
 	 */
 	BUG_ON(!cpu_online(cpu));
 
+	cpu_clear(cpu, mask);
+	cpus = cpus_weight(mask);
 	if (!cpus)
 		return 0;
 
@@ -149,9 +192,7 @@ int smp_call_function (void (*func) (void *info), void *info, int retry,
 	smp_mb();
 
 	/* Send a message to all other CPUs and wait for them to respond */
-	for_each_online_cpu(i)
-		if (i != cpu)
-			core_send_ipi(i, SMP_CALL_FUNCTION);
+	mp_ops->send_ipi_mask(mask, SMP_CALL_FUNCTION);
 
 	/* Wait for response */
 	/* FIXME: lock-up detection, backtrace on lock-up */
@@ -167,6 +208,11 @@ int smp_call_function (void (*func) (void *info), void *info, int retry,
 	return 0;
 }
 
+int smp_call_function(void (*func) (void *info), void *info, int retry,
+	int wait)
+{
+	return smp_call_function_mask(cpu_online_map, func, info, retry, wait);
+}
 
 void smp_call_function_interrupt(void)
 {
@@ -197,8 +243,7 @@ void smp_call_function_interrupt(void)
 int smp_call_function_single(int cpu, void (*func) (void *info), void *info,
 			     int retry, int wait)
 {
-	struct call_data_struct data;
-	int me;
+	int ret, me;
 
 	/*
 	 * Can die spectacularly if this CPU isn't yet marked online
@@ -217,33 +262,8 @@ int smp_call_function_single(int cpu, void (*func) (void *info), void *info,
 		return 0;
 	}
 
-	/* Can deadlock when called with interrupts disabled */
-	WARN_ON(irqs_disabled());
-
-	data.func = func;
-	data.info = info;
-	atomic_set(&data.started, 0);
-	data.wait = wait;
-	if (wait)
-		atomic_set(&data.finished, 0);
-
-	spin_lock(&smp_call_lock);
-	call_data = &data;
-	smp_mb();
-
-	/* Send a message to the other CPU */
-	core_send_ipi(cpu, SMP_CALL_FUNCTION);
-
-	/* Wait for response */
-	/* FIXME: lock-up detection, backtrace on lock-up */
-	while (atomic_read(&data.started) != 1)
-		barrier();
-
-	if (wait)
-		while (atomic_read(&data.finished) != 1)
-			barrier();
-	call_data = NULL;
-	spin_unlock(&smp_call_lock);
+	ret = smp_call_function_mask(cpumask_of_cpu(cpu), func, info, retry,
+				     wait);
 
 	put_cpu();
 	return 0;
@@ -266,7 +286,7 @@ void smp_send_stop(void)
 
 void __init smp_cpus_done(unsigned int max_cpus)
 {
-	prom_cpus_done();
+	mp_ops->cpus_done();
 }
 
 /* called from main before smp_init() */
@@ -274,7 +294,8 @@ void __init smp_prepare_cpus(unsigned int max_cpus)
 {
 	init_new_context(current, &init_mm);
 	current_thread_info()->cpu = 0;
-	plat_prepare_cpus(max_cpus);
+	mp_ops->prepare_cpus(max_cpus);
+	set_cpu_sibling_map(0);
 #ifndef CONFIG_HOTPLUG_CPU
 	cpu_present_map = cpu_possible_map;
 #endif
@@ -312,7 +333,7 @@ int __cpuinit __cpu_up(unsigned int cpu)
 	if (IS_ERR(idle))
 		panic(KERN_ERR "Fork failed for CPU %d", cpu);
 
-	prom_boot_secondary(cpu, idle);
+	mp_ops->boot_secondary(cpu, idle);
 
 	/*
 	 * Trust is futile.  We should really have timeouts ...
@@ -390,12 +411,15 @@ void flush_tlb_mm(struct mm_struct *mm)
 	preempt_disable();
 
 	if ((atomic_read(&mm->mm_users) != 1) || (current->mm != mm)) {
-		smp_on_other_tlbs(flush_tlb_mm_ipi, (void *)mm);
+		smp_on_other_tlbs(flush_tlb_mm_ipi, mm);
 	} else {
-		int i;
-		for (i = 0; i < num_online_cpus(); i++)
-			if (smp_processor_id() != i)
-				cpu_context(i, mm) = 0;
+		cpumask_t mask = cpu_online_map;
+		unsigned int cpu;
+
+		cpu_clear(smp_processor_id(), mask);
+		for_each_cpu_mask(cpu, mask)
+			if (cpu_context(cpu, mm))
+				cpu_context(cpu, mm) = 0;
 	}
 	local_flush_tlb_mm(mm);
 
@@ -410,7 +434,7 @@ struct flush_tlb_data {
 
 static void flush_tlb_range_ipi(void *info)
 {
-	struct flush_tlb_data *fd = (struct flush_tlb_data *)info;
+	struct flush_tlb_data *fd = info;
 
 	local_flush_tlb_range(fd->vma, fd->addr1, fd->addr2);
 }
@@ -421,17 +445,21 @@ void flush_tlb_range(struct vm_area_struct *vma, unsigned long start, unsigned l
 
 	preempt_disable();
 	if ((atomic_read(&mm->mm_users) != 1) || (current->mm != mm)) {
-		struct flush_tlb_data fd;
+		struct flush_tlb_data fd = {
+			.vma = vma,
+			.addr1 = start,
+			.addr2 = end,
+		};
 
-		fd.vma = vma;
-		fd.addr1 = start;
-		fd.addr2 = end;
-		smp_on_other_tlbs(flush_tlb_range_ipi, (void *)&fd);
+		smp_on_other_tlbs(flush_tlb_range_ipi, &fd);
 	} else {
-		int i;
-		for (i = 0; i < num_online_cpus(); i++)
-			if (smp_processor_id() != i)
-				cpu_context(i, mm) = 0;
+		cpumask_t mask = cpu_online_map;
+		unsigned int cpu;
+
+		cpu_clear(smp_processor_id(), mask);
+		for_each_cpu_mask(cpu, mask)
+			if (cpu_context(cpu, mm))
+				cpu_context(cpu, mm) = 0;
 	}
 	local_flush_tlb_range(vma, start, end);
 	preempt_enable();
@@ -439,23 +467,24 @@ void flush_tlb_range(struct vm_area_struct *vma, unsigned long start, unsigned l
 
 static void flush_tlb_kernel_range_ipi(void *info)
 {
-	struct flush_tlb_data *fd = (struct flush_tlb_data *)info;
+	struct flush_tlb_data *fd = info;
 
 	local_flush_tlb_kernel_range(fd->addr1, fd->addr2);
 }
 
 void flush_tlb_kernel_range(unsigned long start, unsigned long end)
 {
-	struct flush_tlb_data fd;
+	struct flush_tlb_data fd = {
+		.addr1 = start,
+		.addr2 = end,
+	};
 
-	fd.addr1 = start;
-	fd.addr2 = end;
-	on_each_cpu(flush_tlb_kernel_range_ipi, (void *)&fd, 1, 1);
+	on_each_cpu(flush_tlb_kernel_range_ipi, &fd, 1, 1);
 }
 
 static void flush_tlb_page_ipi(void *info)
 {
-	struct flush_tlb_data *fd = (struct flush_tlb_data *)info;
+	struct flush_tlb_data *fd = info;
 
 	local_flush_tlb_page(fd->vma, fd->addr1);
 }
@@ -464,16 +493,20 @@ void flush_tlb_page(struct vm_area_struct *vma, unsigned long page)
 {
 	preempt_disable();
 	if ((atomic_read(&vma->vm_mm->mm_users) != 1) || (current->mm != vma->vm_mm)) {
-		struct flush_tlb_data fd;
+		struct flush_tlb_data fd = {
+			.vma = vma,
+			.addr1 = page,
+		};
 
-		fd.vma = vma;
-		fd.addr1 = page;
-		smp_on_other_tlbs(flush_tlb_page_ipi, (void *)&fd);
+		smp_on_other_tlbs(flush_tlb_page_ipi, &fd);
 	} else {
-		int i;
-		for (i = 0; i < num_online_cpus(); i++)
-			if (smp_processor_id() != i)
-				cpu_context(i, vma->vm_mm) = 0;
+		cpumask_t mask = cpu_online_map;
+		unsigned int cpu;
+
+		cpu_clear(smp_processor_id(), mask);
+		for_each_cpu_mask(cpu, mask)
+			if (cpu_context(cpu, vma->vm_mm))
+				cpu_context(cpu, vma->vm_mm) = 0;
 	}
 	local_flush_tlb_page(vma, page);
 	preempt_enable();

@@ -1,5 +1,5 @@
-#ifndef _PPC64_LMB_H
-#define _PPC64_LMB_H
+#ifndef _ASM_POWERPC_LMB_H
+#define _ASM_POWERPC_LMB_H
 #ifdef __KERNEL__
 
 /*
@@ -51,6 +51,7 @@ extern unsigned long __init __lmb_alloc_base(unsigned long size,
 extern unsigned long __init lmb_phys_mem_size(void);
 extern unsigned long __init lmb_end_of_DRAM(void);
 extern void __init lmb_enforce_memory_limit(unsigned long memory_limit);
+extern int __init lmb_is_reserved(unsigned long addr);
 
 extern void lmb_dump_all(void);
 
@@ -77,4 +78,4 @@ lmb_end_pfn(struct lmb_region *type, unsigned long region_nr)
 }
 
 #endif /* __KERNEL__ */
-#endif /* _PPC64_LMB_H */
+#endif /* _ASM_POWERPC_LMB_H */

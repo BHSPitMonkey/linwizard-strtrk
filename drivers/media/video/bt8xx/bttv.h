@@ -172,6 +172,8 @@
 #define BTTV_BOARD_SSAI_ULTRASOUND	   0x92
 #define BTTV_BOARD_VOODOOTV_200		   0x93
 #define BTTV_BOARD_DVICO_FUSIONHDTV_2	   0x94
+#define BTTV_BOARD_TYPHOON_TVTUNERPCI	   0x95
+
 
 /* more card-specific defines */
 #define PT2254_L_CHANNEL 0x10
@@ -239,7 +241,10 @@ struct tvcard
 	unsigned int radio_addr;
 
 	unsigned int has_radio;
-	void (*audio_hook)(struct bttv *btv, struct video_audio *v, int set);
+
+	void (*volume_gpio)(struct bttv *btv, __u16 volume);
+	void (*audio_mode_gpio)(struct bttv *btv, struct v4l2_tuner *tuner, int set);
+
 	void (*muxsel_hook)(struct bttv *btv, unsigned int input);
 };
 

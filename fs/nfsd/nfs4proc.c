@@ -238,12 +238,12 @@ nfsd4_open(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 			break;
              	case NFS4_OPEN_CLAIM_DELEGATE_PREV:
 			open->op_stateowner->so_confirmed = 1;
-			printk("NFSD: unsupported OPEN claim type %d\n",
+			dprintk("NFSD: unsupported OPEN claim type %d\n",
 				open->op_claim_type);
 			status = nfserr_notsupp;
 			goto out;
 		default:
-			printk("NFSD: Invalid OPEN claim type %d\n",
+			dprintk("NFSD: Invalid OPEN claim type %d\n",
 				open->op_claim_type);
 			status = nfserr_inval;
 			goto out;
@@ -750,7 +750,7 @@ _nfsd4_verify(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 				    cstate->current_fh.fh_export,
 				    cstate->current_fh.fh_dentry, buf,
 				    &count, verify->ve_bmval,
-				    rqstp);
+				    rqstp, 0);
 
 	/* this means that nfsd4_encode_fattr() ran out of space */
 	if (status == nfserr_resource && count == 0)

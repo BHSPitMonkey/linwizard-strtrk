@@ -42,7 +42,6 @@
 #include <asm/machdep.h>
 #include <asm/btext.h>
 #include <asm/tlb.h>
-#include <asm/prom.h>
 #include <asm/lmb.h>
 #include <asm/sections.h>
 #include <asm/vdso.h>
@@ -130,51 +129,39 @@ int __devinit arch_add_memory(int nid, u64 start, u64 size)
 	return __add_pages(zone, start_pfn, nr_pages);
 }
 
-/*
- * First pass at this code will check to determine if the remove
- * request is within the RMO.  Do not allow removal within the RMO.
- */
-int __devinit remove_memory(u64 start, u64 size)
+#ifdef CONFIG_MEMORY_HOTREMOVE
+int remove_memory(u64 start, u64 size)
 {
-	struct zone *zone;
-	unsigned long start_pfn, end_pfn, nr_pages;
+	unsigned long start_pfn, end_pfn;
+	int ret;
 
 	start_pfn = start >> PAGE_SHIFT;
-	nr_pages = size >> PAGE_SHIFT;
-	end_pfn = start_pfn + nr_pages;
-
-	printk("%s(): Attempting to remove memoy in range "
-			"%lx to %lx\n", __func__, start, start+size);
-	/*
-	 * check for range within RMO
-	 */
-	zone = page_zone(pfn_to_page(start_pfn));
-
-	printk("%s(): memory will be removed from "
-			"the %s zone\n", __func__, zone->name);
-
-	/*
-	 * not handling removing memory ranges that
-	 * overlap multiple zones yet
-	 */
-	if (end_pfn > (zone->zone_start_pfn + zone->spanned_pages))
-		goto overlap;
-
-	/* make sure it is NOT in RMO */
-	if ((start < lmb.rmo_size) || ((start+size) < lmb.rmo_size)) {
-		printk("%s(): range to be removed must NOT be in RMO!\n",
-			__func__);
-		goto in_rmo;
-	}
-
-	return __remove_pages(zone, start_pfn, nr_pages);
-
-overlap:
-	printk("%s(): memory range to be removed overlaps "
-		"multiple zones!!!\n", __func__);
-in_rmo:
-	return -1;
+	end_pfn = start_pfn + (size >> PAGE_SHIFT);
+	ret = offline_pages(start_pfn, end_pfn, 120 * HZ);
+	if (ret)
+		goto out;
+	/* Arch-specific calls go here - next patch */
+out:
+	return ret;
 }
+#endif /* CONFIG_MEMORY_HOTREMOVE */
+
+/*
+ * walk_memory_resource() needs to make sure there is no holes in a given
+ * memory range. On PPC64, since this range comes from /sysfs, the range
+ * is guaranteed to be valid, non-overlapping and can not contain any
+ * holes. By the time we get here (memory add or remove), /proc/device-tree
+ * is updated and correct. Only reason we need to check against device-tree
+ * would be if we allow user-land to specify a memory range through a
+ * system call/ioctl etc. instead of doing offline/online through /sysfs.
+ */
+int
+walk_memory_resource(unsigned long start_pfn, unsigned long nr_pages, void *arg,
+			int (*func)(unsigned long, unsigned long, void *))
+{
+	return  (*func)(start_pfn, nr_pages, arg);
+}
+
 #endif /* CONFIG_MEMORY_HOTPLUG */
 
 void show_mem(void)
@@ -259,15 +246,32 @@ void __init do_init_bootmem(void)
 	 */
 #ifdef CONFIG_HIGHMEM
 	free_bootmem_with_active_regions(0, total_lowmem >> PAGE_SHIFT);
+
+	/* reserve the sections we're already using */
+	for (i = 0; i < lmb.reserved.cnt; i++) {
+		unsigned long addr = lmb.reserved.region[i].base +
+				     lmb_size_bytes(&lmb.reserved, i) - 1;
+		if (addr < total_lowmem)
+			reserve_bootmem(lmb.reserved.region[i].base,
+					lmb_size_bytes(&lmb.reserved, i),
+					BOOTMEM_DEFAULT);
+		else if (lmb.reserved.region[i].base < total_lowmem) {
+			unsigned long adjusted_size = total_lowmem -
+				      lmb.reserved.region[i].base;
+			reserve_bootmem(lmb.reserved.region[i].base,
+					adjusted_size, BOOTMEM_DEFAULT);
+		}
+	}
 #else
 	free_bootmem_with_active_regions(0, max_pfn);
-#endif
 
 	/* reserve the sections we're already using */
 	for (i = 0; i < lmb.reserved.cnt; i++)
 		reserve_bootmem(lmb.reserved.region[i].base,
-				lmb_size_bytes(&lmb.reserved, i));
+				lmb_size_bytes(&lmb.reserved, i),
+				BOOTMEM_DEFAULT);
 
+#endif
 	/* XXX need to clip this if using highmem? */
 	sparse_memory_present_with_active_regions(0);
 
@@ -380,11 +384,13 @@ void __init mem_init(void)
 		highmem_mapnr = total_lowmem >> PAGE_SHIFT;
 		for (pfn = highmem_mapnr; pfn < max_mapnr; ++pfn) {
 			struct page *page = pfn_to_page(pfn);
-
+			if (lmb_is_reserved(pfn << PAGE_SHIFT))
+				continue;
 			ClearPageReserved(page);
 			init_page_count(page);
 			__free_page(page);
 			totalhigh_pages++;
+			reservedpages--;
 		}
 		totalram_pages += totalhigh_pages;
 		printk(KERN_DEBUG "High memory: %luk\n",
@@ -510,9 +516,14 @@ void update_mmu_cache(struct vm_area_struct *vma, unsigned long address,
 		 * we invalidate the TLB here, thus avoiding dcbst
 		 * misbehaviour.
 		 */
-		_tlbie(address);
+		_tlbie(address, 0 /* 8xx doesn't care about PID */);
 #endif
-		if (!PageReserved(page)
+		/* The _PAGE_USER test should really be _PAGE_EXEC, but
+		 * older glibc versions execute some code from no-exec
+		 * pages, which for now we are supporting.  If exec-only
+		 * pages are ever implemented, this will have to change.
+		 */
+		if (!PageReserved(page) && (pte_val(pte) & _PAGE_USER)
 		    && !test_bit(PG_arch_1, &page->flags)) {
 			if (vma->vm_mm == current->active_mm) {
 				__flush_dcache_icache((void *) address);

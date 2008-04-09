@@ -40,16 +40,22 @@
  */
 
 void qdisc_lock_tree(struct net_device *dev)
+	__acquires(dev->queue_lock)
+	__acquires(dev->ingress_lock)
 {
 	spin_lock_bh(&dev->queue_lock);
 	spin_lock(&dev->ingress_lock);
 }
+EXPORT_SYMBOL(qdisc_lock_tree);
 
 void qdisc_unlock_tree(struct net_device *dev)
+	__releases(dev->ingress_lock)
+	__releases(dev->queue_lock)
 {
 	spin_unlock(&dev->ingress_lock);
 	spin_unlock_bh(&dev->queue_lock);
 }
+EXPORT_SYMBOL(qdisc_unlock_tree);
 
 static inline int qdisc_qlen(struct Qdisc *q)
 {
@@ -134,34 +140,20 @@ static inline int qdisc_restart(struct net_device *dev)
 {
 	struct Qdisc *q = dev->qdisc;
 	struct sk_buff *skb;
-	unsigned lockless;
-	int ret;
+	int ret = NETDEV_TX_BUSY;
 
 	/* Dequeue packet */
 	if (unlikely((skb = dev_dequeue_skb(dev, q)) == NULL))
 		return 0;
 
-	/*
-	 * When the driver has LLTX set, it does its own locking in
-	 * start_xmit. These checks are worth it because even uncongested
-	 * locks can be quite expensive. The driver can do a trylock, as
-	 * is being done here; in case of lock contention it should return
-	 * NETDEV_TX_LOCKED and the packet will be requeued.
-	 */
-	lockless = (dev->features & NETIF_F_LLTX);
-
-	if (!lockless && !netif_tx_trylock(dev)) {
-		/* Another CPU grabbed the driver tx lock */
-		return handle_dev_cpu_collision(skb, dev, q);
-	}
 
 	/* And release queue */
 	spin_unlock(&dev->queue_lock);
 
-	ret = dev_hard_start_xmit(skb, dev);
-
-	if (!lockless)
-		netif_tx_unlock(dev);
+	HARD_TX_LOCK(dev, smp_processor_id());
+	if (!netif_subqueue_stopped(dev, skb))
+		ret = dev_hard_start_xmit(skb, dev);
+	HARD_TX_UNLOCK(dev);
 
 	spin_lock(&dev->queue_lock);
 	q = dev->qdisc;
@@ -192,10 +184,22 @@ static inline int qdisc_restart(struct net_device *dev)
 
 void __qdisc_run(struct net_device *dev)
 {
-	do {
-		if (!qdisc_restart(dev))
+	unsigned long start_time = jiffies;
+
+	while (qdisc_restart(dev)) {
+		if (netif_queue_stopped(dev))
 			break;
-	} while (!netif_queue_stopped(dev));
+
+		/*
+		 * Postpone processing if
+		 * 1. another process needs the CPU;
+		 * 2. we've been doing it for too long.
+		 */
+		if (need_resched() || jiffies != start_time) {
+			netif_schedule(dev);
+			break;
+		}
+	}
 
 	clear_bit(__LINK_STATE_QDISC_RUNNING, &dev->state);
 }
@@ -225,13 +229,6 @@ static void dev_watchdog(unsigned long arg)
 	dev_put(dev);
 }
 
-static void dev_watchdog_init(struct net_device *dev)
-{
-	init_timer(&dev->watchdog_timer);
-	dev->watchdog_timer.data = (unsigned long)dev;
-	dev->watchdog_timer.function = dev_watchdog;
-}
-
 void __netdev_watchdog_up(struct net_device *dev)
 {
 	if (dev->tx_timeout) {
@@ -256,19 +253,34 @@ static void dev_watchdog_down(struct net_device *dev)
 	netif_tx_unlock_bh(dev);
 }
 
+/**
+ *	netif_carrier_on - set carrier
+ *	@dev: network device
+ *
+ * Device has detected that carrier.
+ */
 void netif_carrier_on(struct net_device *dev)
 {
-	if (test_and_clear_bit(__LINK_STATE_NOCARRIER, &dev->state))
+	if (test_and_clear_bit(__LINK_STATE_NOCARRIER, &dev->state)) {
 		linkwatch_fire_event(dev);
-	if (netif_running(dev))
-		__netdev_watchdog_up(dev);
+		if (netif_running(dev))
+			__netdev_watchdog_up(dev);
+	}
 }
+EXPORT_SYMBOL(netif_carrier_on);
 
+/**
+ *	netif_carrier_off - clear carrier
+ *	@dev: network device
+ *
+ * Device has detected loss of carrier.
+ */
 void netif_carrier_off(struct net_device *dev)
 {
 	if (!test_and_set_bit(__LINK_STATE_NOCARRIER, &dev->state))
 		linkwatch_fire_event(dev);
 }
+EXPORT_SYMBOL(netif_carrier_off);
 
 /* "NOOP" scheduler: the best scheduler, recommended for all interfaces
    under all circumstances. It is difficult to invent anything faster or
@@ -295,7 +307,7 @@ static int noop_requeue(struct sk_buff *skb, struct Qdisc* qdisc)
 	return NET_XMIT_CN;
 }
 
-struct Qdisc_ops noop_qdisc_ops = {
+struct Qdisc_ops noop_qdisc_ops __read_mostly = {
 	.id		=	"noop",
 	.priv_size	=	0,
 	.enqueue	=	noop_enqueue,
@@ -311,8 +323,9 @@ struct Qdisc noop_qdisc = {
 	.ops		=	&noop_qdisc_ops,
 	.list		=	LIST_HEAD_INIT(noop_qdisc.list),
 };
+EXPORT_SYMBOL(noop_qdisc);
 
-static struct Qdisc_ops noqueue_qdisc_ops = {
+static struct Qdisc_ops noqueue_qdisc_ops __read_mostly = {
 	.id		=	"noqueue",
 	.priv_size	=	0,
 	.enqueue	=	noop_enqueue,
@@ -396,14 +409,14 @@ static int pfifo_fast_dump(struct Qdisc *qdisc, struct sk_buff *skb)
 	struct tc_prio_qopt opt = { .bands = PFIFO_FAST_BANDS };
 
 	memcpy(&opt.priomap, prio2band, TC_PRIO_MAX+1);
-	RTA_PUT(skb, TCA_OPTIONS, sizeof(opt), &opt);
+	NLA_PUT(skb, TCA_OPTIONS, sizeof(opt), &opt);
 	return skb->len;
 
-rtattr_failure:
+nla_put_failure:
 	return -1;
 }
 
-static int pfifo_fast_init(struct Qdisc *qdisc, struct rtattr *opt)
+static int pfifo_fast_init(struct Qdisc *qdisc, struct nlattr *opt)
 {
 	int prio;
 	struct sk_buff_head *list = qdisc_priv(qdisc);
@@ -414,7 +427,7 @@ static int pfifo_fast_init(struct Qdisc *qdisc, struct rtattr *opt)
 	return 0;
 }
 
-static struct Qdisc_ops pfifo_fast_ops = {
+static struct Qdisc_ops pfifo_fast_ops __read_mostly = {
 	.id		=	"pfifo_fast",
 	.priv_size	=	PFIFO_FAST_BANDS * sizeof(struct sk_buff_head),
 	.enqueue	=	pfifo_fast_enqueue,
@@ -475,16 +488,18 @@ struct Qdisc * qdisc_create_dflt(struct net_device *dev, struct Qdisc_ops *ops,
 errout:
 	return NULL;
 }
+EXPORT_SYMBOL(qdisc_create_dflt);
 
 /* Under dev->queue_lock and BH! */
 
 void qdisc_reset(struct Qdisc *qdisc)
 {
-	struct Qdisc_ops *ops = qdisc->ops;
+	const struct Qdisc_ops *ops = qdisc->ops;
 
 	if (ops->reset)
 		ops->reset(qdisc);
 }
+EXPORT_SYMBOL(qdisc_reset);
 
 /* this is the rcu callback function to clean up a qdisc when there
  * are no further references to it */
@@ -499,7 +514,7 @@ static void __qdisc_destroy(struct rcu_head *head)
 
 void qdisc_destroy(struct Qdisc *qdisc)
 {
-	struct Qdisc_ops  *ops = qdisc->ops;
+	const struct Qdisc_ops  *ops = qdisc->ops;
 
 	if (qdisc->flags & TCQ_F_BUILTIN ||
 	    !atomic_dec_and_test(&qdisc->refcnt))
@@ -516,6 +531,7 @@ void qdisc_destroy(struct Qdisc *qdisc)
 	dev_put(qdisc->dev);
 	call_rcu(&qdisc->q_rcu, __qdisc_destroy);
 }
+EXPORT_SYMBOL(qdisc_destroy);
 
 void dev_activate(struct net_device *dev)
 {
@@ -558,6 +574,7 @@ void dev_deactivate(struct net_device *dev)
 {
 	struct Qdisc *qdisc;
 	struct sk_buff *skb;
+	int running;
 
 	spin_lock_bh(&dev->queue_lock);
 	qdisc = dev->qdisc;
@@ -573,12 +590,31 @@ void dev_deactivate(struct net_device *dev)
 
 	dev_watchdog_down(dev);
 
-	/* Wait for outstanding dev_queue_xmit calls. */
+	/* Wait for outstanding qdisc-less dev_queue_xmit calls. */
 	synchronize_rcu();
 
 	/* Wait for outstanding qdisc_run calls. */
-	while (test_bit(__LINK_STATE_QDISC_RUNNING, &dev->state))
-		yield();
+	do {
+		while (test_bit(__LINK_STATE_QDISC_RUNNING, &dev->state))
+			yield();
+
+		/*
+		 * Double-check inside queue lock to ensure that all effects
+		 * of the queue run are visible when we return.
+		 */
+		spin_lock_bh(&dev->queue_lock);
+		running = test_bit(__LINK_STATE_QDISC_RUNNING, &dev->state);
+		spin_unlock_bh(&dev->queue_lock);
+
+		/*
+		 * The running flag should never be set at this point because
+		 * we've already set dev->qdisc to noop_qdisc *inside* the same
+		 * pair of spin locks.  That is, if any qdisc_run starts after
+		 * our initial test it should see the noop_qdisc and then
+		 * clear the RUNNING bit before dropping the queue lock.  So
+		 * if it is set here then we've found a bug.
+		 */
+	} while (WARN_ON_ONCE(running));
 }
 
 void dev_init_scheduler(struct net_device *dev)
@@ -589,7 +625,7 @@ void dev_init_scheduler(struct net_device *dev)
 	INIT_LIST_HEAD(&dev->qdisc_list);
 	qdisc_unlock_tree(dev);
 
-	dev_watchdog_init(dev);
+	setup_timer(&dev->watchdog_timer, dev_watchdog, (unsigned long)dev);
 }
 
 void dev_shutdown(struct net_device *dev)
@@ -610,12 +646,3 @@ void dev_shutdown(struct net_device *dev)
 	BUG_TRAP(!timer_pending(&dev->watchdog_timer));
 	qdisc_unlock_tree(dev);
 }
-
-EXPORT_SYMBOL(netif_carrier_on);
-EXPORT_SYMBOL(netif_carrier_off);
-EXPORT_SYMBOL(noop_qdisc);
-EXPORT_SYMBOL(qdisc_create_dflt);
-EXPORT_SYMBOL(qdisc_destroy);
-EXPORT_SYMBOL(qdisc_reset);
-EXPORT_SYMBOL(qdisc_lock_tree);
-EXPORT_SYMBOL(qdisc_unlock_tree);

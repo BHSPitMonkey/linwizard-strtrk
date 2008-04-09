@@ -342,13 +342,11 @@ int seq_printf(struct seq_file *m, const char *f, ...)
 }
 EXPORT_SYMBOL(seq_printf);
 
-int seq_path(struct seq_file *m,
-	     struct vfsmount *mnt, struct dentry *dentry,
-	     char *esc)
+int seq_path(struct seq_file *m, struct path *path, char *esc)
 {
 	if (m->count < m->size) {
 		char *s = m->buf + m->count;
-		char *p = d_path(dentry, mnt, s, m->size - m->count);
+		char *p = d_path(path, s, m->size - m->count);
 		if (!IS_ERR(p)) {
 			while (s <= p) {
 				char c = *p++;
@@ -428,6 +426,39 @@ int seq_release_private(struct inode *inode, struct file *file)
 	return seq_release(inode, file);
 }
 EXPORT_SYMBOL(seq_release_private);
+
+void *__seq_open_private(struct file *f, const struct seq_operations *ops,
+		int psize)
+{
+	int rc;
+	void *private;
+	struct seq_file *seq;
+
+	private = kzalloc(psize, GFP_KERNEL);
+	if (private == NULL)
+		goto out;
+
+	rc = seq_open(f, ops);
+	if (rc < 0)
+		goto out_free;
+
+	seq = f->private_data;
+	seq->private = private;
+	return private;
+
+out_free:
+	kfree(private);
+out:
+	return NULL;
+}
+EXPORT_SYMBOL(__seq_open_private);
+
+int seq_open_private(struct file *filp, const struct seq_operations *ops,
+		int psize)
+{
+	return __seq_open_private(filp, ops, psize) ? 0 : -ENOMEM;
+}
+EXPORT_SYMBOL(seq_open_private);
 
 int seq_putc(struct seq_file *m, char c)
 {

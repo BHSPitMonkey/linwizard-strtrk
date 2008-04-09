@@ -22,27 +22,29 @@
 #include <linux/mm.h>
 #include <linux/kexec.h>
 #include <linux/module.h>
+#include <linux/smp.h>
 #include <asm/uaccess.h>
 #include <asm/io.h>
 #include <asm/page.h>
+#include <asm/elf.h>
 #include <asm/sections.h>
 #include <asm/irq.h>
 #include <asm/setup.h>
 #include <asm/clock.h>
 #include <asm/mmu_context.h>
 
-extern void * __rd_start, * __rd_end;
-
-/*
- * Machine setup..
- */
-
 /*
  * Initialize loops_per_jiffy as 10000000 (1000MIPS).
  * This value will be used at the very early stage of serial setup.
  * The bigger value means no problem.
  */
-struct sh_cpuinfo boot_cpu_data = { CPU_SH_NONE, 10000000, };
+struct sh_cpuinfo cpu_data[NR_CPUS] __read_mostly = {
+	[0] = {
+		.type			= CPU_SH_NONE,
+		.loops_per_jiffy	= 10000000,
+	},
+};
+EXPORT_SYMBOL(cpu_data);
 
 /*
  * The machine vector. First entry in .machvec.init, or clobbered by
@@ -56,41 +58,46 @@ struct screen_info screen_info;
 
 extern int root_mountflags;
 
-/*
- * This is set up by the setup-routine at boot-time
- */
-#define PARAM	((unsigned char *)empty_zero_page)
-
-#define MOUNT_ROOT_RDONLY (*(unsigned long *) (PARAM+0x000))
-#define RAMDISK_FLAGS (*(unsigned long *) (PARAM+0x004))
-#define ORIG_ROOT_DEV (*(unsigned long *) (PARAM+0x008))
-#define LOADER_TYPE (*(unsigned long *) (PARAM+0x00c))
-#define INITRD_START (*(unsigned long *) (PARAM+0x010))
-#define INITRD_SIZE (*(unsigned long *) (PARAM+0x014))
-/* ... */
-#define COMMAND_LINE ((char *) (PARAM+0x100))
-
 #define RAMDISK_IMAGE_START_MASK	0x07FF
 #define RAMDISK_PROMPT_FLAG		0x8000
 #define RAMDISK_LOAD_FLAG		0x4000
 
 static char __initdata command_line[COMMAND_LINE_SIZE] = { 0, };
 
-static struct resource code_resource = { .name = "Kernel code", };
-static struct resource data_resource = { .name = "Kernel data", };
+static struct resource code_resource = {
+	.name = "Kernel code",
+	.flags = IORESOURCE_BUSY | IORESOURCE_MEM,
+};
+
+static struct resource data_resource = {
+	.name = "Kernel data",
+	.flags = IORESOURCE_BUSY | IORESOURCE_MEM,
+};
 
 unsigned long memory_start;
 EXPORT_SYMBOL(memory_start);
-
-unsigned long memory_end;
+unsigned long memory_end = 0;
 EXPORT_SYMBOL(memory_end);
+
+int l1i_cache_shape, l1d_cache_shape, l2_cache_shape;
 
 static int __init early_parse_mem(char *p)
 {
 	unsigned long size;
 
-	memory_start = (unsigned long)PAGE_OFFSET+__MEMORY_START;
+	memory_start = (unsigned long)__va(__MEMORY_START);
 	size = memparse(p, &p);
+
+	if (size > __MEMORY_SIZE) {
+		static char msg[] __initdata = KERN_ERR
+			"Using mem= to increase the size of kernel memory "
+			"is not allowed.\n"
+			"  Recompile the kernel with the correct value for "
+			"CONFIG_MEMORY_SIZE.\n";
+		printk(msg);
+		return 0;
+	}
+
 	memory_end = memory_start + size;
 
 	return 0;
@@ -121,6 +128,45 @@ static void __init register_bootmem_low_pages(void)
 	free_bootmem(PFN_PHYS(curr_pfn), PFN_PHYS(pages));
 }
 
+#ifdef CONFIG_KEXEC
+static void __init reserve_crashkernel(void)
+{
+	unsigned long long free_mem;
+	unsigned long long crash_size, crash_base;
+	int ret;
+
+	free_mem = ((unsigned long long)max_low_pfn - min_low_pfn) << PAGE_SHIFT;
+
+	ret = parse_crashkernel(boot_command_line, free_mem,
+			&crash_size, &crash_base);
+	if (ret == 0 && crash_size) {
+		if (crash_base <= 0) {
+			printk(KERN_INFO "crashkernel reservation failed - "
+					"you have to specify a base address\n");
+			return;
+		}
+
+		if (reserve_bootmem(crash_base, crash_size,
+					BOOTMEM_EXCLUSIVE) < 0) {
+			printk(KERN_INFO "crashkernel reservation failed - "
+					"memory is in use\n");
+			return;
+		}
+
+		printk(KERN_INFO "Reserving %ldMB of memory at %ldMB "
+				"for crashkernel (System RAM: %ldMB)\n",
+				(unsigned long)(crash_size >> 20),
+				(unsigned long)(crash_base >> 20),
+				(unsigned long)(free_mem >> 20));
+		crashk_res.start = crash_base;
+		crashk_res.end   = crash_base + crash_size - 1;
+	}
+}
+#else
+static inline void __init reserve_crashkernel(void)
+{}
+#endif
+
 void __init setup_bootmem_allocator(unsigned long free_pfn)
 {
 	unsigned long bootmap_size;
@@ -146,30 +192,24 @@ void __init setup_bootmem_allocator(unsigned long free_pfn)
 	 * an invalid RAM area.
 	 */
 	reserve_bootmem(__MEMORY_START+PAGE_SIZE,
-		(PFN_PHYS(free_pfn)+bootmap_size+PAGE_SIZE-1)-__MEMORY_START);
+		(PFN_PHYS(free_pfn)+bootmap_size+PAGE_SIZE-1)-__MEMORY_START,
+		BOOTMEM_DEFAULT);
 
 	/*
 	 * reserve physical page 0 - it's a special BIOS page on many boxes,
 	 * enabling clean reboots, SMP operation, laptop functions.
 	 */
-	reserve_bootmem(__MEMORY_START, PAGE_SIZE);
+	reserve_bootmem(__MEMORY_START, PAGE_SIZE, BOOTMEM_DEFAULT);
 
 	sparse_memory_present_with_active_regions(0);
 
 #ifdef CONFIG_BLK_DEV_INITRD
-	ROOT_DEV = MKDEV(RAMDISK_MAJOR, 0);
-	if (&__rd_start != &__rd_end) {
-		LOADER_TYPE = 1;
-		INITRD_START = PHYSADDR((unsigned long)&__rd_start) -
-					__MEMORY_START;
-		INITRD_SIZE = (unsigned long)&__rd_end -
-			      (unsigned long)&__rd_start;
-	}
+	ROOT_DEV = Root_RAM0;
 
 	if (LOADER_TYPE && INITRD_START) {
 		if (INITRD_START + INITRD_SIZE <= (max_low_pfn << PAGE_SHIFT)) {
 			reserve_bootmem(INITRD_START + __MEMORY_START,
-					INITRD_SIZE);
+					INITRD_SIZE, BOOTMEM_DEFAULT);
 			initrd_start = INITRD_START + PAGE_OFFSET +
 					__MEMORY_START;
 			initrd_end = initrd_start + INITRD_SIZE;
@@ -182,11 +222,8 @@ void __init setup_bootmem_allocator(unsigned long free_pfn)
 		}
 	}
 #endif
-#ifdef CONFIG_KEXEC
-	if (crashk_res.start != crashk_res.end)
-		reserve_bootmem(crashk_res.start,
-			crashk_res.end - crashk_res.start + 1);
-#endif
+
+	reserve_crashkernel();
 }
 
 #ifndef CONFIG_NEED_MULTIPLE_NODES
@@ -229,8 +266,9 @@ void __init setup_arch(char **cmdline_p)
 	data_resource.start = virt_to_phys(_etext);
 	data_resource.end = virt_to_phys(_edata)-1;
 
-	memory_start = (unsigned long)PAGE_OFFSET+__MEMORY_START;
-	memory_end = memory_start + __MEMORY_SIZE;
+	memory_start = (unsigned long)__va(__MEMORY_START);
+	if (!memory_end)
+		memory_end = memory_start + __MEMORY_SIZE;
 
 #ifdef CONFIG_CMDLINE_BOOL
 	strlcpy(command_line, CONFIG_CMDLINE, sizeof(command_line));
@@ -272,24 +310,30 @@ void __init setup_arch(char **cmdline_p)
 		sh_mv.mv_setup(cmdline_p);
 
 	paging_init();
+
+#ifdef CONFIG_SMP
+	plat_smp_setup();
+#endif
 }
 
 static const char *cpu_name[] = {
+	[CPU_SH7203]	= "SH7203",	[CPU_SH7263]	= "SH7263",
 	[CPU_SH7206]	= "SH7206",	[CPU_SH7619]	= "SH7619",
 	[CPU_SH7705]	= "SH7705",	[CPU_SH7706]	= "SH7706",
 	[CPU_SH7707]	= "SH7707",	[CPU_SH7708]	= "SH7708",
 	[CPU_SH7709]	= "SH7709",	[CPU_SH7710]	= "SH7710",
-	[CPU_SH7712]	= "SH7712",
-	[CPU_SH7729]	= "SH7729",	[CPU_SH7750]	= "SH7750",
-	[CPU_SH7750S]	= "SH7750S",	[CPU_SH7750R]	= "SH7750R",
-	[CPU_SH7751]	= "SH7751",	[CPU_SH7751R]	= "SH7751R",
-	[CPU_SH7760]	= "SH7760",
-	[CPU_ST40RA]	= "ST40RA",	[CPU_ST40GX1]	= "ST40GX1",
+	[CPU_SH7712]	= "SH7712",	[CPU_SH7720]	= "SH7720",
+	[CPU_SH7721]	= "SH7721",	[CPU_SH7729]	= "SH7729",
+	[CPU_SH7750]	= "SH7750",	[CPU_SH7750S]	= "SH7750S",
+	[CPU_SH7750R]	= "SH7750R",	[CPU_SH7751]	= "SH7751",
+	[CPU_SH7751R]	= "SH7751R",	[CPU_SH7760]	= "SH7760",
 	[CPU_SH4_202]	= "SH4-202",	[CPU_SH4_501]	= "SH4-501",
-	[CPU_SH7770]	= "SH7770",	[CPU_SH7780]	= "SH7780",
-	[CPU_SH7781]	= "SH7781",	[CPU_SH7343]	= "SH7343",
-	[CPU_SH7785]	= "SH7785",	[CPU_SH7722]	= "SH7722",
-	[CPU_SHX3]	= "SH-X3",	[CPU_SH_NONE]	= "Unknown"
+	[CPU_SH7763]	= "SH7763",	[CPU_SH7770]	= "SH7770",
+	[CPU_SH7780]	= "SH7780",	[CPU_SH7781]	= "SH7781",
+	[CPU_SH7343]	= "SH7343",	[CPU_SH7785]	= "SH7785",
+	[CPU_SH7722]	= "SH7722",	[CPU_SHX3]	= "SH-X3",
+	[CPU_SH5_101]	= "SH5-101",	[CPU_SH5_103]	= "SH5-103",
+	[CPU_SH7366]	= "SH7366",	[CPU_SH_NONE]	= "Unknown"
 };
 
 const char *get_cpu_subtype(struct sh_cpuinfo *c)
@@ -392,7 +436,7 @@ static void *c_next(struct seq_file *m, void *v, loff_t *pos)
 static void c_stop(struct seq_file *m, void *v)
 {
 }
-struct seq_operations cpuinfo_op = {
+const struct seq_operations cpuinfo_op = {
 	.start	= c_start,
 	.next	= c_next,
 	.stop	= c_stop,

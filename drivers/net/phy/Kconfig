@@ -60,20 +60,27 @@ config ICPLUS_PHY
 	---help---
 	  Currently supports the IP175C PHY.
 
-config FIXED_PHY
-	tristate "Drivers for PHY emulation on fixed speed/link"
+config REALTEK_PHY
+	tristate "Drivers for Realtek PHYs"
 	---help---
-	  Adds the driver to PHY layer to cover the boards that do not have any PHY bound,
-	  but with the ability to manipulate the speed/link in software. The relevant MII
-	  speed/duplex parameters could be effectively handled in a user-specified function.
-	  Currently tested with mpc866ads.
+	  Supports the Realtek 821x PHY.
 
-config FIXED_MII_10_FDX
-	bool "Emulation for 10M Fdx fixed PHY behavior"
-	depends on FIXED_PHY
+config FIXED_PHY
+	bool "Driver for MDIO Bus/PHY emulation with fixed speed/link PHYs"
+	depends on PHYLIB=y
+	---help---
+	  Adds the platform "fixed" MDIO Bus to cover the boards that use
+	  PHYs that are not connected to the real MDIO bus.
 
-config FIXED_MII_100_FDX
-	bool "Emulation for 100M Fdx fixed PHY behavior"
-	depends on FIXED_PHY
+	  Currently tested with mpc866ads and mpc8349e-mitx.
+
+config MDIO_BITBANG
+	tristate "Support for bitbanged MDIO buses"
+	help
+	  This module implements the MDIO bus protocol in software,
+	  for use by low level drivers that export the ability to
+	  drive the relevant pins.
+
+	  If in doubt, say N.
 
 endif # PHYLIB

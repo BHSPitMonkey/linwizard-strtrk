@@ -28,7 +28,7 @@ MODULE_ALIAS("ip_conntrack_sip");
 
 #define MAX_PORTS	8
 static unsigned short ports[MAX_PORTS];
-static int ports_c;
+static unsigned int ports_c;
 module_param_array(ports, ushort, &ports_c, 0400);
 MODULE_PARM_DESC(ports, "port numbers of SIP servers");
 
@@ -36,22 +36,22 @@ static unsigned int sip_timeout __read_mostly = SIP_TIMEOUT;
 module_param(sip_timeout, uint, 0600);
 MODULE_PARM_DESC(sip_timeout, "timeout for the master SIP session");
 
-unsigned int (*nf_nat_sip_hook)(struct sk_buff **pskb,
+unsigned int (*nf_nat_sip_hook)(struct sk_buff *skb,
 				enum ip_conntrack_info ctinfo,
 				struct nf_conn *ct,
 				const char **dptr) __read_mostly;
 EXPORT_SYMBOL_GPL(nf_nat_sip_hook);
 
-unsigned int (*nf_nat_sdp_hook)(struct sk_buff **pskb,
+unsigned int (*nf_nat_sdp_hook)(struct sk_buff *skb,
 				enum ip_conntrack_info ctinfo,
 				struct nf_conntrack_expect *exp,
 				const char *dptr) __read_mostly;
 EXPORT_SYMBOL_GPL(nf_nat_sdp_hook);
 
-static int digits_len(struct nf_conn *, const char *, const char *, int *);
-static int epaddr_len(struct nf_conn *, const char *, const char *, int *);
-static int skp_digits_len(struct nf_conn *, const char *, const char *, int *);
-static int skp_epaddr_len(struct nf_conn *, const char *, const char *, int *);
+static int digits_len(const struct nf_conn *, const char *, const char *, int *);
+static int epaddr_len(const struct nf_conn *, const char *, const char *, int *);
+static int skp_digits_len(const struct nf_conn *, const char *, const char *, int *);
+static int skp_epaddr_len(const struct nf_conn *, const char *, const char *, int *);
 
 struct sip_header_nfo {
 	const char	*lname;
@@ -61,7 +61,7 @@ struct sip_header_nfo {
 	size_t		snlen;
 	size_t		ln_strlen;
 	int		case_sensitive;
-	int		(*match_len)(struct nf_conn *, const char *,
+	int		(*match_len)(const struct nf_conn *, const char *,
 				     const char *, int *);
 };
 
@@ -187,7 +187,7 @@ static const struct sip_header_nfo ct_sip_hdrs[] = {
 	}
 };
 
-/* get line lenght until first CR or LF seen. */
+/* get line length until first CR or LF seen. */
 int ct_sip_lnlen(const char *line, const char *limit)
 {
 	const char *k = line;
@@ -225,7 +225,7 @@ const char *ct_sip_search(const char *needle, const char *haystack,
 }
 EXPORT_SYMBOL_GPL(ct_sip_search);
 
-static int digits_len(struct nf_conn *ct, const char *dptr,
+static int digits_len(const struct nf_conn *ct, const char *dptr,
 		      const char *limit, int *shift)
 {
 	int len = 0;
@@ -236,8 +236,8 @@ static int digits_len(struct nf_conn *ct, const char *dptr,
 	return len;
 }
 
-/* get digits lenght, skiping blank spaces. */
-static int skp_digits_len(struct nf_conn *ct, const char *dptr,
+/* get digits length, skipping blank spaces. */
+static int skp_digits_len(const struct nf_conn *ct, const char *dptr,
 			  const char *limit, int *shift)
 {
 	for (; dptr <= limit && *dptr == ' '; dptr++)
@@ -246,8 +246,9 @@ static int skp_digits_len(struct nf_conn *ct, const char *dptr,
 	return digits_len(ct, dptr, limit, shift);
 }
 
-static int parse_addr(struct nf_conn *ct, const char *cp, const char **endp,
-		      union nf_conntrack_address *addr, const char *limit)
+static int parse_addr(const struct nf_conn *ct, const char *cp,
+                      const char **endp, union nf_inet_addr *addr,
+                      const char *limit)
 {
 	const char *end;
 	int family = ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.l3num;
@@ -272,10 +273,10 @@ static int parse_addr(struct nf_conn *ct, const char *cp, const char **endp,
 }
 
 /* skip ip address. returns its length. */
-static int epaddr_len(struct nf_conn *ct, const char *dptr,
+static int epaddr_len(const struct nf_conn *ct, const char *dptr,
 		      const char *limit, int *shift)
 {
-	union nf_conntrack_address addr;
+	union nf_inet_addr addr;
 	const char *aux = dptr;
 
 	if (!parse_addr(ct, dptr, &dptr, &addr, limit)) {
@@ -292,7 +293,7 @@ static int epaddr_len(struct nf_conn *ct, const char *dptr,
 }
 
 /* get address length, skiping user info. */
-static int skp_epaddr_len(struct nf_conn *ct, const char *dptr,
+static int skp_epaddr_len(const struct nf_conn *ct, const char *dptr,
 			  const char *limit, int *shift)
 {
 	const char *start = dptr;
@@ -319,7 +320,7 @@ static int skp_epaddr_len(struct nf_conn *ct, const char *dptr,
 }
 
 /* Returns 0 if not found, -1 error parsing. */
-int ct_sip_get_info(struct nf_conn *ct,
+int ct_sip_get_info(const struct nf_conn *ct,
 		    const char *dptr, size_t dlen,
 		    unsigned int *matchoff,
 		    unsigned int *matchlen,
@@ -363,10 +364,10 @@ int ct_sip_get_info(struct nf_conn *ct,
 }
 EXPORT_SYMBOL_GPL(ct_sip_get_info);
 
-static int set_expected_rtp(struct sk_buff **pskb,
+static int set_expected_rtp(struct sk_buff *skb,
 			    struct nf_conn *ct,
 			    enum ip_conntrack_info ctinfo,
-			    union nf_conntrack_address *addr,
+			    union nf_inet_addr *addr,
 			    __be16 port,
 			    const char *dptr)
 {
@@ -385,7 +386,7 @@ static int set_expected_rtp(struct sk_buff **pskb,
 
 	nf_nat_sdp = rcu_dereference(nf_nat_sdp_hook);
 	if (nf_nat_sdp && ct->status & IPS_NAT_MASK)
-		ret = nf_nat_sdp(pskb, ctinfo, exp, dptr);
+		ret = nf_nat_sdp(skb, ctinfo, exp, dptr);
 	else {
 		if (nf_ct_expect_related(exp) != 0)
 			ret = NF_DROP;
@@ -397,30 +398,30 @@ static int set_expected_rtp(struct sk_buff **pskb,
 	return ret;
 }
 
-static int sip_help(struct sk_buff **pskb,
+static int sip_help(struct sk_buff *skb,
 		    unsigned int protoff,
 		    struct nf_conn *ct,
 		    enum ip_conntrack_info ctinfo)
 {
 	int family = ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.l3num;
-	union nf_conntrack_address addr;
+	union nf_inet_addr addr;
 	unsigned int dataoff, datalen;
 	const char *dptr;
 	int ret = NF_ACCEPT;
-	int matchoff, matchlen;
+	unsigned int matchoff, matchlen;
 	u_int16_t port;
 	enum sip_header_pos pos;
 	typeof(nf_nat_sip_hook) nf_nat_sip;
 
 	/* No Data ? */
 	dataoff = protoff + sizeof(struct udphdr);
-	if (dataoff >= (*pskb)->len)
+	if (dataoff >= skb->len)
 		return NF_ACCEPT;
 
-	nf_ct_refresh(ct, *pskb, sip_timeout * HZ);
+	nf_ct_refresh(ct, skb, sip_timeout * HZ);
 
-	if (!skb_is_nonlinear(*pskb))
-		dptr = (*pskb)->data + dataoff;
+	if (!skb_is_nonlinear(skb))
+		dptr = skb->data + dataoff;
 	else {
 		pr_debug("Copy of skbuff not supported yet.\n");
 		goto out;
@@ -428,13 +429,13 @@ static int sip_help(struct sk_buff **pskb,
 
 	nf_nat_sip = rcu_dereference(nf_nat_sip_hook);
 	if (nf_nat_sip && ct->status & IPS_NAT_MASK) {
-		if (!nf_nat_sip(pskb, ctinfo, ct, &dptr)) {
+		if (!nf_nat_sip(skb, ctinfo, ct, &dptr)) {
 			ret = NF_DROP;
 			goto out;
 		}
 	}
 
-	datalen = (*pskb)->len - dataoff;
+	datalen = skb->len - dataoff;
 	if (datalen < sizeof("SIP/2.0 200") - 1)
 		goto out;
 
@@ -464,7 +465,7 @@ static int sip_help(struct sk_buff **pskb,
 				ret = NF_DROP;
 				goto out;
 			}
-			ret = set_expected_rtp(pskb, ct, ctinfo, &addr,
+			ret = set_expected_rtp(skb, ct, ctinfo, &addr,
 					       htons(port), dptr);
 		}
 	}

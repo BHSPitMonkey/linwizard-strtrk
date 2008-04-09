@@ -25,8 +25,7 @@
 #include "ivtv-queue.h"
 #include "ivtv-fileops.h"
 #include "ivtv-vbi.h"
-#include "ivtv-audio.h"
-#include "ivtv-video.h"
+#include "ivtv-routing.h"
 #include "ivtv-streams.h"
 #include "ivtv-yuv.h"
 #include "ivtv-ioctl.h"
@@ -164,7 +163,7 @@ void ivtv_set_osd_alpha(struct ivtv *itv)
 {
 	ivtv_vapi(itv, CX2341X_OSD_SET_GLOBAL_ALPHA, 3,
 		itv->osd_global_alpha_state, itv->osd_global_alpha, !itv->osd_local_alpha_state);
-	ivtv_vapi(itv, CX2341X_OSD_SET_CHROMA_KEY, 2, itv->osd_color_key_state, itv->osd_color_key);
+	ivtv_vapi(itv, CX2341X_OSD_SET_CHROMA_KEY, 2, itv->osd_chroma_key_state, itv->osd_chroma_key);
 }
 
 int ivtv_set_speed(struct ivtv *itv, int speed)
@@ -373,7 +372,7 @@ static int ivtv_get_fmt(struct ivtv *itv, int streamtype, struct v4l2_format *fm
 		fmt->fmt.pix.height = itv->main_rect.height;
 		fmt->fmt.pix.colorspace = V4L2_COLORSPACE_SMPTE170M;
 		fmt->fmt.pix.field = V4L2_FIELD_INTERLACED;
-		if (itv->output_mode == OUT_UDMA_YUV) {
+		if (streamtype == IVTV_DEC_STREAM_TYPE_YUV) {
 			switch (itv->yuv_info.lace_mode & IVTV_YUV_MODE_MASK) {
 			case IVTV_YUV_MODE_INTERLACED:
 				fmt->fmt.pix.field = (itv->yuv_info.lace_mode & IVTV_YUV_SYNC_MASK) ?
@@ -387,14 +386,13 @@ static int ivtv_get_fmt(struct ivtv *itv, int streamtype, struct v4l2_format *fm
 				break;
 			}
 			fmt->fmt.pix.pixelformat = V4L2_PIX_FMT_HM12;
+			fmt->fmt.pix.bytesperline = 720;
+			fmt->fmt.pix.width = itv->yuv_info.v4l2_src_w;
+			fmt->fmt.pix.height = itv->yuv_info.v4l2_src_h;
 			/* YUV size is (Y=(h*w) + UV=(h*(w/2))) */
 			fmt->fmt.pix.sizeimage =
-				fmt->fmt.pix.height * fmt->fmt.pix.width +
-				fmt->fmt.pix.height * (fmt->fmt.pix.width / 2);
-		}
-		else if (itv->output_mode == OUT_YUV ||
-				streamtype == IVTV_ENC_STREAM_TYPE_YUV ||
-				streamtype == IVTV_DEC_STREAM_TYPE_YUV) {
+				1080 * ((fmt->fmt.pix.height + 31) & ~31);
+		} else if (streamtype == IVTV_ENC_STREAM_TYPE_YUV) {
 			fmt->fmt.pix.pixelformat = V4L2_PIX_FMT_HM12;
 			/* YUV size is (Y=(h*w) + UV=(h*(w/2))) */
 			fmt->fmt.pix.sizeimage =
@@ -427,7 +425,7 @@ static int ivtv_get_fmt(struct ivtv *itv, int streamtype, struct v4l2_format *fm
 	case V4L2_BUF_TYPE_VIDEO_OUTPUT_OVERLAY:
 		if (!(itv->v4l2_cap & V4L2_CAP_VIDEO_OUTPUT))
 			return -EINVAL;
-		fmt->fmt.win.chromakey = itv->osd_color_key;
+		fmt->fmt.win.chromakey = itv->osd_chroma_key;
 		fmt->fmt.win.global_alpha = itv->osd_global_alpha;
 		break;
 
@@ -491,6 +489,7 @@ static int ivtv_get_fmt(struct ivtv *itv, int streamtype, struct v4l2_format *fm
 static int ivtv_try_or_set_fmt(struct ivtv *itv, int streamtype,
 		struct v4l2_format *fmt, int set_fmt)
 {
+	struct yuv_playback_info *yi = &itv->yuv_info;
 	struct v4l2_sliced_vbi_format *vbifmt = &fmt->fmt.sliced;
 	u16 set;
 
@@ -506,39 +505,52 @@ static int ivtv_try_or_set_fmt(struct ivtv *itv, int streamtype,
 		r.width = fmt->fmt.pix.width;
 		r.height = fmt->fmt.pix.height;
 		ivtv_get_fmt(itv, streamtype, fmt);
-		if (itv->output_mode != OUT_UDMA_YUV) {
-			/* TODO: would setting the rect also be valid for this mode? */
-			fmt->fmt.pix.width = r.width;
-			fmt->fmt.pix.height = r.height;
-		}
-		if (itv->output_mode == OUT_UDMA_YUV) {
-			/* TODO: add checks for validity */
+		fmt->fmt.pix.width = r.width;
+		fmt->fmt.pix.height = r.height;
+		if (streamtype == IVTV_DEC_STREAM_TYPE_YUV) {
 			fmt->fmt.pix.field = field;
+			if (fmt->fmt.pix.width < 2)
+				fmt->fmt.pix.width = 2;
+			if (fmt->fmt.pix.width > 720)
+				fmt->fmt.pix.width = 720;
+			if (fmt->fmt.pix.height < 2)
+				fmt->fmt.pix.height = 2;
+			if (fmt->fmt.pix.height > 576)
+				fmt->fmt.pix.height = 576;
 		}
-		if (set_fmt) {
-			if (itv->output_mode == OUT_UDMA_YUV) {
-				switch (field) {
-				case V4L2_FIELD_NONE:
-					itv->yuv_info.lace_mode = IVTV_YUV_MODE_PROGRESSIVE;
-					break;
-				case V4L2_FIELD_ANY:
-					itv->yuv_info.lace_mode = IVTV_YUV_MODE_AUTO;
-					break;
-				case V4L2_FIELD_INTERLACED_BT:
-					itv->yuv_info.lace_mode =
-						IVTV_YUV_MODE_INTERLACED|IVTV_YUV_SYNC_ODD;
-					break;
-				case V4L2_FIELD_INTERLACED_TB:
-				default:
-					itv->yuv_info.lace_mode = IVTV_YUV_MODE_INTERLACED;
-					break;
-				}
-				itv->yuv_info.lace_sync_field = (itv->yuv_info.lace_mode & IVTV_YUV_SYNC_MASK) == IVTV_YUV_SYNC_EVEN ? 0 : 1;
+		if (set_fmt && streamtype == IVTV_DEC_STREAM_TYPE_YUV) {
+			/* Return now if we already have some frame data */
+			if (yi->stream_size)
+				return -EBUSY;
 
-				/* Force update of yuv registers */
-				itv->yuv_info.yuv_forced_update = 1;
-				return 0;
+			yi->v4l2_src_w = r.width;
+			yi->v4l2_src_h = r.height;
+
+			switch (field) {
+			case V4L2_FIELD_NONE:
+				yi->lace_mode = IVTV_YUV_MODE_PROGRESSIVE;
+				break;
+			case V4L2_FIELD_ANY:
+				yi->lace_mode = IVTV_YUV_MODE_AUTO;
+				break;
+			case V4L2_FIELD_INTERLACED_BT:
+				yi->lace_mode =
+				     IVTV_YUV_MODE_INTERLACED|IVTV_YUV_SYNC_ODD;
+				break;
+			case V4L2_FIELD_INTERLACED_TB:
+			default:
+				yi->lace_mode = IVTV_YUV_MODE_INTERLACED;
+				break;
 			}
+			yi->lace_sync_field = (yi->lace_mode & IVTV_YUV_SYNC_MASK) == IVTV_YUV_SYNC_EVEN ? 0 : 1;
+
+			if (test_bit(IVTV_F_I_DEC_YUV, &itv->i_flags))
+				itv->dma_data_req_size =
+					   1080 * ((yi->v4l2_src_h + 31) & ~31);
+
+			/* Force update of yuv registers */
+			yi->yuv_forced_update = 1;
+			return 0;
 		}
 		return 0;
 	}
@@ -547,7 +559,7 @@ static int ivtv_try_or_set_fmt(struct ivtv *itv, int streamtype,
 		if (!(itv->v4l2_cap & V4L2_CAP_VIDEO_OUTPUT))
 			return -EINVAL;
 		if (set_fmt) {
-			itv->osd_color_key = fmt->fmt.win.chromakey;
+			itv->osd_chroma_key = fmt->fmt.win.chromakey;
 			itv->osd_global_alpha = fmt->fmt.win.global_alpha;
 			ivtv_set_osd_alpha(itv);
 		}
@@ -556,6 +568,7 @@ static int ivtv_try_or_set_fmt(struct ivtv *itv, int streamtype,
 
 	/* set window size */
 	if (fmt->type == V4L2_BUF_TYPE_VIDEO_CAPTURE) {
+		struct cx2341x_mpeg_params *p = &itv->params;
 		int w = fmt->fmt.pix.width;
 		int h = fmt->fmt.pix.height;
 
@@ -567,26 +580,26 @@ static int ivtv_try_or_set_fmt(struct ivtv *itv, int streamtype,
 		fmt->fmt.pix.width = w;
 		fmt->fmt.pix.height = h;
 
-		if (!set_fmt || (itv->params.width == w && itv->params.height == h))
+		if (!set_fmt || (p->width == w && p->height == h))
 			return 0;
 		if (atomic_read(&itv->capturing) > 0)
 			return -EBUSY;
 
-		itv->params.width = w;
-		itv->params.height = h;
+		p->width = w;
+		p->height = h;
 		if (w != 720 || h != (itv->is_50hz ? 576 : 480))
-			itv->params.video_temporal_filter = 0;
+			p->video_temporal_filter = 0;
 		else
-			itv->params.video_temporal_filter = 8;
+			p->video_temporal_filter = 8;
+		if (p->video_encoding == V4L2_MPEG_VIDEO_ENCODING_MPEG_1)
+			fmt->fmt.pix.width /= 2;
 		itv->video_dec_func(itv, VIDIOC_S_FMT, fmt);
 		return ivtv_get_fmt(itv, streamtype, fmt);
 	}
 
 	/* set raw VBI format */
 	if (fmt->type == V4L2_BUF_TYPE_VBI_CAPTURE) {
-		if (set_fmt && streamtype == IVTV_ENC_STREAM_TYPE_VBI &&
-		    itv->vbi.sliced_in->service_set &&
-		    atomic_read(&itv->capturing) > 0) {
+		if (set_fmt && atomic_read(&itv->capturing) > 0) {
 			return -EBUSY;
 		}
 		if (set_fmt) {
@@ -624,7 +637,7 @@ static int ivtv_try_or_set_fmt(struct ivtv *itv, int streamtype,
 		return 0;
 	if (set == 0)
 		return -EINVAL;
-	if (atomic_read(&itv->capturing) > 0 && itv->vbi.sliced_in->service_set == 0) {
+	if (atomic_read(&itv->capturing) > 0) {
 		return -EBUSY;
 	}
 	itv->video_dec_func(itv, VIDIOC_S_FMT, fmt);
@@ -660,11 +673,8 @@ static int ivtv_debug_ioctls(struct file *filp, unsigned int cmd, void *arg)
 		chip->ident = V4L2_IDENT_NONE;
 		chip->revision = 0;
 		if (reg->match_type == V4L2_CHIP_MATCH_HOST) {
-			if (v4l2_chip_match_host(reg->match_type, reg->match_chip)) {
-				struct v4l2_chip_ident *chip = arg;
-
+			if (v4l2_chip_match_host(reg->match_type, reg->match_chip))
 				chip->ident = itv->has_cx23415 ? V4L2_IDENT_CX23415 : V4L2_IDENT_CX23416;
-			}
 			return 0;
 		}
 		if (reg->match_type == V4L2_CHIP_MATCH_I2C_DRIVER)
@@ -677,13 +687,21 @@ static int ivtv_debug_ioctls(struct file *filp, unsigned int cmd, void *arg)
 	case VIDIOC_INT_S_AUDIO_ROUTING: {
 		struct v4l2_routing *route = arg;
 
-		ivtv_audio_set_route(itv, route);
+		ivtv_i2c_hw(itv, itv->card->hw_audio, VIDIOC_INT_S_AUDIO_ROUTING, route);
 		break;
 	}
 
-	case VIDIOC_INT_RESET:
-		ivtv_reset_ir_gpio(itv);
+	case VIDIOC_INT_RESET: {
+		u32 val = *(u32 *)arg;
+
+		if ((val == 0 && itv->options.newi2c) || (val & 0x01)) {
+			ivtv_reset_ir_gpio(itv);
+		}
+		if (val & 0x02) {
+			itv->video_dec_func(itv, cmd, NULL);
+		}
 		break;
+	}
 
 	default:
 		return -EINVAL;
@@ -694,8 +712,13 @@ static int ivtv_debug_ioctls(struct file *filp, unsigned int cmd, void *arg)
 int ivtv_v4l2_ioctls(struct ivtv *itv, struct file *filp, unsigned int cmd, void *arg)
 {
 	struct ivtv_open_id *id = NULL;
+	u32 data[CX2341X_MBOX_MAX_DATA];
+	int streamtype = 0;
 
-	if (filp) id = (struct ivtv_open_id *)filp->private_data;
+	if (filp) {
+		id = (struct ivtv_open_id *)filp->private_data;
+		streamtype = id->type;
+	}
 
 	switch (cmd) {
 	case VIDIOC_G_PRIORITY:
@@ -813,6 +836,11 @@ int ivtv_v4l2_ioctls(struct ivtv *itv, struct file *filp, unsigned int cmd, void
 			cropcap->bounds.height = itv->is_50hz ? 576 : 480;
 			cropcap->pixelaspect.numerator = itv->is_50hz ? 59 : 10;
 			cropcap->pixelaspect.denominator = itv->is_50hz ? 54 : 11;
+		} else if (streamtype == IVTV_DEC_STREAM_TYPE_YUV) {
+			cropcap->bounds.width = itv->yuv_info.osd_full_w;
+			cropcap->bounds.height = itv->yuv_info.osd_full_h;
+			cropcap->pixelaspect.numerator = itv->is_out_50hz ? 59 : 10;
+			cropcap->pixelaspect.denominator = itv->is_out_50hz ? 54 : 11;
 		} else {
 			cropcap->bounds.height = itv->is_out_50hz ? 576 : 480;
 			cropcap->pixelaspect.numerator = itv->is_out_50hz ? 59 : 10;
@@ -827,10 +855,15 @@ int ivtv_v4l2_ioctls(struct ivtv *itv, struct file *filp, unsigned int cmd, void
 
 		if (crop->type == V4L2_BUF_TYPE_VIDEO_OUTPUT &&
 		    (itv->v4l2_cap & V4L2_CAP_VIDEO_OUTPUT)) {
-			if (!ivtv_vapi(itv, CX2341X_OSD_SET_FRAMEBUFFER_WINDOW, 4,
-				 crop->c.width, crop->c.height, crop->c.left, crop->c.top)) {
-				itv->main_rect = crop->c;
+			if (streamtype == IVTV_DEC_STREAM_TYPE_YUV) {
+				itv->yuv_info.main_rect = crop->c;
 				return 0;
+			} else {
+				if (!ivtv_vapi(itv, CX2341X_OSD_SET_FRAMEBUFFER_WINDOW, 4,
+					crop->c.width, crop->c.height, crop->c.left, crop->c.top)) {
+					itv->main_rect = crop->c;
+					return 0;
+				}
 			}
 			return -EINVAL;
 		}
@@ -844,7 +877,10 @@ int ivtv_v4l2_ioctls(struct ivtv *itv, struct file *filp, unsigned int cmd, void
 
 		if (crop->type == V4L2_BUF_TYPE_VIDEO_OUTPUT &&
 		    (itv->v4l2_cap & V4L2_CAP_VIDEO_OUTPUT)) {
-			crop->c = itv->main_rect;
+			if (streamtype == IVTV_DEC_STREAM_TYPE_YUV)
+				crop->c = itv->yuv_info.main_rect;
+			else
+				crop->c = itv->main_rect;
 			return 0;
 		}
 		if (crop->type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
@@ -855,7 +891,7 @@ int ivtv_v4l2_ioctls(struct ivtv *itv, struct file *filp, unsigned int cmd, void
 	case VIDIOC_ENUM_FMT: {
 		static struct v4l2_fmtdesc formats[] = {
 			{ 0, 0, 0,
-			  "HM12 (YUV 4:1:1)", V4L2_PIX_FMT_HM12,
+			  "HM12 (YUV 4:2:0)", V4L2_PIX_FMT_HM12,
 			  { 0, 0, 0, 0 }
 			},
 			{ 1, 0, V4L2_FMT_FLAG_COMPRESSED,
@@ -897,6 +933,9 @@ int ivtv_v4l2_ioctls(struct ivtv *itv, struct file *filp, unsigned int cmd, void
 		if (inp == itv->active_input) {
 			IVTV_DEBUG_INFO("Input unchanged\n");
 			break;
+		}
+		if (atomic_read(&itv->capturing) > 0) {
+			return -EBUSY;
 		}
 		IVTV_DEBUG_INFO("Changing input from %d to %d\n",
 				itv->active_input, inp);
@@ -1031,6 +1070,12 @@ int ivtv_v4l2_ioctls(struct ivtv *itv, struct file *filp, unsigned int cmd, void
 			itv->main_rect.height = itv->params.height;
 			ivtv_vapi(itv, CX2341X_OSD_SET_FRAMEBUFFER_WINDOW, 4,
 				720, itv->main_rect.height, 0, 0);
+			itv->yuv_info.main_rect = itv->main_rect;
+			if (!itv->osd_info) {
+				itv->yuv_info.osd_full_w = 720;
+				itv->yuv_info.osd_full_h =
+						itv->is_out_50hz ? 576 : 480;
+			}
 		}
 		break;
 	}
@@ -1127,12 +1172,14 @@ int ivtv_v4l2_ioctls(struct ivtv *itv, struct file *filp, unsigned int cmd, void
 		memset(&enc->raw, 0, sizeof(enc->raw));
 		switch (enc->cmd) {
 		case V4L2_ENC_CMD_START:
+			IVTV_DEBUG_IOCTL("V4L2_ENC_CMD_START\n");
 			enc->flags = 0;
 			if (try)
 				return 0;
 			return ivtv_start_capture(id);
 
 		case V4L2_ENC_CMD_STOP:
+			IVTV_DEBUG_IOCTL("V4L2_ENC_CMD_STOP\n");
 			enc->flags &= V4L2_ENC_CMD_STOP_AT_GOP_END;
 			if (try)
 				return 0;
@@ -1140,6 +1187,7 @@ int ivtv_v4l2_ioctls(struct ivtv *itv, struct file *filp, unsigned int cmd, void
 			return 0;
 
 		case V4L2_ENC_CMD_PAUSE:
+			IVTV_DEBUG_IOCTL("V4L2_ENC_CMD_PAUSE\n");
 			enc->flags = 0;
 			if (try)
 				return 0;
@@ -1152,6 +1200,7 @@ int ivtv_v4l2_ioctls(struct ivtv *itv, struct file *filp, unsigned int cmd, void
 			break;
 
 		case V4L2_ENC_CMD_RESUME:
+			IVTV_DEBUG_IOCTL("V4L2_ENC_CMD_RESUME\n");
 			enc->flags = 0;
 			if (try)
 				return 0;
@@ -1163,6 +1212,7 @@ int ivtv_v4l2_ioctls(struct ivtv *itv, struct file *filp, unsigned int cmd, void
 			ivtv_unmute(itv);
 			break;
 		default:
+			IVTV_DEBUG_IOCTL("Unknown cmd %d\n", enc->cmd);
 			return -EINVAL;
 		}
 		break;
@@ -1170,22 +1220,58 @@ int ivtv_v4l2_ioctls(struct ivtv *itv, struct file *filp, unsigned int cmd, void
 
 	case VIDIOC_G_FBUF: {
 		struct v4l2_framebuffer *fb = arg;
+		int pixfmt;
+		static u32 pixel_format[16] = {
+			V4L2_PIX_FMT_PAL8, /* Uses a 256-entry RGB colormap */
+			V4L2_PIX_FMT_RGB565,
+			V4L2_PIX_FMT_RGB555,
+			V4L2_PIX_FMT_RGB444,
+			V4L2_PIX_FMT_RGB32,
+			0,
+			0,
+			0,
+			V4L2_PIX_FMT_PAL8, /* Uses a 256-entry YUV colormap */
+			V4L2_PIX_FMT_YUV565,
+			V4L2_PIX_FMT_YUV555,
+			V4L2_PIX_FMT_YUV444,
+			V4L2_PIX_FMT_YUV32,
+			0,
+			0,
+			0,
+		};
 
 		memset(fb, 0, sizeof(*fb));
 		if (!(itv->v4l2_cap & V4L2_CAP_VIDEO_OUTPUT_OVERLAY))
 			return -EINVAL;
 		fb->capability = V4L2_FBUF_CAP_EXTERNOVERLAY | V4L2_FBUF_CAP_CHROMAKEY |
-			V4L2_FBUF_CAP_LOCAL_ALPHA | V4L2_FBUF_CAP_GLOBAL_ALPHA;
-		fb->fmt.pixelformat = itv->osd_pixelformat;
+			V4L2_FBUF_CAP_GLOBAL_ALPHA;
+		ivtv_vapi_result(itv, data, CX2341X_OSD_GET_STATE, 0);
+		data[0] |= (read_reg(0x2a00) >> 7) & 0x40;
+		pixfmt = (data[0] >> 3) & 0xf;
+		fb->fmt.pixelformat = pixel_format[pixfmt];
 		fb->fmt.width = itv->osd_rect.width;
 		fb->fmt.height = itv->osd_rect.height;
 		fb->base = (void *)itv->osd_video_pbase;
+		if (itv->osd_chroma_key_state)
+			fb->flags |= V4L2_FBUF_FLAG_CHROMAKEY;
 		if (itv->osd_global_alpha_state)
 			fb->flags |= V4L2_FBUF_FLAG_GLOBAL_ALPHA;
-		if (itv->osd_local_alpha_state)
-			fb->flags |= V4L2_FBUF_FLAG_LOCAL_ALPHA;
-		if (itv->osd_color_key_state)
-			fb->flags |= V4L2_FBUF_FLAG_CHROMAKEY;
+		pixfmt &= 7;
+		/* no local alpha for RGB565 or unknown formats */
+		if (pixfmt == 1 || pixfmt > 4)
+			break;
+		/* 16-bit formats have inverted local alpha */
+		if (pixfmt == 2 || pixfmt == 3)
+			fb->capability |= V4L2_FBUF_CAP_LOCAL_INV_ALPHA;
+		else
+			fb->capability |= V4L2_FBUF_CAP_LOCAL_ALPHA;
+		if (itv->osd_local_alpha_state) {
+			/* 16-bit formats have inverted local alpha */
+			if (pixfmt == 2 || pixfmt == 3)
+				fb->flags |= V4L2_FBUF_FLAG_LOCAL_INV_ALPHA;
+			else
+				fb->flags |= V4L2_FBUF_FLAG_LOCAL_ALPHA;
+		}
 		break;
 	}
 
@@ -1195,9 +1281,19 @@ int ivtv_v4l2_ioctls(struct ivtv *itv, struct file *filp, unsigned int cmd, void
 		if (!(itv->v4l2_cap & V4L2_CAP_VIDEO_OUTPUT_OVERLAY))
 			return -EINVAL;
 		itv->osd_global_alpha_state = (fb->flags & V4L2_FBUF_FLAG_GLOBAL_ALPHA) != 0;
-		itv->osd_local_alpha_state = (fb->flags & V4L2_FBUF_FLAG_LOCAL_ALPHA) != 0;
-		itv->osd_color_key_state = (fb->flags & V4L2_FBUF_FLAG_CHROMAKEY) != 0;
+		itv->osd_local_alpha_state =
+			(fb->flags & (V4L2_FBUF_FLAG_LOCAL_ALPHA|V4L2_FBUF_FLAG_LOCAL_INV_ALPHA)) != 0;
+		itv->osd_chroma_key_state = (fb->flags & V4L2_FBUF_FLAG_CHROMAKEY) != 0;
 		ivtv_set_osd_alpha(itv);
+		break;
+	}
+
+	case VIDIOC_OVERLAY: {
+		int *on = arg;
+
+		if (!(itv->v4l2_cap & V4L2_CAP_VIDEO_OUTPUT_OVERLAY))
+			return -EINVAL;
+		ivtv_vapi(itv, CX2341X_OSD_SET_STATE, 1, *on != 0);
 		break;
 	}
 
@@ -1209,6 +1305,7 @@ int ivtv_v4l2_ioctls(struct ivtv *itv, struct file *filp, unsigned int cmd, void
 		int i;
 
 		IVTV_INFO("=================  START STATUS CARD #%d  =================\n", itv->num);
+		IVTV_INFO("Version: %s Card: %s\n", IVTV_VERSION, itv->card_name);
 		if (itv->hw_flags & IVTV_HW_TVEEPROM) {
 			struct tveeprom tv;
 
@@ -1217,32 +1314,72 @@ int ivtv_v4l2_ioctls(struct ivtv *itv, struct file *filp, unsigned int cmd, void
 		ivtv_call_i2c_clients(itv, VIDIOC_LOG_STATUS, NULL);
 		ivtv_get_input(itv, itv->active_input, &vidin);
 		ivtv_get_audio_input(itv, itv->audio_input, &audin);
-		IVTV_INFO("Video Input: %s\n", vidin.name);
-		IVTV_INFO("Audio Input: %s\n", audin.name);
+		IVTV_INFO("Video Input:  %s\n", vidin.name);
+		IVTV_INFO("Audio Input:  %s%s\n", audin.name,
+			(itv->dualwatch_stereo_mode & ~0x300) == 0x200 ? " (Bilingual)" : "");
 		if (has_output) {
 			struct v4l2_output vidout;
 			struct v4l2_audioout audout;
 			int mode = itv->output_mode;
-			static const char * const output_modes[] = {
+			static const char * const output_modes[5] = {
 				"None",
 				"MPEG Streaming",
 				"YUV Streaming",
 				"YUV Frames",
 				"Passthrough",
 			};
+			static const char * const audio_modes[5] = {
+				"Stereo",
+				"Left",
+				"Right",
+				"Mono",
+				"Swapped"
+			};
+			static const char * const alpha_mode[4] = {
+				"None",
+				"Global",
+				"Local",
+				"Global and Local"
+			};
+			static const char * const pixel_format[16] = {
+				"ARGB Indexed",
+				"RGB 5:6:5",
+				"ARGB 1:5:5:5",
+				"ARGB 1:4:4:4",
+				"ARGB 8:8:8:8",
+				"5",
+				"6",
+				"7",
+				"AYUV Indexed",
+				"YUV 5:6:5",
+				"AYUV 1:5:5:5",
+				"AYUV 1:4:4:4",
+				"AYUV 8:8:8:8",
+				"13",
+				"14",
+				"15",
+			};
 
 			ivtv_get_output(itv, itv->active_output, &vidout);
 			ivtv_get_audio_output(itv, 0, &audout);
 			IVTV_INFO("Video Output: %s\n", vidout.name);
-			IVTV_INFO("Audio Output: %s\n", audout.name);
+			IVTV_INFO("Audio Output: %s (Stereo/Bilingual: %s/%s)\n", audout.name,
+				audio_modes[itv->audio_stereo_mode],
+				audio_modes[itv->audio_bilingual_mode]);
 			if (mode < 0 || mode > OUT_PASSTHROUGH)
 				mode = OUT_NONE;
-			IVTV_INFO("Output Mode: %s\n", output_modes[mode]);
+			IVTV_INFO("Output Mode:  %s\n", output_modes[mode]);
+			ivtv_vapi_result(itv, data, CX2341X_OSD_GET_STATE, 0);
+			data[0] |= (read_reg(0x2a00) >> 7) & 0x40;
+			IVTV_INFO("Overlay:      %s, Alpha: %s, Pixel Format: %s\n",
+				data[0] & 1 ? "On" : "Off",
+				alpha_mode[(data[0] >> 1) & 0x3],
+				pixel_format[(data[0] >> 3) & 0xf]);
 		}
-		IVTV_INFO("Tuner: %s\n",
+		IVTV_INFO("Tuner:  %s\n",
 			test_bit(IVTV_F_I_RADIO_USER, &itv->i_flags) ? "Radio" : "TV");
 		cx2341x_log_status(&itv->params, itv->name);
-		IVTV_INFO("Version: %s Status flags: 0x%08lx\n", IVTV_VERSION, itv->i_flags);
+		IVTV_INFO("Status flags:    0x%08lx\n", itv->i_flags);
 		for (i = 0; i < IVTV_MAX_STREAMS; i++) {
 			struct ivtv_stream *s = &itv->streams[i];
 
@@ -1252,7 +1389,7 @@ int ivtv_v4l2_ioctls(struct ivtv *itv, struct file *filp, unsigned int cmd, void
 					(s->buffers - s->q_free.buffers) * 100 / s->buffers,
 					(s->buffers * s->buf_size) / 1024, s->buffers);
 		}
-		IVTV_INFO("Read MPEG/VBI: %lld/%lld bytes\n", (long long)itv->mpg_data_received, (long long)itv->vbi_data_inserted);
+		IVTV_INFO("Read MPG/VBI: %lld/%lld bytes\n", (long long)itv->mpg_data_received, (long long)itv->vbi_data_inserted);
 		IVTV_INFO("==================  END STATUS CARD #%d  ==================\n", itv->num);
 		break;
 	}
@@ -1288,6 +1425,8 @@ static int ivtv_decoder_ioctls(struct file *filp, unsigned int cmd, void *arg)
 			ivtv_release_stream(s);
 			return -EBUSY;
 		}
+		/* Mark that this file handle started the UDMA_YUV mode */
+		id->yuv_frames = 1;
 		if (args->y_source == NULL)
 			return 0;
 		return ivtv_yuv_prep_frame(itv, args);
@@ -1396,9 +1535,9 @@ static int ivtv_decoder_ioctls(struct file *filp, unsigned int cmd, void *arg)
 		int try = (cmd == VIDEO_TRY_COMMAND);
 
 		if (try)
-			IVTV_DEBUG_IOCTL("VIDEO_TRY_COMMAND\n");
+			IVTV_DEBUG_IOCTL("VIDEO_TRY_COMMAND %d\n", vc->cmd);
 		else
-			IVTV_DEBUG_IOCTL("VIDEO_COMMAND\n");
+			IVTV_DEBUG_IOCTL("VIDEO_COMMAND %d\n", vc->cmd);
 		return ivtv_video_command(itv, id, vc, try);
 	}
 
@@ -1429,11 +1568,15 @@ static int ivtv_decoder_ioctls(struct file *filp, unsigned int cmd, void *arg)
 				return 0;
 			if (nonblocking)
 				return -EAGAIN;
-			/* wait for event */
+			/* Wait for event. Note that serialize_lock is locked,
+			   so to allow other processes to access the driver while
+			   we are waiting unlock first and later lock again. */
+			mutex_unlock(&itv->serialize_lock);
 			prepare_to_wait(&itv->event_waitq, &wait, TASK_INTERRUPTIBLE);
 			if ((itv->i_flags & (IVTV_F_I_EV_DEC_STOPPED|IVTV_F_I_EV_VSYNC)) == 0)
 				schedule();
 			finish_wait(&itv->event_waitq, &wait);
+			mutex_lock(&itv->serialize_lock);
 			if (signal_pending(current)) {
 				/* return if a signal was received */
 				IVTV_DEBUG_INFO("User stopped wait for event\n");
@@ -1470,6 +1613,7 @@ static int ivtv_v4l2_do_ioctl(struct inode *inode, struct file *filp,
 	case VIDIOC_S_AUDOUT:
 	case VIDIOC_S_EXT_CTRLS:
 	case VIDIOC_S_FBUF:
+	case VIDIOC_OVERLAY:
 		ret = v4l2_prio_check(&itv->prio, &id->prio);
 		if (ret)
 			return ret;
@@ -1523,6 +1667,7 @@ static int ivtv_v4l2_do_ioctl(struct inode *inode, struct file *filp,
 	case VIDIOC_TRY_ENCODER_CMD:
 	case VIDIOC_G_FBUF:
 	case VIDIOC_S_FBUF:
+	case VIDIOC_OVERLAY:
 		if (ivtv_debug & IVTV_DBGFLG_IOCTL) {
 			printk(KERN_INFO "ivtv%d ioctl: ", itv->num);
 			v4l_printk_ioctl(cmd);
@@ -1563,12 +1708,9 @@ static int ivtv_v4l2_do_ioctl(struct inode *inode, struct file *filp,
 	return 0;
 }
 
-int ivtv_v4l2_ioctl(struct inode *inode, struct file *filp, unsigned int cmd,
-		    unsigned long arg)
+static int ivtv_serialized_ioctl(struct ivtv *itv, struct inode *inode, struct file *filp,
+		unsigned int cmd, unsigned long arg)
 {
-	struct ivtv_open_id *id = (struct ivtv_open_id *)filp->private_data;
-	struct ivtv *itv = id->itv;
-
 	/* Filter dvb ioctls that cannot be handled by video_usercopy */
 	switch (cmd) {
 	case VIDEO_SELECT_SOURCE:
@@ -1602,4 +1744,17 @@ int ivtv_v4l2_ioctl(struct inode *inode, struct file *filp, unsigned int cmd,
 		break;
 	}
 	return video_usercopy(inode, filp, cmd, arg, ivtv_v4l2_do_ioctl);
+}
+
+int ivtv_v4l2_ioctl(struct inode *inode, struct file *filp, unsigned int cmd,
+		    unsigned long arg)
+{
+	struct ivtv_open_id *id = (struct ivtv_open_id *)filp->private_data;
+	struct ivtv *itv = id->itv;
+	int res;
+
+	mutex_lock(&itv->serialize_lock);
+	res = ivtv_serialized_ioctl(itv, inode, filp, cmd, arg);
+	mutex_unlock(&itv->serialize_lock);
+	return res;
 }

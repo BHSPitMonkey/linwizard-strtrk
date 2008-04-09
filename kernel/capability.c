@@ -3,28 +3,54 @@
  *
  * Copyright (C) 1997  Andrew Main <zefram@fysh.org>
  *
- * Integrated into 2.1.97+,  Andrew G. Morgan <morgan@transmeta.com>
+ * Integrated into 2.1.97+,  Andrew G. Morgan <morgan@kernel.org>
  * 30 May 2002:	Cleanup, Robert M. Love <rml@tech9.net>
- */ 
+ */
 
 #include <linux/capability.h>
 #include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/security.h>
 #include <linux/syscalls.h>
+#include <linux/pid_namespace.h>
 #include <asm/uaccess.h>
-
-unsigned securebits = SECUREBITS_DEFAULT; /* systemwide security settings */
-kernel_cap_t cap_bset = CAP_INIT_EFF_SET;
-
-EXPORT_SYMBOL(securebits);
-EXPORT_SYMBOL(cap_bset);
 
 /*
  * This lock protects task->cap_* for all tasks including current.
  * Locking rule: acquire this prior to tasklist_lock.
  */
 static DEFINE_SPINLOCK(task_capability_lock);
+
+/*
+ * Leveraged for setting/resetting capabilities
+ */
+
+const kernel_cap_t __cap_empty_set = CAP_EMPTY_SET;
+const kernel_cap_t __cap_full_set = CAP_FULL_SET;
+const kernel_cap_t __cap_init_eff_set = CAP_INIT_EFF_SET;
+
+EXPORT_SYMBOL(__cap_empty_set);
+EXPORT_SYMBOL(__cap_full_set);
+EXPORT_SYMBOL(__cap_init_eff_set);
+
+/*
+ * More recent versions of libcap are available from:
+ *
+ *   http://www.kernel.org/pub/linux/libs/security/linux-privs/
+ */
+
+static void warn_legacy_capability_use(void)
+{
+	static int warned;
+	if (!warned) {
+		char name[sizeof(current->comm)];
+
+		printk(KERN_INFO "warning: `%s' uses 32-bit capabilities"
+		       " (legacy support in use)\n",
+		       get_task_comm(name, current));
+		warned = 1;
+	}
+}
 
 /*
  * For sys_getproccap() and sys_setproccap(), any of the three
@@ -43,49 +69,91 @@ static DEFINE_SPINLOCK(task_capability_lock);
  */
 asmlinkage long sys_capget(cap_user_header_t header, cap_user_data_t dataptr)
 {
-     int ret = 0;
-     pid_t pid;
-     __u32 version;
-     struct task_struct *target;
-     struct __user_cap_data_struct data;
+	int ret = 0;
+	pid_t pid;
+	__u32 version;
+	struct task_struct *target;
+	unsigned tocopy;
+	kernel_cap_t pE, pI, pP;
 
-     if (get_user(version, &header->version))
-	     return -EFAULT;
+	if (get_user(version, &header->version))
+		return -EFAULT;
 
-     if (version != _LINUX_CAPABILITY_VERSION) {
-	     if (put_user(_LINUX_CAPABILITY_VERSION, &header->version))
-		     return -EFAULT; 
-             return -EINVAL;
-     }
+	switch (version) {
+	case _LINUX_CAPABILITY_VERSION_1:
+		warn_legacy_capability_use();
+		tocopy = _LINUX_CAPABILITY_U32S_1;
+		break;
+	case _LINUX_CAPABILITY_VERSION_2:
+		tocopy = _LINUX_CAPABILITY_U32S_2;
+		break;
+	default:
+		if (put_user(_LINUX_CAPABILITY_VERSION, &header->version))
+			return -EFAULT;
+		return -EINVAL;
+	}
 
-     if (get_user(pid, &header->pid))
-	     return -EFAULT;
+	if (get_user(pid, &header->pid))
+		return -EFAULT;
 
-     if (pid < 0) 
-             return -EINVAL;
+	if (pid < 0)
+		return -EINVAL;
 
-     spin_lock(&task_capability_lock);
-     read_lock(&tasklist_lock); 
+	spin_lock(&task_capability_lock);
+	read_lock(&tasklist_lock);
 
-     if (pid && pid != current->pid) {
-	     target = find_task_by_pid(pid);
-	     if (!target) {
-	          ret = -ESRCH;
-	          goto out;
-	     }
-     } else
-	     target = current;
+	if (pid && pid != task_pid_vnr(current)) {
+		target = find_task_by_vpid(pid);
+		if (!target) {
+			ret = -ESRCH;
+			goto out;
+		}
+	} else
+		target = current;
 
-     ret = security_capget(target, &data.effective, &data.inheritable, &data.permitted);
+	ret = security_capget(target, &pE, &pI, &pP);
 
 out:
-     read_unlock(&tasklist_lock); 
-     spin_unlock(&task_capability_lock);
+	read_unlock(&tasklist_lock);
+	spin_unlock(&task_capability_lock);
 
-     if (!ret && copy_to_user(dataptr, &data, sizeof data))
-          return -EFAULT; 
+	if (!ret) {
+		struct __user_cap_data_struct kdata[_LINUX_CAPABILITY_U32S];
+		unsigned i;
 
-     return ret;
+		for (i = 0; i < tocopy; i++) {
+			kdata[i].effective = pE.cap[i];
+			kdata[i].permitted = pP.cap[i];
+			kdata[i].inheritable = pI.cap[i];
+		}
+
+		/*
+		 * Note, in the case, tocopy < _LINUX_CAPABILITY_U32S,
+		 * we silently drop the upper capabilities here. This
+		 * has the effect of making older libcap
+		 * implementations implicitly drop upper capability
+		 * bits when they perform a: capget/modify/capset
+		 * sequence.
+		 *
+		 * This behavior is considered fail-safe
+		 * behavior. Upgrading the application to a newer
+		 * version of libcap will enable access to the newer
+		 * capabilities.
+		 *
+		 * An alternative would be to return an error here
+		 * (-ERANGE), but that causes legacy applications to
+		 * unexpectidly fail; the capget/modify/capset aborts
+		 * before modification is attempted and the application
+		 * fails.
+		 */
+
+		if (copy_to_user(dataptr, kdata, tocopy
+				 * sizeof(struct __user_cap_data_struct))) {
+			return -EFAULT;
+		}
+	}
+
+	return ret;
 }
 
 /*
@@ -101,7 +169,7 @@ static inline int cap_set_pg(int pgrp_nr, kernel_cap_t *effective,
 	int found = 0;
 	struct pid *pgrp;
 
-	pgrp = find_pid(pgrp_nr);
+	pgrp = find_vpid(pgrp_nr);
 	do_each_pid_task(pgrp, PIDTYPE_PGID, g) {
 		target = g;
 		while_each_thread(g, target) {
@@ -118,7 +186,7 @@ static inline int cap_set_pg(int pgrp_nr, kernel_cap_t *effective,
 	} while_each_pid_task(pgrp, PIDTYPE_PGID, g);
 
 	if (!found)
-	     ret = 0;
+		ret = 0;
 	return ret;
 }
 
@@ -135,7 +203,7 @@ static inline int cap_set_all(kernel_cap_t *effective,
      int found = 0;
 
      do_each_thread(g, target) {
-             if (target == current || is_init(target))
+             if (target == current || is_container_init(target->group_leader))
                      continue;
              found = 1;
 	     if (security_capset_check(target, effective, inheritable,
@@ -172,68 +240,90 @@ static inline int cap_set_all(kernel_cap_t *effective,
  */
 asmlinkage long sys_capset(cap_user_header_t header, const cap_user_data_t data)
 {
-     kernel_cap_t inheritable, permitted, effective;
-     __u32 version;
-     struct task_struct *target;
-     int ret;
-     pid_t pid;
+	struct __user_cap_data_struct kdata[_LINUX_CAPABILITY_U32S];
+	unsigned i, tocopy;
+	kernel_cap_t inheritable, permitted, effective;
+	__u32 version;
+	struct task_struct *target;
+	int ret;
+	pid_t pid;
 
-     if (get_user(version, &header->version))
-	     return -EFAULT; 
+	if (get_user(version, &header->version))
+		return -EFAULT;
 
-     if (version != _LINUX_CAPABILITY_VERSION) {
-	     if (put_user(_LINUX_CAPABILITY_VERSION, &header->version))
-		     return -EFAULT; 
-             return -EINVAL;
-     }
+	switch (version) {
+	case _LINUX_CAPABILITY_VERSION_1:
+		warn_legacy_capability_use();
+		tocopy = _LINUX_CAPABILITY_U32S_1;
+		break;
+	case _LINUX_CAPABILITY_VERSION_2:
+		tocopy = _LINUX_CAPABILITY_U32S_2;
+		break;
+	default:
+		if (put_user(_LINUX_CAPABILITY_VERSION, &header->version))
+			return -EFAULT;
+		return -EINVAL;
+	}
 
-     if (get_user(pid, &header->pid))
-	     return -EFAULT; 
+	if (get_user(pid, &header->pid))
+		return -EFAULT;
 
-     if (pid && pid != current->pid && !capable(CAP_SETPCAP))
-             return -EPERM;
+	if (pid && pid != task_pid_vnr(current) && !capable(CAP_SETPCAP))
+		return -EPERM;
 
-     if (copy_from_user(&effective, &data->effective, sizeof(effective)) ||
-	 copy_from_user(&inheritable, &data->inheritable, sizeof(inheritable)) ||
-	 copy_from_user(&permitted, &data->permitted, sizeof(permitted)))
-	     return -EFAULT; 
+	if (copy_from_user(&kdata, data, tocopy
+			   * sizeof(struct __user_cap_data_struct))) {
+		return -EFAULT;
+	}
 
-     spin_lock(&task_capability_lock);
-     read_lock(&tasklist_lock);
+	for (i = 0; i < tocopy; i++) {
+		effective.cap[i] = kdata[i].effective;
+		permitted.cap[i] = kdata[i].permitted;
+		inheritable.cap[i] = kdata[i].inheritable;
+	}
+	while (i < _LINUX_CAPABILITY_U32S) {
+		effective.cap[i] = 0;
+		permitted.cap[i] = 0;
+		inheritable.cap[i] = 0;
+		i++;
+	}
 
-     if (pid > 0 && pid != current->pid) {
-          target = find_task_by_pid(pid);
-          if (!target) {
-               ret = -ESRCH;
-               goto out;
-          }
-     } else
-               target = current;
+	spin_lock(&task_capability_lock);
+	read_lock(&tasklist_lock);
 
-     ret = 0;
+	if (pid > 0 && pid != task_pid_vnr(current)) {
+		target = find_task_by_vpid(pid);
+		if (!target) {
+			ret = -ESRCH;
+			goto out;
+		}
+	} else
+		target = current;
 
-     /* having verified that the proposed changes are legal,
-           we now put them into effect. */
-     if (pid < 0) {
-             if (pid == -1)  /* all procs other than current and init */
-                     ret = cap_set_all(&effective, &inheritable, &permitted);
+	ret = 0;
 
-             else            /* all procs in process group */
-                     ret = cap_set_pg(-pid, &effective, &inheritable,
-		     					&permitted);
-     } else {
-	     ret = security_capset_check(target, &effective, &inheritable,
-	     						&permitted);
-	     if (!ret)
-		     security_capset_set(target, &effective, &inheritable,
-		     					&permitted);
-     }
+	/* having verified that the proposed changes are legal,
+	   we now put them into effect. */
+	if (pid < 0) {
+		if (pid == -1)	/* all procs other than current and init */
+			ret = cap_set_all(&effective, &inheritable, &permitted);
+
+		else		/* all procs in process group */
+			ret = cap_set_pg(-pid, &effective, &inheritable,
+					 &permitted);
+	} else {
+		ret = security_capset_check(target, &effective, &inheritable,
+					    &permitted);
+		if (!ret)
+			security_capset_set(target, &effective, &inheritable,
+					    &permitted);
+	}
 
 out:
-     read_unlock(&tasklist_lock);
-     spin_unlock(&task_capability_lock);
+	read_unlock(&tasklist_lock);
+	spin_unlock(&task_capability_lock);
 
-     return ret;
+	return ret;
 }
 
 int __capable(struct task_struct *t, int cap)
@@ -244,7 +334,6 @@ int __capable(struct task_struct *t, int cap)
 	}
 	return 0;
 }
-EXPORT_SYMBOL(__capable);
 
 int capable(int cap)
 {

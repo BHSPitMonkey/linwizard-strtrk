@@ -659,7 +659,7 @@ sunos_nfs_get_server_fd (int fd, struct sockaddr_in *addr)
 
 	socket = SOCKET_I(inode);
 	local.sin_family = AF_INET;
-	local.sin_addr.s_addr = INADDR_ANY;
+	local.sin_addr.s_addr = htonl(INADDR_ANY);
 
 	/* IPPORT_RESERVED = 1024, can't find the definition in the kernel */
 	try_port = 1024;
@@ -866,7 +866,7 @@ asmlinkage int sunos_killpg(int pgrp, int sig)
 	rcu_read_lock();
 	ret = -EINVAL;
 	if (pgrp > 0)
-		ret = kill_pgrp(find_pid(pgrp), sig, 0);
+		ret = kill_pgrp(find_vpid(pgrp), sig, 0);
 	rcu_read_unlock();
 
 	return ret;

@@ -77,10 +77,6 @@ int smp_num_probed;		/* Internal processor count */
 int smp_num_cpus = 1;		/* Number that came online.  */
 EXPORT_SYMBOL(smp_num_cpus);
 
-extern void calibrate_delay(void);
-
-
-
 /*
  * Called by both boot and secondaries to move global data into
  *  per-processor storage.
@@ -439,7 +435,6 @@ setup_smp(void)
 				((char *)cpubase + i*hwrpb->processor_size);
 			if ((cpu->flags & 0x1cc) == 0x1cc) {
 				smp_num_probed++;
-				/* Assume here that "whami" == index */
 				cpu_set(i, cpu_present_map);
 				cpu->pal_revision = boot_cpu_palrev;
 			}

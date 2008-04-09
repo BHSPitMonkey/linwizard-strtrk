@@ -41,21 +41,20 @@
 #include <linux/i2c.h>
 
 /* Addresses to scan */
-static unsigned short normal_i2c[] = { 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27,
-					0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f,
-					I2C_CLIENT_END };
+static const unsigned short normal_i2c[] = {
+	0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27,
+	0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f,
+	I2C_CLIENT_END
+};
 
 /* Insmod parameters */
 I2C_CLIENT_INSMOD_2(pcf8574, pcf8574a);
-
-/* Initial values */
-#define PCF8574_INIT 255	/* All outputs on (input mode) */
 
 /* Each client has this additional data */
 struct pcf8574_data {
 	struct i2c_client client;
 
-	u8 write;			/* Remember last written value */
+	int write;			/* Remember last written value */
 };
 
 static int pcf8574_attach_adapter(struct i2c_adapter *adapter);
@@ -68,7 +67,6 @@ static struct i2c_driver pcf8574_driver = {
 	.driver = {
 		.name	= "pcf8574",
 	},
-	.id		= I2C_DRIVERID_PCF8574,
 	.attach_adapter	= pcf8574_attach_adapter,
 	.detach_client	= pcf8574_detach_client,
 };
@@ -85,7 +83,11 @@ static DEVICE_ATTR(read, S_IRUGO, show_read, NULL);
 static ssize_t show_write(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct pcf8574_data *data = i2c_get_clientdata(to_i2c_client(dev));
-	return sprintf(buf, "%u\n", data->write);
+
+	if (data->write < 0)
+		return data->write;
+
+	return sprintf(buf, "%d\n", data->write);
 }
 
 static ssize_t set_write(struct device *dev, struct device_attribute *attr, const char *buf,
@@ -206,8 +208,7 @@ static int pcf8574_detach_client(struct i2c_client *client)
 static void pcf8574_init_client(struct i2c_client *client)
 {
 	struct pcf8574_data *data = i2c_get_clientdata(client);
-	data->write = PCF8574_INIT;
-	i2c_smbus_write_byte(client, data->write);
+	data->write = -EAGAIN;
 }
 
 static int __init pcf8574_init(void)

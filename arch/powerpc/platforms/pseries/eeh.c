@@ -29,6 +29,8 @@
 #include <linux/rbtree.h>
 #include <linux/seq_file.h>
 #include <linux/spinlock.h>
+#include <linux/of.h>
+
 #include <asm/atomic.h>
 #include <asm/eeh.h>
 #include <asm/eeh_event.h>
@@ -169,6 +171,7 @@ static void rtas_slot_error_detail(struct pci_dn *pdn, int severity,
  */
 static size_t gather_pci_data(struct pci_dn *pdn, char * buf, size_t len)
 {
+	struct pci_dev *dev = pdn->pcidev;
 	u32 cfg;
 	int cap, i;
 	int n = 0;
@@ -184,8 +187,24 @@ static size_t gather_pci_data(struct pci_dn *pdn, char * buf, size_t len)
 	n += scnprintf(buf+n, len-n, "cmd/stat:%x\n", cfg);
 	printk(KERN_WARNING "EEH: PCI cmd/status register: %08x\n", cfg);
 
+	if (!dev) {
+		printk(KERN_WARNING "EEH: no PCI device for this of node\n");
+		return n;
+	}
+
+	/* Gather bridge-specific registers */
+	if (dev->class >> 16 == PCI_BASE_CLASS_BRIDGE) {
+		rtas_read_config(pdn, PCI_SEC_STATUS, 2, &cfg);
+		n += scnprintf(buf+n, len-n, "sec stat:%x\n", cfg);
+		printk(KERN_WARNING "EEH: Bridge secondary status: %04x\n", cfg);
+
+		rtas_read_config(pdn, PCI_BRIDGE_CONTROL, 2, &cfg);
+		n += scnprintf(buf+n, len-n, "brdg ctl:%x\n", cfg);
+		printk(KERN_WARNING "EEH: Bridge control: %04x\n", cfg);
+	}
+
 	/* Dump out the PCI-X command and status regs */
-	cap = pci_find_capability(pdn->pcidev, PCI_CAP_ID_PCIX);
+	cap = pci_find_capability(dev, PCI_CAP_ID_PCIX);
 	if (cap) {
 		rtas_read_config(pdn, cap, 4, &cfg);
 		n += scnprintf(buf+n, len-n, "pcix-cmd:%x\n", cfg);
@@ -197,7 +216,7 @@ static size_t gather_pci_data(struct pci_dn *pdn, char * buf, size_t len)
 	}
 
 	/* If PCI-E capable, dump PCI-E cap 10, and the AER */
-	cap = pci_find_capability(pdn->pcidev, PCI_CAP_ID_EXP);
+	cap = pci_find_capability(dev, PCI_CAP_ID_EXP);
 	if (cap) {
 		n += scnprintf(buf+n, len-n, "pci-e cap10:\n");
 		printk(KERN_WARNING
@@ -209,7 +228,7 @@ static size_t gather_pci_data(struct pci_dn *pdn, char * buf, size_t len)
 			printk(KERN_WARNING "EEH: PCI-E %02x: %08x\n", i, cfg);
 		}
 
-		cap = pci_find_ext_capability(pdn->pcidev,PCI_EXT_CAP_ID_ERR);
+		cap = pci_find_ext_capability(dev, PCI_EXT_CAP_ID_ERR);
 		if (cap) {
 			n += scnprintf(buf+n, len-n, "pci-e AER:\n");
 			printk(KERN_WARNING
@@ -222,6 +241,18 @@ static size_t gather_pci_data(struct pci_dn *pdn, char * buf, size_t len)
 			}
 		}
 	}
+
+	/* Gather status on devices under the bridge */
+	if (dev->class >> 16 == PCI_BASE_CLASS_BRIDGE) {
+		struct device_node *dn;
+
+		for_each_child_of_node(pdn->node, dn) {
+			pdn = PCI_DN(dn);
+			if (pdn)
+				n += gather_pci_data(pdn, buf+n, len-n);
+		}
+	}
+
 	return n;
 }
 
@@ -293,7 +324,7 @@ eeh_wait_for_slot_status(struct pci_dn *pdn, int max_wait_msecs)
 
 		if (rets[2] == 0) return -1; /* permanently unavailable */
 
-		if (max_wait_msecs <= 0) return -1;
+		if (max_wait_msecs <= 0) break;
 
 		mwait = rets[2];
 		if (mwait <= 0) {
@@ -342,7 +373,7 @@ struct device_node * find_device_pe(struct device_node *dn)
 	return dn;
 }
 
-/** Mark all devices that are peers of this device as failed.
+/** Mark all devices that are children of this device as failed.
  *  Mark the device driver too, so that it can see the failure
  *  immediately; this is critical, since some drivers poll
  *  status registers in interrupts ... If a driver is polling,
@@ -350,9 +381,11 @@ struct device_node * find_device_pe(struct device_node *dn)
  *  an interrupt context, which is bad.
  */
 
-static void __eeh_mark_slot (struct device_node *dn, int mode_flag)
+static void __eeh_mark_slot(struct device_node *parent, int mode_flag)
 {
-	while (dn) {
+	struct device_node *dn;
+
+	for_each_child_of_node(parent, dn) {
 		if (PCI_DN(dn)) {
 			/* Mark the pci device driver too */
 			struct pci_dev *dev = PCI_DN(dn)->pcidev;
@@ -362,10 +395,8 @@ static void __eeh_mark_slot (struct device_node *dn, int mode_flag)
 			if (dev && dev->driver)
 				dev->error_state = pci_channel_io_frozen;
 
-			if (dn->child)
-				__eeh_mark_slot (dn->child, mode_flag);
+			__eeh_mark_slot(dn, mode_flag);
 		}
-		dn = dn->sibling;
 	}
 }
 
@@ -385,19 +416,19 @@ void eeh_mark_slot (struct device_node *dn, int mode_flag)
 	if (dev)
 		dev->error_state = pci_channel_io_frozen;
 
-	__eeh_mark_slot (dn->child, mode_flag);
+	__eeh_mark_slot(dn, mode_flag);
 }
 
-static void __eeh_clear_slot (struct device_node *dn, int mode_flag)
+static void __eeh_clear_slot(struct device_node *parent, int mode_flag)
 {
-	while (dn) {
+	struct device_node *dn;
+
+	for_each_child_of_node(parent, dn) {
 		if (PCI_DN(dn)) {
 			PCI_DN(dn)->eeh_mode &= ~mode_flag;
 			PCI_DN(dn)->eeh_check_count = 0;
-			if (dn->child)
-				__eeh_clear_slot (dn->child, mode_flag);
+			__eeh_clear_slot(dn, mode_flag);
 		}
-		dn = dn->sibling;
 	}
 }
 
@@ -414,7 +445,7 @@ void eeh_clear_slot (struct device_node *dn, int mode_flag)
 
 	PCI_DN(dn)->eeh_mode &= ~mode_flag;
 	PCI_DN(dn)->eeh_check_count = 0;
-	__eeh_clear_slot (dn->child, mode_flag);
+	__eeh_clear_slot(dn, mode_flag);
 	spin_unlock_irqrestore(&confirm_error_lock, flags);
 }
 
@@ -450,6 +481,7 @@ int eeh_dn_check_failure(struct device_node *dn, struct pci_dev *dev)
 		no_dn++;
 		return 0;
 	}
+	dn = find_device_pe(dn);
 	pdn = PCI_DN(dn);
 
 	/* Access to IO BARs might get this far and still not want checking. */
@@ -515,7 +547,7 @@ int eeh_dn_check_failure(struct device_node *dn, struct pci_dev *dev)
 
 	/* Note that config-io to empty slots may fail;
 	 * they are empty when they don't have children. */
-	if ((rets[0] == 5) && (dn->child == NULL)) {
+	if ((rets[0] == 5) && (rets[2] == 0) && (dn->child == NULL)) {
 		false_positives++;
 		pdn->eeh_false_positives ++;
 		rc = 0;
@@ -750,12 +782,12 @@ int rtas_set_slot_reset(struct pci_dn *pdn)
 			return 0;
 
 		if (rc < 0) {
-			printk (KERN_ERR "EEH: unrecoverable slot failure %s\n",
-			        pdn->node->full_name);
+			printk(KERN_ERR "EEH: unrecoverable slot failure %s\n",
+			       pdn->node->full_name);
 			return -1;
 		}
-		printk (KERN_ERR "EEH: bus reset %d failed on slot %s\n",
-		        i+1, pdn->node->full_name);
+		printk(KERN_ERR "EEH: bus reset %d failed on slot %s, rc=%d\n",
+		       i+1, pdn->node->full_name, rc);
 	}
 
 	return -1;
@@ -818,11 +850,8 @@ void eeh_restore_bars(struct pci_dn *pdn)
 	if ((pdn->eeh_mode & EEH_MODE_SUPPORTED) && !IS_BRIDGE(pdn->class_code))
 		__restore_bars (pdn);
 
-	dn = pdn->node->child;
-	while (dn) {
+	for_each_child_of_node(pdn->node, dn)
 		eeh_restore_bars (PCI_DN(dn));
-		dn = dn->sibling;
-	}
 }
 
 /**
@@ -930,7 +959,7 @@ static void *early_enable_eeh(struct device_node *dn, void *data)
 	pdn->eeh_freeze_count = 0;
 	pdn->eeh_false_positives = 0;
 
-	if (status && strcmp(status, "ok") != 0)
+	if (status && strncmp(status, "ok", 2) != 0)
 		return NULL;	/* ignore devices with bad status */
 
 	/* Ignore bad nodes. */
@@ -943,23 +972,6 @@ static void *early_enable_eeh(struct device_node *dn, void *data)
 		return NULL;
 	}
 	pdn->class_code = *class_code;
-
-	/*
-	 * Now decide if we are going to "Disable" EEH checking
-	 * for this device.  We still run with the EEH hardware active,
-	 * but we won't be checking for ff's.  This means a driver
-	 * could return bad data (very bad!), an interrupt handler could
-	 * hang waiting on status bits that won't change, etc.
-	 * But there are a few cases like display devices that make sense.
-	 */
-	enable = 1;	/* i.e. we will do checking */
-#if 0
-	if ((*class_code >> 16) == PCI_BASE_CLASS_DISPLAY)
-		enable = 0;
-#endif
-
-	if (!enable)
-		pdn->eeh_mode |= EEH_MODE_NOCHECK;
 
 	/* Ok... see if this device supports EEH.  Some do, some don't,
 	 * and the only way to find out is to check each and every one. */
@@ -1117,7 +1129,8 @@ static void eeh_add_device_early(struct device_node *dn)
 void eeh_add_device_tree_early(struct device_node *dn)
 {
 	struct device_node *sib;
-	for (sib = dn->child; sib; sib = sib->sibling)
+
+	for_each_child_of_node(dn, sib)
 		eeh_add_device_tree_early(sib);
 	eeh_add_device_early(dn);
 }

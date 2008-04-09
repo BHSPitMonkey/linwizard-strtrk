@@ -973,6 +973,8 @@ static void digi_set_termios(struct usb_serial_port *port,
 		}
 	}
 	/* set parity */
+	tty->termios->c_cflag &= ~CMSPAR;
+
 	if ((cflag&(PARENB|PARODD)) != (old_cflag&(PARENB|PARODD))) {
 		if (cflag&PARENB) {
 			if (cflag&PARODD)
@@ -1054,15 +1056,15 @@ static void digi_set_termios(struct usb_serial_port *port,
 	}
 
 	/* set output flow control */
-	if ((iflag&IXON) != (old_iflag&IXON)
-	    || (cflag&CRTSCTS) != (old_cflag&CRTSCTS)) {
+	if ((iflag & IXON) != (old_iflag & IXON)
+	    || (cflag & CRTSCTS) != (old_cflag & CRTSCTS)) {
 		arg = 0;
-		if (iflag&IXON)
+		if (iflag & IXON)
 			arg |= DIGI_OUTPUT_FLOW_CONTROL_XON_XOFF;
 		else
 			arg &= ~DIGI_OUTPUT_FLOW_CONTROL_XON_XOFF;
 
-		if (cflag&CRTSCTS) {
+		if (cflag & CRTSCTS) {
 			arg |= DIGI_OUTPUT_FLOW_CONTROL_CTS;
 		} else {
 			arg &= ~DIGI_OUTPUT_FLOW_CONTROL_CTS;
@@ -1076,8 +1078,8 @@ static void digi_set_termios(struct usb_serial_port *port,
 	}
 
 	/* set receive enable/disable */
-	if ((cflag&CREAD) != (old_cflag&CREAD)) {
-		if (cflag&CREAD)
+	if ((cflag & CREAD) != (old_cflag & CREAD)) {
+		if (cflag & CREAD)
 			arg = DIGI_ENABLE;
 		else
 			arg = DIGI_DISABLE;
@@ -1089,7 +1091,7 @@ static void digi_set_termios(struct usb_serial_port *port,
 	}
 	if ((ret = digi_write_oob_command(port, buf, i, 1)) != 0)
 		dbg("digi_set_termios: write oob failed, ret=%d", ret);
-
+	tty_encode_baud_rate(tty, baud, baud);
 }
 
 
@@ -1403,19 +1405,19 @@ static void digi_close(struct usb_serial_port *port, struct file *filp)
 	unsigned char buf[32];
 	struct tty_struct *tty = port->tty;
 	struct digi_port *priv = usb_get_serial_port_data(port);
-	unsigned long flags = 0;
 
 	dbg("digi_close: TOP: port=%d, open_count=%d",
 		priv->dp_port_num, port->open_count);
 
+	mutex_lock(&port->serial->disc_mutex);
 	/* if disconnected, just clear flags */
-	if (!usb_get_intfdata(port->serial->interface))
+	if (port->serial->disconnected)
 		goto exit;
 
 	/* do cleanup only after final close on this port */
-	spin_lock_irqsave(&priv->dp_port_lock, flags);
+	spin_lock_irq(&priv->dp_port_lock);
 	priv->dp_in_close = 1;
-	spin_unlock_irqrestore(&priv->dp_port_lock, flags);
+	spin_unlock_irq(&priv->dp_port_lock);
 
 	/* tell line discipline to process only XON/XOFF */
 	tty->closing = 1;
@@ -1480,11 +1482,12 @@ static void digi_close(struct usb_serial_port *port, struct file *filp)
 	}
 	tty->closing = 0;
 exit:
-	spin_lock_irqsave(&priv->dp_port_lock, flags);
+	spin_lock_irq(&priv->dp_port_lock);
 	priv->dp_write_urb_in_use = 0;
 	priv->dp_in_close = 0;
 	wake_up_interruptible(&priv->dp_close_wait);
-	spin_unlock_irqrestore(&priv->dp_port_lock, flags);
+	spin_unlock_irq(&priv->dp_port_lock);
+	mutex_unlock(&port->serial->disc_mutex);
 	dbg("digi_close: done");
 }
 

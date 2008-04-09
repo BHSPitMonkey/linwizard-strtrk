@@ -49,7 +49,7 @@
  * Address is fully defined internally and cannot be changed.
  */
 
-static unsigned short normal_i2c[] = { 0x2e, I2C_CLIENT_END };
+static const unsigned short normal_i2c[] = { 0x2e, I2C_CLIENT_END };
 
 /*
  * Insmod parameters
@@ -96,7 +96,6 @@ static struct i2c_driver w83l785ts_driver = {
 	.driver = {
 		.name	= "w83l785ts",
 	},
-	.id		= I2C_DRIVERID_W83L785TS,
 	.attach_adapter	= w83l785ts_attach_adapter,
 	.detach_client	= w83l785ts_detach_client,
 };
@@ -107,7 +106,7 @@ static struct i2c_driver w83l785ts_driver = {
 
 struct w83l785ts_data {
 	struct i2c_client client;
-	struct class_device *class_dev;
+	struct device *hwmon_dev;
 	struct mutex update_lock;
 	char valid; /* zero until following fields are valid */
 	unsigned long last_updated; /* in jiffies */
@@ -247,9 +246,9 @@ static int w83l785ts_detect(struct i2c_adapter *adapter, int address, int kind)
 		goto exit_remove;
 
 	/* Register sysfs hooks */
-	data->class_dev = hwmon_device_register(&new_client->dev);
-	if (IS_ERR(data->class_dev)) {
-		err = PTR_ERR(data->class_dev);
+	data->hwmon_dev = hwmon_device_register(&new_client->dev);
+	if (IS_ERR(data->hwmon_dev)) {
+		err = PTR_ERR(data->hwmon_dev);
 		goto exit_remove;
 	}
 
@@ -272,7 +271,7 @@ static int w83l785ts_detach_client(struct i2c_client *client)
 	struct w83l785ts_data *data = i2c_get_clientdata(client);
 	int err;
 
-	hwmon_device_unregister(data->class_dev);
+	hwmon_device_unregister(data->hwmon_dev);
 	device_remove_file(&client->dev,
 			   &sensor_dev_attr_temp1_input.dev_attr);
 	device_remove_file(&client->dev,

@@ -36,7 +36,7 @@ static inline int uhc_clkctrl_ready(u32 val)
 }
 
 /*
- * UHC(usb host controler) enable function.
+ * UHC(usb host controller) enable function.
  * affect to both of OHCI and EHCI core module.
  */
 static void enable_scc_uhc(struct pci_dev *dev)
@@ -47,7 +47,8 @@ static void enable_scc_uhc(struct pci_dev *dev)
 	u32 val = 0;
 	int i;
 
-	if (!machine_is(celleb))
+	if (!machine_is(celleb_beat) &&
+	    !machine_is(celleb_native))
 		return;
 
 	uhc_base = ioremap(pci_resource_start(dev, 0),

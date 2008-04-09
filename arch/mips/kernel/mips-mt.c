@@ -17,7 +17,6 @@
 #include <asm/system.h>
 #include <asm/hardirq.h>
 #include <asm/mmu_context.h>
-#include <asm/smp.h>
 #include <asm/mipsmtregs.h>
 #include <asm/r4kcache.h>
 #include <asm/cacheflush.h>
@@ -236,7 +235,7 @@ void mips_mt_set_cpuoptions(void)
 	if (oconfig7 != nconfig7) {
 		__asm__ __volatile("sync");
 		write_c0_config7(nconfig7);
-		ehb ();
+		ehb();
 		printk("Config7: 0x%08x\n", read_c0_config7());
 	}
 

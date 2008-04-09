@@ -47,7 +47,7 @@
 /* #define ATR_CSUM */
 
 #ifdef PCMCIA_DEBUG
-#define reader_to_dev(x)	(&handle_to_dev(x->p_dev->handle))
+#define reader_to_dev(x)	(&handle_to_dev(x->p_dev))
 static int pc_debug = PCMCIA_DEBUG;
 module_param(pc_debug, int, 0600);
 #define DEBUGP(n, rdr, x, args...) do { 				\
@@ -308,7 +308,8 @@ static unsigned int calc_baudv(unsigned char fidi)
 	return (wcrcf / wbrcf);
 }
 
-static unsigned short io_read_num_rec_bytes(ioaddr_t iobase, unsigned short *s)
+static unsigned short io_read_num_rec_bytes(unsigned int iobase,
+					    unsigned short *s)
 {
 	unsigned short tmp;
 
@@ -426,7 +427,7 @@ static struct card_fixup card_fixups[] = {
 static void set_cardparameter(struct cm4000_dev *dev)
 {
 	int i;
-	ioaddr_t iobase = dev->p_dev->io.BasePort1;
+	unsigned int iobase = dev->p_dev->io.BasePort1;
 	u_int8_t stopbits = 0x02; /* ISO default */
 
 	DEBUGP(3, dev, "-> set_cardparameter\n");
@@ -459,7 +460,7 @@ static int set_protocol(struct cm4000_dev *dev, struct ptsreq *ptsreq)
 	unsigned short num_bytes_read;
 	unsigned char pts_reply[4];
 	ssize_t rc;
-	ioaddr_t iobase = dev->p_dev->io.BasePort1;
+	unsigned int iobase = dev->p_dev->io.BasePort1;
 
 	rc = 0;
 
@@ -610,7 +611,7 @@ exit_setprotocol:
 	return rc;
 }
 
-static int io_detect_cm4000(ioaddr_t iobase, struct cm4000_dev *dev)
+static int io_detect_cm4000(unsigned int iobase, struct cm4000_dev *dev)
 {
 
 	/* note: statemachine is assumed to be reset */
@@ -671,7 +672,7 @@ static void terminate_monitor(struct cm4000_dev *dev)
 static void monitor_card(unsigned long p)
 {
 	struct cm4000_dev *dev = (struct cm4000_dev *) p;
-	ioaddr_t iobase = dev->p_dev->io.BasePort1;
+	unsigned int iobase = dev->p_dev->io.BasePort1;
 	unsigned short s;
 	struct ptsreq ptsreq;
 	int i, atrc;
@@ -933,7 +934,7 @@ static ssize_t cmm_read(struct file *filp, __user char *buf, size_t count,
 			loff_t *ppos)
 {
 	struct cm4000_dev *dev = filp->private_data;
-	ioaddr_t iobase = dev->p_dev->io.BasePort1;
+	unsigned int iobase = dev->p_dev->io.BasePort1;
 	ssize_t rc;
 	int i, j, k;
 
@@ -1054,7 +1055,7 @@ static ssize_t cmm_write(struct file *filp, const char __user *buf,
 			 size_t count, loff_t *ppos)
 {
 	struct cm4000_dev *dev = (struct cm4000_dev *) filp->private_data;
-	ioaddr_t iobase = dev->p_dev->io.BasePort1;
+	unsigned int iobase = dev->p_dev->io.BasePort1;
 	unsigned short s;
 	unsigned char tmp;
 	unsigned char infolen;
@@ -1408,7 +1409,7 @@ static int cmm_ioctl(struct inode *inode, struct file *filp, unsigned int cmd,
 		     unsigned long arg)
 {
 	struct cm4000_dev *dev = filp->private_data;
-	ioaddr_t iobase = dev->p_dev->io.BasePort1;
+	unsigned int iobase = dev->p_dev->io.BasePort1;
 	struct pcmcia_device *link;
 	int size;
 	int rc;
@@ -1863,8 +1864,7 @@ static int cm4000_probe(struct pcmcia_device *link)
 		return ret;
 	}
 
-	class_device_create(cmm_class, NULL, MKDEV(major, i), NULL,
-			    "cmm%d", i);
+	device_create(cmm_class, NULL, MKDEV(major, i), "cmm%d", i);
 
 	return 0;
 }
@@ -1888,7 +1888,7 @@ static void cm4000_detach(struct pcmcia_device *link)
 	dev_table[devno] = NULL;
 	kfree(dev);
 
-	class_device_destroy(cmm_class, MKDEV(major, devno));
+	device_destroy(cmm_class, MKDEV(major, devno));
 
 	return;
 }

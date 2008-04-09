@@ -86,6 +86,14 @@ UNUSUAL_DEV(  0x03f0, 0x0307, 0x0001, 0x0001,
 		US_SC_8070, US_PR_USBAT, init_usbat_cd, 0),
 #endif
 
+/* Reported by Grant Grundler <grundler@parisc-linux.org>
+ * HP r707 camera in "Disk" mode with 2.00.23 or 2.00.24 firmware.
+ */
+UNUSUAL_DEV(  0x03f0, 0x4002, 0x0001, 0x0001,
+		"HP",
+		"PhotoSmart R707",
+		US_SC_DEVICE, US_PR_DEVICE, NULL, US_FL_FIX_CAPACITY),
+
 /* Reported by Sebastian Kapfer <sebastian_kapfer@gmx.net>
  * and Olaf Hering <olh@suse.de> (different bcd's, same vendor/product)
  * for USB floppies that need the SINGLE_LUN enforcement.
@@ -198,7 +206,7 @@ UNUSUAL_DEV(  0x0421, 0x044e, 0x0100, 0x0100,
 		US_FL_IGNORE_RESIDUE | US_FL_FIX_CAPACITY ),
 
 /* Reported by Bardur Arantsson <bardur@scientician.net> */
-UNUSUAL_DEV(  0x0421, 0x047c, 0x0370, 0x0370,
+UNUSUAL_DEV(  0x0421, 0x047c, 0x0370, 0x0610,
 		"Nokia",
 		"6131",
 		US_SC_DEVICE, US_PR_DEVICE, NULL,
@@ -341,8 +349,15 @@ UNUSUAL_DEV(  0x04b0, 0x040d, 0x0100, 0x0100,
 		US_SC_DEVICE, US_PR_DEVICE, NULL,
 		US_FL_FIX_CAPACITY),
 
+/* Reported by Graber and Mike Pagano <mpagano-kernel@mpagano.com> */
+UNUSUAL_DEV(  0x04b0, 0x040f, 0x0100, 0x0200,
+		"NIKON",
+		"NIKON DSC D200",
+		US_SC_DEVICE, US_PR_DEVICE, NULL,
+		US_FL_FIX_CAPACITY),
+
 /* Reported by Emil Larsson <emil@swip.net> */
-UNUSUAL_DEV(  0x04b0, 0x0411, 0x0100, 0x0101,
+UNUSUAL_DEV(  0x04b0, 0x0411, 0x0100, 0x0110,
 		"NIKON",
 		"NIKON DSC D80",
 		US_SC_DEVICE, US_PR_DEVICE, NULL,
@@ -354,6 +369,27 @@ UNUSUAL_DEV(  0x04b0, 0x0413, 0x0110, 0x0110,
 		"NIKON DSC D40",
 		US_SC_DEVICE, US_PR_DEVICE, NULL,
 		US_FL_FIX_CAPACITY),
+
+/* Reported by Paul Check <paul@openstreet.com> */
+UNUSUAL_DEV(  0x04b0, 0x0415, 0x0100, 0x0100,
+		"NIKON",
+		"NIKON DSC D2Xs",
+		US_SC_DEVICE, US_PR_DEVICE, NULL,
+		US_FL_FIX_CAPACITY),
+
+/* Reported by Shan Destromp (shansan@gmail.com) */
+UNUSUAL_DEV(  0x04b0, 0x0417, 0x0100, 0x0100,
+		"NIKON",
+		"NIKON DSC D40X",
+		US_SC_DEVICE, US_PR_DEVICE, NULL,
+		US_FL_FIX_CAPACITY),
+
+/* Reported by Doug Maxey (dwm@austin.ibm.com) */
+UNUSUAL_DEV(  0x04b3, 0x4001, 0x0110, 0x0110,
+		"IBM",
+		"IBM RSA2",
+		US_SC_DEVICE, US_PR_CB, NULL,
+		US_FL_MAX_SECTORS_MIN),
 
 /* BENQ DC5330
  * Reported by Manuel Fombuena <mfombuena@ya.com> and
@@ -386,7 +422,7 @@ UNUSUAL_DEV(  0x04cb, 0x0100, 0x0000, 0x2210,
 		"FinePix 1400Zoom",
 		US_SC_UFI, US_PR_DEVICE, NULL, US_FL_FIX_INQUIRY | US_FL_SINGLE_LUN),
 
-/* Reported by Peter Wächtler <pwaechtler@loewe-komp.de>
+/* Reported by Peter WÃ¤chtler <pwaechtler@loewe-komp.de>
  * The device needs the flags only.
  */
 UNUSUAL_DEV(  0x04ce, 0x0002, 0x0074, 0x0074,
@@ -710,11 +746,30 @@ UNUSUAL_DEV(  0x0584, 0x0008, 0x0102, 0x0102,
  		US_SC_SCSI, US_PR_ALAUDA, init_alauda, 0 ),
 #endif
 
+/* Reported by RTE <raszilki@yandex.ru> */
+UNUSUAL_DEV(  0x058f, 0x6387, 0x0141, 0x0141,
+		"JetFlash",
+		"TS1GJF2A/120",
+		US_SC_DEVICE, US_PR_DEVICE, NULL,
+		US_FL_MAX_SECTORS_64 ),
+
 /* Fabrizio Fellini <fello@libero.it> */
 UNUSUAL_DEV(  0x0595, 0x4343, 0x0000, 0x2210,
 		"Fujifilm",
 		"Digital Camera EX-20 DSC",
 		US_SC_8070, US_PR_DEVICE, NULL, 0 ),
+
+/* Reported by Andre Welter <a.r.welter@gmx.de>
+ * This antique device predates the release of the Bulk-only Transport
+ * spec, and if it gets a Get-Max-LUN then it requires the host to do a
+ * Clear-Halt on the bulk endpoints.  The SINGLE_LUN flag will prevent
+ * us from sending the request.
+ */
+UNUSUAL_DEV(  0x059b, 0x0001, 0x0100, 0x0100,
+		"Iomega",
+		"ZIP 100",
+		US_SC_DEVICE, US_PR_DEVICE, NULL,
+		US_FL_SINGLE_LUN ),
 
 /* Reported by <Hendryk.Pfeiffer@gmx.de> */
 UNUSUAL_DEV(  0x059f, 0x0643, 0x0000, 0x0000,
@@ -1230,14 +1285,6 @@ UNUSUAL_DEV( 0x0ace, 0x20ff, 0x0101, 0x0101,
 		US_SC_DEVICE, US_PR_DEVICE, NULL,
 		US_FL_IGNORE_DEVICE ),
 
-/* SanDisk that has a second LUN for a driver ISO, reported by
- * Ben Collins <bcollins@ubuntu.com> */
-UNUSUAL_DEV( 0x0781, 0x5406, 0x0000, 0xffff,
-		"SanDisk",
-		"U3 Cruzer Micro driver ISO",
-		US_SC_DEVICE, US_PR_DEVICE, NULL,
-		US_FL_SINGLE_LUN ),
-
 #ifdef CONFIG_USB_STORAGE_ISD200
 UNUSUAL_DEV(  0x0bf6, 0xa001, 0x0100, 0x0110,
 		"ATI",
@@ -1377,6 +1424,17 @@ UNUSUAL_DEV(  0x0ed1, 0x7636, 0x0103, 0x0103,
 		US_SC_DEVICE, US_PR_DEVICE, NULL,
 		US_FL_IGNORE_RESIDUE | US_FL_GO_SLOW | US_FL_MAX_SECTORS_64),
 
+/* Patch by Leonid Petrov mail at lpetrov.net
+ * Reported by Robert Spitzenpfeil <robert@spitzenpfeil.org>
+ * http://www.qbik.ch/usb/devices/showdev.php?id=1705
+ * Updated to 103 device by MJ Ray mjr at phonecoop.coop
+ */
+UNUSUAL_DEV(  0x0f19, 0x0103, 0x0100, 0x0100,
+		"Oracom Co., Ltd",
+		"ORC-200M",
+		US_SC_DEVICE, US_PR_DEVICE, NULL,
+		US_FL_IGNORE_RESIDUE ),
+
 /* David Kuehling <dvdkhlng@gmx.de>:
  * for MP3-Player AVOX WSX-300ER (bought in Japan).  Reports lots of SCSI
  * errors when trying to write.
@@ -1442,6 +1500,15 @@ UNUSUAL_DEV(  0x1019, 0x0c55, 0x0000, 0x0110,
 		US_SC_DEVICE, US_PR_DEVICE, usb_stor_ucr61s2b_init,
 		0 ),
 
+/* Reported by Fabio Venturi <f.venturi@tdnet.it>
+ * The device reports a vendor-specific bDeviceClass.
+ */
+UNUSUAL_DEV(  0x10d6, 0x2200, 0x0100, 0x0100,
+		"Actions Semiconductor",
+		"Mtp device",
+		US_SC_DEVICE, US_PR_DEVICE, NULL,
+		0),
+
 /* Reported by Kevin Lloyd <linux@sierrawireless.com>
  * Entry is needed for the initializer function override,
  * which instructs the device to load as a modem
@@ -1462,6 +1529,17 @@ UNUSUAL_DEV(  0x1210, 0x0003, 0x0100, 0x0100,
 		"DigiTech Mass Storage",
 		US_SC_DEVICE, US_PR_DEVICE, NULL,
 		US_FL_IGNORE_RESIDUE ),
+
+/* Reported by fangxiaozhi <fangxiaozhi60675@huawei.com>
+ * and by linlei <linlei83@huawei.com>
+ * Patch reworked by Johann Wilhelm <johann.wilhelm@student.tugraz.at>
+ * This brings the HUAWEI E220 devices into multi-port mode
+ */
+UNUSUAL_DEV( 0x12d1, 0x1003, 0x0000, 0x0000,
+		"HUAWEI MOBILE",
+		"Mass Storage",
+		US_SC_DEVICE, US_PR_DEVICE, usb_stor_huawei_e220_init,
+		0),
 
 /* Reported by Vilius Bilinkevicius <vilisas AT xxx DOT lt) */
 UNUSUAL_DEV(  0x132b, 0x000b, 0x0001, 0x0001,
@@ -1511,6 +1589,17 @@ UNUSUAL_DEV(  0x22b8, 0x4810, 0x0001, 0x0001,
 		US_SC_DEVICE, US_PR_DEVICE, NULL,
 		US_FL_FIX_CAPACITY),
 
+/*
+ * Patch by Constantin Baranov <const@tltsu.ru>
+ * Report by Andreas Koenecke.
+ * Motorola ROKR Z6.
+ */
+UNUSUAL_DEV(  0x22b8, 0x6426, 0x0101, 0x0101,
+		"Motorola",
+		"MSnc.",
+		US_SC_DEVICE, US_PR_DEVICE, NULL,
+		US_FL_FIX_INQUIRY | US_FL_FIX_CAPACITY | US_FL_BULK_IGNORE_TAG),
+
 /* Reported by Radovan Garabik <garabik@kassiopeia.juls.savba.sk> */
 UNUSUAL_DEV(  0x2735, 0x100b, 0x0000, 0x9999,
 		"MPIO",
@@ -1519,7 +1608,7 @@ UNUSUAL_DEV(  0x2735, 0x100b, 0x0000, 0x9999,
 		US_FL_GO_SLOW ),
 
 /*
- * David Härdeman <david@2gen.com>
+ * David HÃ¤rdeman <david@2gen.com>
  * The key makes the SCSI stack print confusing (but harmless) messages
  */
 UNUSUAL_DEV(  0x4146, 0xba01, 0x0100, 0x0100,

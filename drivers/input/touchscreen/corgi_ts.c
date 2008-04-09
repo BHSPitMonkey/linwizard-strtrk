@@ -74,10 +74,10 @@ extern unsigned int get_clk_frequency_khz(int info);
 
 static unsigned long calc_waittime(struct corgi_ts *corgi_ts)
 {
-	unsigned long hsync_len = corgi_ts->machinfo->get_hsync_len();
+	unsigned long hsync_invperiod = corgi_ts->machinfo->get_hsync_invperiod();
 
-	if (hsync_len)
-		return get_clk_frequency_khz(0)*1000/hsync_len;
+	if (hsync_invperiod)
+		return get_clk_frequency_khz(0)*1000/hsync_invperiod;
 	else
 		return 0;
 }
@@ -114,7 +114,7 @@ static int sync_receive_data_send_cmd(struct corgi_ts *corgi_ts, int doRecive, i
 			if (timer2-timer1 > wait_time) {
 				/* too slow - timeout, try again */
 				corgi_ts->machinfo->wait_hsync();
-				/* get OSCR */
+				/* get CCNT */
 				CCNT(timer1);
 				/* Wait after HSync */
 				CCNT(timer2);
@@ -302,8 +302,8 @@ static int __init corgits_probe(struct platform_device *pdev)
 	input_dev->id.version = 0x0100;
 	input_dev->dev.parent = &pdev->dev;
 
-	input_dev->evbit[0] = BIT(EV_KEY) | BIT(EV_ABS);
-	input_dev->keybit[LONG(BTN_TOUCH)] = BIT(BTN_TOUCH);
+	input_dev->evbit[0] = BIT_MASK(EV_KEY) | BIT_MASK(EV_ABS);
+	input_dev->keybit[BIT_WORD(BTN_TOUCH)] = BIT_MASK(BTN_TOUCH);
 	input_set_abs_params(input_dev, ABS_X, X_AXIS_MIN, X_AXIS_MAX, 0, 0);
 	input_set_abs_params(input_dev, ABS_Y, Y_AXIS_MIN, Y_AXIS_MAX, 0, 0);
 	input_set_abs_params(input_dev, ABS_PRESSURE, PRESSURE_MIN, PRESSURE_MAX, 0, 0);

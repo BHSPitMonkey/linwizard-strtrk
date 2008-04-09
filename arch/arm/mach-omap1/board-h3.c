@@ -21,27 +21,29 @@
 #include <linux/platform_device.h>
 #include <linux/errno.h>
 #include <linux/workqueue.h>
+#include <linux/i2c.h>
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/nand.h>
 #include <linux/mtd/partitions.h>
 #include <linux/input.h>
-#include <linux/clk.h>
 #include <linux/spi/spi.h>
-#include <linux/spi/tsc2101.h>
+#include <linux/i2c/tps65010.h>
 
 #include <asm/setup.h>
 #include <asm/page.h>
 #include <asm/hardware.h>
+#include <asm/gpio.h>
+
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/flash.h>
 #include <asm/mach/map.h>
 
-#include <asm/arch/gpio.h>
 #include <asm/arch/gpioexpander.h>
 #include <asm/arch/irqs.h>
 #include <asm/arch/mux.h>
 #include <asm/arch/tc.h>
+#include <asm/arch/nand.h>
 #include <asm/arch/irda.h>
 #include <asm/arch/usb.h>
 #include <asm/arch/keypad.h>
@@ -50,7 +52,7 @@
 #include <asm/arch/mcbsp.h>
 #include <asm/arch/omap-alsa.h>
 
-extern int omap_gpio_init(void);
+#define H3_TS_GPIO	48
 
 static int h3_keymap[] = {
 	KEY(0, 0, KEY_LEFT),
@@ -179,7 +181,7 @@ static struct mtd_partition nand_partitions[] = {
 };
 
 /* dip switches control NAND chip access:  8 bit, 16 bit, or neither */
-static struct nand_platform_data nand_data = {
+static struct omap_nand_platform_data nand_data = {
 	.options	= NAND_SAMSUNG_LP_OPTIONS,
 	.parts		= nand_partitions,
 	.nr_parts	= ARRAY_SIZE(nand_partitions),
@@ -208,7 +210,7 @@ static struct resource smc91x_resources[] = {
 	[1] = {
 		.start	= OMAP_GPIO_IRQ(40),
 		.end	= OMAP_GPIO_IRQ(40),
-		.flags	= IORESOURCE_IRQ,
+		.flags	= IORESOURCE_IRQ | IORESOURCE_IRQ_LOWEDGE,
 	},
 };
 
@@ -374,86 +376,14 @@ static struct platform_device h3_lcd_device = {
 	.id		= -1,
 };
 
-struct {
-	struct clk	*mclk;
-	int		initialized;
-} h3_tsc2101;
-
-#define TSC2101_MUX_MCLK_ON	V5_1710_MCLK_ON
-#define TSC2101_MUX_MCLK_OFF	V5_1710_MCLK_OFF
-
-static int h3_tsc2101_init(struct spi_device *spi)
-{
-	u8 io_exp_val;
-	int r;
-
-	if (h3_tsc2101.initialized) {
-		printk(KERN_ERR "tsc2101: already initialized\n");
-		return -ENODEV;
-	}
-
-	/* Get the MCLK */
-	h3_tsc2101.mclk = clk_get(&spi->dev, "mclk");
-	if (IS_ERR(h3_tsc2101.mclk)) {
-		dev_err(&spi->dev, "unable to get the clock MCLK\n");
-		return PTR_ERR(h3_tsc2101.mclk);
-	}
-	if ((r = clk_set_rate(h3_tsc2101.mclk, 12000000)) < 0) {
-		dev_err(&spi->dev, "unable to set rate to the MCLK\n");
-		goto err;
-	}
-
-	if ((r = read_gpio_expa(&io_exp_val, 0x24))) {
-		dev_err(&spi->dev, "error reading from I/O EXPANDER\n");
-		goto err;
-	}
-	io_exp_val |= 0x8;
-	if ((r = write_gpio_expa(io_exp_val, 0x24))) {
-		dev_err(&spi->dev, "error writing to I/O EXPANDER\n");
-		goto err;
-	}
-
-	omap_cfg_reg(N14_1610_UWIRE_CS0);
-	omap_cfg_reg(TSC2101_MUX_MCLK_OFF);
-
-	return 0;
-err:
-	clk_put(h3_tsc2101.mclk);
-	return r;
-}
-
-static void h3_tsc2101_cleanup(struct spi_device *spi)
-{
-	clk_put(h3_tsc2101.mclk);
-	omap_cfg_reg(TSC2101_MUX_MCLK_OFF);
-}
-
-static void h3_tsc2101_enable_mclk(struct spi_device *spi)
-{
-	omap_cfg_reg(TSC2101_MUX_MCLK_ON);
-	clk_enable(h3_tsc2101.mclk);
-}
-
-static void h3_tsc2101_disable_mclk(struct spi_device *spi)
-{
-	clk_disable(h3_tsc2101.mclk);
-	omap_cfg_reg(R10_1610_MCLK_OFF);
-}
-
-static struct tsc2101_platform_data h3_tsc2101_platform_data = {
-	.init		= h3_tsc2101_init,
-	.cleanup	= h3_tsc2101_cleanup,
-	.enable_mclk	= h3_tsc2101_enable_mclk,
-	.disable_mclk	= h3_tsc2101_disable_mclk,
-};
-
 static struct spi_board_info h3_spi_board_info[] __initdata = {
 	[0] = {
 		.modalias	= "tsc2101",
 		.bus_num	= 2,
 		.chip_select	= 0,
+		.irq		= OMAP_GPIO_IRQ(H3_TS_GPIO),
 		.max_speed_hz	= 16000000,
-		.platform_data	= &h3_tsc2101_platform_data,
+		/* .platform_data	= &tsc_platform_data, */
 	},
 };
 
@@ -470,18 +400,18 @@ static struct omap_mcbsp_reg_cfg mcbsp_regs = {
 	.srgr2 = GSYNC | CLKSP | FSGM | FPER(31),
 
 	.pcr0  = CLKRM | SCLKME | FSXP | FSRP | CLKXP | CLKRP,
-	//.pcr0 = CLKXP | CLKRP,        /* mcbsp: slave */
+	/*.pcr0 = CLKXP | CLKRP,*/        /* mcbsp: slave */
 };
 
 static struct omap_alsa_codec_config alsa_config = {
 	.name                   = "H3 TSC2101",
 	.mcbsp_regs_alsa        = &mcbsp_regs,
-	.codec_configure_dev    = NULL, // tsc2101_configure,
-	.codec_set_samplerate   = NULL, // tsc2101_set_samplerate,
-	.codec_clock_setup      = NULL, // tsc2101_clock_setup,
-	.codec_clock_on         = NULL, // tsc2101_clock_on,
-	.codec_clock_off        = NULL, // tsc2101_clock_off,
-	.get_default_samplerate = NULL, // tsc2101_get_default_samplerate,
+	.codec_configure_dev    = NULL, /* tsc2101_configure, */
+	.codec_set_samplerate   = NULL, /* tsc2101_set_samplerate, */
+	.codec_clock_setup      = NULL, /* tsc2101_clock_setup, */
+	.codec_clock_on         = NULL, /* tsc2101_clock_on, */
+	.codec_clock_off        = NULL, /* tsc2101_clock_off, */
+	.get_default_samplerate = NULL, /* tsc2101_get_default_samplerate, */
 };
 
 static struct platform_device h3_mcbsp1_device = {
@@ -519,11 +449,12 @@ static struct omap_usb_config h3_usb_config __initdata = {
 
 static struct omap_mmc_config h3_mmc_config __initdata = {
 	.mmc[0] = {
-		.enabled 	= 1,
-		.power_pin	= -1,   /* tps65010 GPIO4 */
-		.switch_pin	= OMAP_MPUIO(1),
-	},
+		.enabled	= 1,
+		.wire4		= 1,
+       },
 };
+
+extern struct omap_mmc_platform_data h3_mmc_data;
 
 static struct omap_uart_config h3_uart_config __initdata = {
 	.enabled_uarts = ((1 << 0) | (1 << 1) | (1 << 2)),
@@ -540,9 +471,29 @@ static struct omap_board_config_kernel h3_config[] __initdata = {
 	{ OMAP_TAG_LCD,		&h3_lcd_config },
 };
 
+static struct i2c_board_info __initdata h3_i2c_board_info[] = {
+       {
+               I2C_BOARD_INFO("tps65010", 0x48),
+               .type           = "tps65013",
+               /* .irq         = OMAP_GPIO_IRQ(??), */
+       },
+};
+
+static struct omap_gpio_switch h3_gpio_switches[] __initdata = {
+	{
+		.name			= "mmc_slot",
+		.gpio                   = OMAP_MPUIO(1),
+		.type                   = OMAP_GPIO_SWITCH_TYPE_COVER,
+		.debounce_rising        = 100,
+		.debounce_falling       = 0,
+		.notify                 = h3_mmc_slot_cover_handler,
+		.notify_data            = NULL,
+	},
+};
+
 #define H3_NAND_RB_GPIO_PIN	10
 
-static int nand_dev_ready(struct nand_platform_data *data)
+static int nand_dev_ready(struct omap_nand_platform_data *data)
 {
 	return omap_get_gpio_datain(H3_NAND_RB_GPIO_PIN);
 }
@@ -575,6 +526,9 @@ static void __init h3_init(void)
 	omap_board_config = h3_config;
 	omap_board_config_size = ARRAY_SIZE(h3_config);
 	omap_serial_init();
+	omap_register_i2c_bus(1, 100, h3_i2c_board_info,
+			      ARRAY_SIZE(h3_i2c_board_info));
+	h3_mmc_init();
 }
 
 static void __init h3_init_smc91x(void)

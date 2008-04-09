@@ -434,21 +434,18 @@ static void ib_device_release(struct class_device *cdev)
 	kfree(dev);
 }
 
-static int ib_device_uevent(struct class_device *cdev, char **envp,
-			    int num_envp, char *buf, int size)
+static int ib_device_uevent(struct class_device *cdev,
+			    struct kobj_uevent_env *env)
 {
 	struct ib_device *dev = container_of(cdev, struct ib_device, class_dev);
-	int i = 0, len = 0;
 
-	if (add_uevent_var(envp, num_envp, &i, buf, size, &len,
-			   "NAME=%s", dev->name))
+	if (add_uevent_var(env, "NAME=%s", dev->name))
 		return -ENOMEM;
 
 	/*
 	 * It would be nice to pass the node GUID with the event...
 	 */
 
-	envp[i] = NULL;
 	return 0;
 }
 
@@ -511,19 +508,10 @@ static int add_port(struct ib_device *device, int port_num)
 
 	p->ibdev      = device;
 	p->port_num   = port_num;
-	p->kobj.ktype = &port_type;
 
-	p->kobj.parent = kobject_get(&device->ports_parent);
-	if (!p->kobj.parent) {
-		ret = -EBUSY;
-		goto err;
-	}
-
-	ret = kobject_set_name(&p->kobj, "%d", port_num);
-	if (ret)
-		goto err_put;
-
-	ret = kobject_register(&p->kobj);
+	ret = kobject_init_and_add(&p->kobj, &port_type,
+				   kobject_get(device->ports_parent),
+				   "%d", port_num);
 	if (ret)
 		goto err_put;
 
@@ -552,6 +540,7 @@ static int add_port(struct ib_device *device, int port_num)
 
 	list_add_tail(&p->kobj.entry, &device->port_list);
 
+	kobject_uevent(&p->kobj, KOBJ_ADD);
 	return 0;
 
 err_free_pkey:
@@ -573,9 +562,7 @@ err_remove_pma:
 	sysfs_remove_group(&p->kobj, &pma_group);
 
 err_put:
-	kobject_put(&device->ports_parent);
-
-err:
+	kobject_put(device->ports_parent);
 	kfree(p);
 	return ret;
 }
@@ -697,17 +684,12 @@ int ib_device_register_sysfs(struct ib_device *device)
 			goto err_unregister;
 	}
 
-	device->ports_parent.parent = kobject_get(&class_dev->kobj);
-	if (!device->ports_parent.parent) {
-		ret = -EBUSY;
-		goto err_unregister;
+	device->ports_parent = kobject_create_and_add("ports",
+					kobject_get(&class_dev->kobj));
+	if (!device->ports_parent) {
+		ret = -ENOMEM;
+		goto err_put;
 	}
-	ret = kobject_set_name(&device->ports_parent, "ports");
-	if (ret)
-		goto err_put;
-	ret = kobject_register(&device->ports_parent);
-	if (ret)
-		goto err_put;
 
 	if (device->node_type == RDMA_NODE_IB_SWITCH) {
 		ret = add_port(device, 0);
@@ -734,7 +716,7 @@ err_put:
 			sysfs_remove_group(p, &pma_group);
 			sysfs_remove_group(p, &port->pkey_group);
 			sysfs_remove_group(p, &port->gid_group);
-			kobject_unregister(p);
+			kobject_put(p);
 		}
 	}
 
@@ -758,10 +740,10 @@ void ib_device_unregister_sysfs(struct ib_device *device)
 		sysfs_remove_group(p, &pma_group);
 		sysfs_remove_group(p, &port->pkey_group);
 		sysfs_remove_group(p, &port->gid_group);
-		kobject_unregister(p);
+		kobject_put(p);
 	}
 
-	kobject_unregister(&device->ports_parent);
+	kobject_put(device->ports_parent);
 	class_device_unregister(&device->class_dev);
 }
 

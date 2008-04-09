@@ -65,6 +65,8 @@ extern int add_temporary_entry(unsigned long entrylo0, unsigned long entrylo1,
 
 #define VMALLOC_START     MAP_BASE
 
+#define PKMAP_BASE		(0xfe000000UL)
+
 #ifdef CONFIG_HIGHMEM
 # define VMALLOC_END	(PKMAP_BASE-2*PAGE_SIZE)
 #else
@@ -140,7 +142,7 @@ pfn_pte(unsigned long pfn, pgprot_t prot)
 #define pgd_index(address)	(((address) >> PGDIR_SHIFT) & (PTRS_PER_PGD-1))
 
 /* to find an entry in a page-table-directory */
-#define pgd_offset(mm,addr)	((mm)->pgd + pgd_index(addr))
+#define pgd_offset(mm, addr)	((mm)->pgd + pgd_index(addr))
 
 /* Find an entry in the third-level page table.. */
 #define __pte_offset(address)						\

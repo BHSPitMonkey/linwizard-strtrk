@@ -82,7 +82,7 @@ struct dcssblk_dev_info {
 	struct request_queue *dcssblk_queue;
 };
 
-static struct list_head dcssblk_devices = LIST_HEAD_INIT(dcssblk_devices);
+static LIST_HEAD(dcssblk_devices);
 static struct rw_semaphore dcssblk_devices_sem;
 
 /*
@@ -193,6 +193,12 @@ dcssblk_segment_warn(int rc, char* seg_name)
 	}
 }
 
+static void dcssblk_unregister_callback(struct device *dev)
+{
+	device_unregister(dev);
+	put_device(dev);
+}
+
 /*
  * device attribute for switching shared/nonshared (exclusive)
  * operation (show + store)
@@ -276,8 +282,7 @@ removeseg:
 	blk_cleanup_queue(dev_info->dcssblk_queue);
 	dev_info->gd->queue = NULL;
 	put_disk(dev_info->gd);
-	device_unregister(dev);
-	put_device(dev);
+	rc = device_schedule_callback(dev, dcssblk_unregister_callback);
 out:
 	up_write(&dcssblk_devices_sem);
 	return rc;
@@ -410,6 +415,8 @@ dcssblk_add_store(struct device *dev, struct device_attribute *attr, const char 
 	dev_info->gd->queue = dev_info->dcssblk_queue;
 	dev_info->gd->private_data = dev_info;
 	dev_info->gd->driverfs_dev = &dev_info->dev;
+	blk_queue_make_request(dev_info->dcssblk_queue, dcssblk_make_request);
+	blk_queue_hardsect_size(dev_info->dcssblk_queue, 4096);
 	/*
 	 * load the segment
 	 */
@@ -468,9 +475,6 @@ dcssblk_add_store(struct device *dev, struct device_attribute *attr, const char 
 		goto unregister_dev;
 
 	add_disk(dev_info->gd);
-
-	blk_queue_make_request(dev_info->dcssblk_queue, dcssblk_make_request);
-	blk_queue_hardsect_size(dev_info->dcssblk_queue, 4096);
 
 	switch (dev_info->segment_type) {
 		case SEG_TYPE_SR:
@@ -662,7 +666,7 @@ dcssblk_make_request(struct request_queue *q, struct bio *bio)
 		page_addr = (unsigned long)
 			page_address(bvec->bv_page) + bvec->bv_offset;
 		source_addr = dev_info->start + (index<<12) + bytes_done;
-		if (unlikely(page_addr & 4095) != 0 || (bvec->bv_len & 4095) != 0)
+		if (unlikely((page_addr & 4095) != 0) || (bvec->bv_len & 4095) != 0)
 			// More paranoia.
 			goto fail;
 		if (bio_data_dir(bio) == READ) {
@@ -674,10 +678,10 @@ dcssblk_make_request(struct request_queue *q, struct bio *bio)
 		}
 		bytes_done += bvec->bv_len;
 	}
-	bio_endio(bio, bytes_done, 0);
+	bio_endio(bio, 0);
 	return 0;
 fail:
-	bio_io_error(bio, bio->bi_size);
+	bio_io_error(bio);
 	return 0;
 }
 

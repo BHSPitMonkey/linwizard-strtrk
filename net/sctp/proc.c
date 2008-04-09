@@ -1,15 +1,15 @@
-/* SCTP kernel reference Implementation
+/* SCTP kernel implementation
  * Copyright (c) 2003 International Business Machines, Corp.
  *
- * This file is part of the SCTP kernel reference Implementation
+ * This file is part of the SCTP kernel implementation
  *
- * The SCTP reference implementation is free software;
+ * This SCTP implementation is free software;
  * you can redistribute it and/or modify it under the terms of
  * the GNU General Public License as published by
  * the Free Software Foundation; either version 2, or (at your option)
  * any later version.
  *
- * The SCTP reference implementation is distributed in the hope that it
+ * This SCTP implementation is distributed in the hope that it
  * will be useful, but WITHOUT ANY WARRANTY; without even the implied
  *                 ************************
  * warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
@@ -38,6 +38,7 @@
 #include <linux/seq_file.h>
 #include <linux/init.h>
 #include <net/sctp/sctp.h>
+#include <net/ip.h> /* for snmp_fold_field */
 
 static struct snmp_mib sctp_snmp_list[] = {
 	SNMP_MIB_ITEM("SctpCurrEstab", SCTP_MIB_CURRESTAB),
@@ -75,26 +76,6 @@ static struct snmp_mib sctp_snmp_list[] = {
 	SNMP_MIB_SENTINEL
 };
 
-/* Return the current value of a particular entry in the mib by adding its
- * per cpu counters.
- */
-static unsigned long
-fold_field(void *mib[], int nr)
-{
-	unsigned long res = 0;
-	int i;
-
-	for_each_possible_cpu(i) {
-		res +=
-		    *((unsigned long *) (((void *) per_cpu_ptr(mib[0], i)) +
-					 sizeof (unsigned long) * nr));
-		res +=
-		    *((unsigned long *) (((void *) per_cpu_ptr(mib[1], i)) +
-					 sizeof (unsigned long) * nr));
-	}
-	return res;
-}
-
 /* Display sctp snmp mib statistics(/proc/net/sctp/snmp). */
 static int sctp_snmp_seq_show(struct seq_file *seq, void *v)
 {
@@ -102,7 +83,7 @@ static int sctp_snmp_seq_show(struct seq_file *seq, void *v)
 
 	for (i = 0; sctp_snmp_list[i].name != NULL; i++)
 		seq_printf(seq, "%-32s\t%ld\n", sctp_snmp_list[i].name,
-			   fold_field((void **)sctp_statistics,
+			   snmp_fold_field((void **)sctp_statistics,
 				      sctp_snmp_list[i].entry));
 
 	return 0;
@@ -127,11 +108,9 @@ int __init sctp_snmp_proc_init(void)
 {
 	struct proc_dir_entry *p;
 
-	p = create_proc_entry("snmp", S_IRUGO, proc_net_sctp);
+	p = proc_create("snmp", S_IRUGO, proc_net_sctp, &sctp_snmp_seq_fops);
 	if (!p)
 		return -ENOMEM;
-
-	p->proc_fops = &sctp_snmp_seq_fops;
 
 	return 0;
 }
@@ -225,6 +204,7 @@ static int sctp_eps_seq_show(struct seq_file *seq, void *v)
 	struct sctp_ep_common *epb;
 	struct sctp_endpoint *ep;
 	struct sock *sk;
+	struct hlist_node *node;
 	int    hash = *(loff_t *)v;
 
 	if (hash >= sctp_ep_hashsize)
@@ -233,7 +213,7 @@ static int sctp_eps_seq_show(struct seq_file *seq, void *v)
 	head = &sctp_ep_hashtable[hash];
 	sctp_local_bh_disable();
 	read_lock(&head->lock);
-	for (epb = head->chain; epb; epb = epb->next) {
+	sctp_for_each_hentry(epb, node, &head->chain) {
 		ep = sctp_ep(epb);
 		sk = epb->sk;
 		seq_printf(seq, "%8p %8p %-3d %-3d %-4d %-5d %5d %5lu ", ep, sk,
@@ -276,11 +256,9 @@ int __init sctp_eps_proc_init(void)
 {
 	struct proc_dir_entry *p;
 
-	p = create_proc_entry("eps", S_IRUGO, proc_net_sctp);
+	p = proc_create("eps", S_IRUGO, proc_net_sctp, &sctp_eps_seq_fops);
 	if (!p)
 		return -ENOMEM;
-
-	p->proc_fops = &sctp_eps_seq_fops;
 
 	return 0;
 }
@@ -328,6 +306,7 @@ static int sctp_assocs_seq_show(struct seq_file *seq, void *v)
 	struct sctp_ep_common *epb;
 	struct sctp_association *assoc;
 	struct sock *sk;
+	struct hlist_node *node;
 	int    hash = *(loff_t *)v;
 
 	if (hash >= sctp_assoc_hashsize)
@@ -336,7 +315,7 @@ static int sctp_assocs_seq_show(struct seq_file *seq, void *v)
 	head = &sctp_assoc_hashtable[hash];
 	sctp_local_bh_disable();
 	read_lock(&head->lock);
-	for (epb = head->chain; epb; epb = epb->next) {
+	sctp_for_each_hentry(epb, node, &head->chain) {
 		assoc = sctp_assoc(epb);
 		sk = epb->sk;
 		seq_printf(seq,
@@ -386,11 +365,10 @@ int __init sctp_assocs_proc_init(void)
 {
 	struct proc_dir_entry *p;
 
-	p = create_proc_entry("assocs", S_IRUGO, proc_net_sctp);
+	p = proc_create("assocs", S_IRUGO, proc_net_sctp,
+			&sctp_assocs_seq_fops);
 	if (!p)
 		return -ENOMEM;
-
-	p->proc_fops = &sctp_assocs_seq_fops;
 
 	return 0;
 }

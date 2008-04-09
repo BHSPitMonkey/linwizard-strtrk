@@ -351,7 +351,7 @@ struct i5000_pvt {
 	u16 b1_ambpresent0;	/* Branch 1, Channel 8 */
 	u16 b1_ambpresent1;	/* Branch 1, Channel 1 */
 
-	/* DIMM infomation matrix, allocating architecture maximums */
+	/* DIMM information matrix, allocating architecture maximums */
 	struct i5000_dimm_info dimm_info[MAX_CSROWS][MAX_CHANNELS];
 
 	/* Actual values for this controller */
@@ -1462,7 +1462,7 @@ MODULE_DEVICE_TABLE(pci, i5000_pci_tbl);
  *
  */
 static struct pci_driver i5000_driver = {
-	.name = __stringify(KBUILD_BASENAME),
+	.name = KBUILD_BASENAME,
 	.probe = i5000_init_one,
 	.remove = __devexit_p(i5000_remove_one),
 	.id_table = i5000_pci_tbl,

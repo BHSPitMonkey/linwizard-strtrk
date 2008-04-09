@@ -362,7 +362,6 @@ void scsi_print_command(struct scsi_cmnd *cmd)
 EXPORT_SYMBOL(scsi_print_command);
 
 /**
- *
  *	scsi_print_status - print scsi status description
  *	@scsi_status: scsi status value
  *
@@ -1235,7 +1234,21 @@ scsi_print_sense_hdr(const char *name, struct scsi_sense_hdr *sshdr)
 }
 EXPORT_SYMBOL(scsi_print_sense_hdr);
 
+/*
+ * Print normalized SCSI sense header with device information and a prefix.
+ */
 void
+scsi_cmd_print_sense_hdr(struct scsi_cmnd *scmd, const char *desc,
+			  struct scsi_sense_hdr *sshdr)
+{
+	scmd_printk(KERN_INFO, scmd, "%s: ", desc);
+	scsi_show_sense_hdr(sshdr);
+	scmd_printk(KERN_INFO, scmd, "%s: ", desc);
+	scsi_show_extd_sense(sshdr->asc, sshdr->ascq);
+}
+EXPORT_SYMBOL(scsi_cmd_print_sense_hdr);
+
+static void
 scsi_decode_sense_buffer(const unsigned char *sense_buffer, int sense_len,
 		       struct scsi_sense_hdr *sshdr)
 {
@@ -1258,7 +1271,7 @@ scsi_decode_sense_buffer(const unsigned char *sense_buffer, int sense_len,
 	}
 }
 
-void
+static void
 scsi_decode_sense_extras(const unsigned char *sense_buffer, int sense_len,
 			 struct scsi_sense_hdr *sshdr)
 {
@@ -1355,7 +1368,7 @@ EXPORT_SYMBOL(scsi_print_sense);
 static const char * const hostbyte_table[]={
 "DID_OK", "DID_NO_CONNECT", "DID_BUS_BUSY", "DID_TIME_OUT", "DID_BAD_TARGET",
 "DID_ABORT", "DID_PARITY", "DID_ERROR", "DID_RESET", "DID_BAD_INTR",
-"DID_PASSTHROUGH", "DID_SOFT_ERROR", "DID_IMM_RETRY"};
+"DID_PASSTHROUGH", "DID_SOFT_ERROR", "DID_IMM_RETRY", "DID_REQUEUE"};
 #define NUM_HOSTBYTE_STRS ARRAY_SIZE(hostbyte_table)
 
 static const char * const driverbyte_table[]={

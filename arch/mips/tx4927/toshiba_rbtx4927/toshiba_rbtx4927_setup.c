@@ -45,26 +45,19 @@
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/types.h>
-#include <linux/mm.h>
-#include <linux/swap.h>
 #include <linux/ioport.h>
-#include <linux/sched.h>
 #include <linux/interrupt.h>
 #include <linux/pci.h>
-#include <linux/timex.h>
 #include <linux/pm.h>
 #include <linux/platform_device.h>
+#include <linux/clk.h>
 
 #include <asm/bootinfo.h>
-#include <asm/page.h>
 #include <asm/io.h>
-#include <asm/irq.h>
-#include <asm/irq_regs.h>
 #include <asm/processor.h>
 #include <asm/reboot.h>
 #include <asm/time.h>
-#include <linux/bootmem.h>
-#include <linux/blkdev.h>
+#include <asm/txx9tmr.h>
 #ifdef CONFIG_TOSHIBA_FPCIB0
 #include <asm/tx4927/smsc_fdc37m81x.h>
 #endif
@@ -72,45 +65,26 @@
 #ifdef CONFIG_PCI
 #include <asm/tx4927/tx4927_pci.h>
 #endif
-#ifdef CONFIG_BLK_DEV_IDEPCI
-#include <linux/hdreg.h>
-#include <linux/ide.h>
-#endif
 #ifdef CONFIG_SERIAL_TXX9
-#include <linux/tty.h>
-#include <linux/serial.h>
 #include <linux/serial_core.h>
 #endif
 
 #undef TOSHIBA_RBTX4927_SETUP_DEBUG
 
 #ifdef TOSHIBA_RBTX4927_SETUP_DEBUG
-#define TOSHIBA_RBTX4927_SETUP_NONE        0x00000000
-
-#define TOSHIBA_RBTX4927_SETUP_INFO        ( 1 <<  0 )
-#define TOSHIBA_RBTX4927_SETUP_WARN        ( 1 <<  1 )
-#define TOSHIBA_RBTX4927_SETUP_EROR        ( 1 <<  2 )
-
-#define TOSHIBA_RBTX4927_SETUP_EFWFU       ( 1 <<  3 )
 #define TOSHIBA_RBTX4927_SETUP_SETUP       ( 1 <<  4 )
-#define TOSHIBA_RBTX4927_SETUP_TIME_INIT   ( 1 <<  5 )
-#define TOSHIBA_RBTX4927_SETUP_TIMER_SETUP ( 1 <<  6 )
 #define TOSHIBA_RBTX4927_SETUP_PCIBIOS     ( 1 <<  7 )
 #define TOSHIBA_RBTX4927_SETUP_PCI1        ( 1 <<  8 )
 #define TOSHIBA_RBTX4927_SETUP_PCI2        ( 1 <<  9 )
-#define TOSHIBA_RBTX4927_SETUP_PCI66       ( 1 << 10 )
 
 #define TOSHIBA_RBTX4927_SETUP_ALL         0xffffffff
 #endif
 
 #ifdef TOSHIBA_RBTX4927_SETUP_DEBUG
 static const u32 toshiba_rbtx4927_setup_debug_flag =
-    (TOSHIBA_RBTX4927_SETUP_NONE | TOSHIBA_RBTX4927_SETUP_INFO |
-     TOSHIBA_RBTX4927_SETUP_WARN | TOSHIBA_RBTX4927_SETUP_EROR |
-     TOSHIBA_RBTX4927_SETUP_EFWFU | TOSHIBA_RBTX4927_SETUP_SETUP |
-     TOSHIBA_RBTX4927_SETUP_TIME_INIT | TOSHIBA_RBTX4927_SETUP_TIMER_SETUP
+    (TOSHIBA_RBTX4927_SETUP_SETUP |
      | TOSHIBA_RBTX4927_SETUP_PCIBIOS | TOSHIBA_RBTX4927_SETUP_PCI1 |
-     TOSHIBA_RBTX4927_SETUP_PCI2 | TOSHIBA_RBTX4927_SETUP_PCI66);
+     TOSHIBA_RBTX4927_SETUP_PCI2);
 #endif
 
 #ifdef TOSHIBA_RBTX4927_SETUP_DEBUG
@@ -122,7 +96,7 @@ static const u32 toshiba_rbtx4927_setup_debug_flag =
            printk( "%s(%s:%u)::%s", __FUNCTION__, __FILE__, __LINE__, tmp ); \
         }
 #else
-#define TOSHIBA_RBTX4927_SETUP_DPRINTK(flag,str...)
+#define TOSHIBA_RBTX4927_SETUP_DPRINTK(flag, str...)
 #endif
 
 /* These functions are used for rebooting or halting the machine*/
@@ -132,7 +106,6 @@ extern void toshiba_rbtx4927_power_off(void);
 
 int tx4927_using_backplane = 0;
 
-extern void gt64120_time_init(void);
 extern void toshiba_rbtx4927_irq_setup(void);
 
 char *prom_getcmdline(void);
@@ -497,7 +470,7 @@ void __init tx4927_pci_setup(void)
 		     "Internal");
 		called = 1;
 	}
-	printk("%s PCIC --%s PCICLK:",toshiba_name,
+	printk("%s PCIC --%s PCICLK:", toshiba_name,
 	       (tx4927_ccfgptr->ccfg & TX4927_CCFG_PCI66) ? " PCI66" : "");
 	if (tx4927_ccfgptr->pcfg & TX4927_PCFG_PCICLKEN_ALL) {
 		int pciclk = 0;
@@ -679,25 +652,30 @@ void __init tx4927_pci_setup(void)
 
 #endif /* CONFIG_PCI */
 
+static void __noreturn wait_forever(void)
+{
+	while (1)
+		if (cpu_wait)
+			(*cpu_wait)();
+}
+
 void toshiba_rbtx4927_restart(char *command)
 {
 	printk(KERN_NOTICE "System Rebooting...\n");
 
 	/* enable the s/w reset register */
-	reg_wr08(RBTX4927_SW_RESET_ENABLE, RBTX4927_SW_RESET_ENABLE_SET);
+	writeb(RBTX4927_SW_RESET_ENABLE_SET, RBTX4927_SW_RESET_ENABLE);
 
 	/* wait for enable to be seen */
-	while ((reg_rd08(RBTX4927_SW_RESET_ENABLE) &
+	while ((readb(RBTX4927_SW_RESET_ENABLE) &
 		RBTX4927_SW_RESET_ENABLE_SET) == 0x00);
 
 	/* do a s/w reset */
-	reg_wr08(RBTX4927_SW_RESET_DO, RBTX4927_SW_RESET_DO_SET);
+	writeb(RBTX4927_SW_RESET_DO_SET, RBTX4927_SW_RESET_DO);
 
 	/* do something passive while waiting for reset */
 	local_irq_disable();
-	while (1)
-		asm_wait();
-
+	wait_forever();
 	/* no return */
 }
 
@@ -706,9 +684,7 @@ void toshiba_rbtx4927_halt(void)
 {
 	printk(KERN_NOTICE "System Halted\n");
 	local_irq_disable();
-	while (1) {
-		asm_wait();
-	}
+	wait_forever();
 	/* no return */
 }
 
@@ -718,9 +694,10 @@ void toshiba_rbtx4927_power_off(void)
 	/* no return */
 }
 
-void __init toshiba_rbtx4927_setup(void)
+void __init plat_mem_setup(void)
 {
-	vu32 cp0_config;
+	int i;
+	u32 cp0_config;
 	char *argptr;
 
 	printk("CPU is %s\n", toshiba_name);
@@ -740,22 +717,6 @@ void __init toshiba_rbtx4927_setup(void)
 	cp0_config = cp0_config & ~(TX49_CONF_IC | TX49_CONF_DC);
 	write_c0_config(cp0_config);
 
-#ifdef TOSHIBA_RBTX4927_SETUP_DEBUG
-	{
-		extern void dump_cp0(char *);
-		dump_cp0("toshiba_rbtx4927_early_fw_fixup");
-	}
-#endif
-
-	/* setup serial stuff */
-	TOSHIBA_RBTX4927_SETUP_DPRINTK(TOSHIBA_RBTX4927_SETUP_SETUP,
-				       ":Setting up tx4927 sio.\n");
-	TX4927_WR(0xff1ff314, 0x00000000);	/* h/w flow control off */
-	TX4927_WR(0xff1ff414, 0x00000000);	/* h/w flow control off */
-
-	TOSHIBA_RBTX4927_SETUP_DPRINTK(TOSHIBA_RBTX4927_SETUP_SETUP,
-				       "+\n");
-
 	set_io_port_base(KSEG1 + TBTX4927_ISA_IO_OFFSET);
 	TOSHIBA_RBTX4927_SETUP_DPRINTK(TOSHIBA_RBTX4927_SETUP_SETUP,
 				       ":mips_io_port_base=0x%08lx\n",
@@ -771,6 +732,9 @@ void __init toshiba_rbtx4927_setup(void)
 	_machine_restart = toshiba_rbtx4927_restart;
 	_machine_halt = toshiba_rbtx4927_halt;
 	pm_power_off = toshiba_rbtx4927_power_off;
+
+	for (i = 0; i < TX4927_NR_TMR; i++)
+		txx9_tmr_init(TX4927_TMR_REG(0) & 0xfffffffffULL);
 
 #ifdef CONFIG_PCI
 
@@ -840,6 +804,8 @@ void __init toshiba_rbtx4927_setup(void)
 		}
 
 	/* CCFG */
+	/* do reset on watchdog */
+	tx4927_ccfgptr->ccfg |= TX4927_CCFG_WR;
 	/* enable Timeout BusError */
 	if (tx4927_ccfg_toeon)
 		tx4927_ccfgptr->ccfg |= TX4927_CCFG_TOE;
@@ -900,7 +866,6 @@ void __init toshiba_rbtx4927_setup(void)
 #ifdef CONFIG_SERIAL_TXX9
 	{
 		extern int early_serial_txx9_setup(struct uart_port *port);
-		int i;
 		struct uart_port req;
 		for(i = 0; i < 2; i++) {
 			memset(&req, 0, sizeof(req));
@@ -942,23 +907,13 @@ void __init toshiba_rbtx4927_setup(void)
 			       "+\n");
 }
 
-void __init
-toshiba_rbtx4927_time_init(void)
+void __init plat_time_init(void)
 {
-	TOSHIBA_RBTX4927_SETUP_DPRINTK(TOSHIBA_RBTX4927_SETUP_TIME_INIT, "-\n");
-
 	mips_hpt_frequency = tx4927_cpu_clock / 2;
-
-	TOSHIBA_RBTX4927_SETUP_DPRINTK(TOSHIBA_RBTX4927_SETUP_TIME_INIT, "+\n");
-
-}
-
-void __init toshiba_rbtx4927_timer_setup(struct irqaction *irq)
-{
-	TOSHIBA_RBTX4927_SETUP_DPRINTK(TOSHIBA_RBTX4927_SETUP_TIMER_SETUP,
-				       "-\n");
-	TOSHIBA_RBTX4927_SETUP_DPRINTK(TOSHIBA_RBTX4927_SETUP_TIMER_SETUP,
-				       "+\n");
+	if (tx4927_ccfgptr->ccfg & TX4927_CCFG_TINTDIS)
+		txx9_clockevent_init(TX4927_TMR_REG(0) & 0xfffffffffULL,
+				     TXX9_IRQ_BASE + 17,
+				     50000000);
 }
 
 static int __init toshiba_rbtx4927_rtc_init(void)
@@ -969,7 +924,7 @@ static int __init toshiba_rbtx4927_rtc_init(void)
 		.flags	= IORESOURCE_MEM,
 	};
 	struct platform_device *dev =
-		platform_device_register_simple("ds1742", -1, &res, 1);
+		platform_device_register_simple("rtc-ds1742", -1, &res, 1);
 	return IS_ERR(dev) ? PTR_ERR(dev) : 0;
 }
 device_initcall(toshiba_rbtx4927_rtc_init);
@@ -992,3 +947,55 @@ static int __init rbtx4927_ne_init(void)
 	return IS_ERR(dev) ? PTR_ERR(dev) : 0;
 }
 device_initcall(rbtx4927_ne_init);
+
+/* Watchdog support */
+
+static int __init txx9_wdt_init(unsigned long base)
+{
+	struct resource res = {
+		.start	= base,
+		.end	= base + 0x100 - 1,
+		.flags	= IORESOURCE_MEM,
+	};
+	struct platform_device *dev =
+		platform_device_register_simple("txx9wdt", -1, &res, 1);
+	return IS_ERR(dev) ? PTR_ERR(dev) : 0;
+}
+
+static int __init rbtx4927_wdt_init(void)
+{
+	return txx9_wdt_init(TX4927_TMR_REG(2) & 0xfffffffffULL);
+}
+device_initcall(rbtx4927_wdt_init);
+
+/* Minimum CLK support */
+
+struct clk *clk_get(struct device *dev, const char *id)
+{
+	if (!strcmp(id, "imbus_clk"))
+		return (struct clk *)50000000;
+	return ERR_PTR(-ENOENT);
+}
+EXPORT_SYMBOL(clk_get);
+
+int clk_enable(struct clk *clk)
+{
+	return 0;
+}
+EXPORT_SYMBOL(clk_enable);
+
+void clk_disable(struct clk *clk)
+{
+}
+EXPORT_SYMBOL(clk_disable);
+
+unsigned long clk_get_rate(struct clk *clk)
+{
+	return (unsigned long)clk;
+}
+EXPORT_SYMBOL(clk_get_rate);
+
+void clk_put(struct clk *clk)
+{
+}
+EXPORT_SYMBOL(clk_put);

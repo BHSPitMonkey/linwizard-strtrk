@@ -293,7 +293,7 @@ EXPORT(sysn32_call_table)
 	PTR	sys_ni_syscall			/* 6170, was get_kernel_syms */
 	PTR	sys_ni_syscall			/* was query_module */
 	PTR	sys_quotactl
-	PTR	sys_nfsservctl
+	PTR	compat_sys_nfsservctl
 	PTR	sys_ni_syscall			/* res. for getpmsg */
 	PTR	sys_ni_syscall			/* 6175  for putpmsg */
 	PTR	sys_ni_syscall			/* res. for afs_syscall */
@@ -401,7 +401,10 @@ EXPORT(sysn32_call_table)
 	PTR	sys_ioprio_get
 	PTR	compat_sys_utimensat
 	PTR	compat_sys_signalfd		/* 5280 */
-	PTR	compat_sys_timerfd
+	PTR	sys_ni_syscall
 	PTR	sys_eventfd
 	PTR	sys_fallocate
+	PTR	sys_timerfd_create
+	PTR	sys_timerfd_gettime		/* 5285 */
+	PTR	sys_timerfd_settime
 	.size	sysn32_call_table,.-sysn32_call_table
