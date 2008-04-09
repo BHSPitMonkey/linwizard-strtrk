@@ -779,6 +779,8 @@ struct device_reg_24xx {
 #define FA_NVRAM_VPD_SIZE	0x200
 #define FA_NVRAM_VPD0_ADDR	0x00
 #define FA_NVRAM_VPD1_ADDR	0x100
+
+#define FA_BOOT_CODE_ADDR	0x00000
 					/*
 					 * RISC code begins at offset 512KB
 					 * within flash. Consisting of two
@@ -940,7 +942,9 @@ struct device_reg_24xx {
 	uint16_t mailbox31;
 
 	uint32_t iobase_window;
-	uint32_t unused_4[8];		/* Gap. */
+	uint32_t iobase_c4;
+	uint32_t iobase_c8;
+	uint32_t unused_4_1[6];		/* Gap. */
 	uint32_t iobase_q;
 	uint32_t unused_5[2];		/* Gap. */
 	uint32_t iobase_select;
@@ -948,9 +952,31 @@ struct device_reg_24xx {
 	uint32_t iobase_sdata;
 };
 
+/* Trace Control *************************************************************/
+
+#define TC_AEN_DISABLE		0
+
+#define TC_EFT_ENABLE		4
+#define TC_EFT_DISABLE		5
+
+#define TC_FCE_ENABLE		8
+#define TC_FCE_OPTIONS		0
+#define TC_FCE_DEFAULT_RX_SIZE	2112
+#define TC_FCE_DEFAULT_TX_SIZE	2112
+#define TC_FCE_DISABLE		9
+#define TC_FCE_DISABLE_TRACE	BIT_0
+
 /* MID Support ***************************************************************/
 
-#define MAX_MID_VPS	125
+#define MIN_MULTI_ID_FABRIC	64	/* Must be power-of-2. */
+#define MAX_MULTI_ID_FABRIC	256	/* ... */
+
+#define for_each_mapped_vp_idx(_ha, _idx)		\
+	for (_idx = find_next_bit((_ha)->vp_idx_map,	\
+		(_ha)->max_npiv_vports + 1, 1);		\
+	    _idx <= (_ha)->max_npiv_vports;		\
+	    _idx = find_next_bit((_ha)->vp_idx_map,	\
+		(_ha)->max_npiv_vports + 1, _idx + 1))	\
 
 struct mid_conf_entry_24xx {
 	uint16_t reserved_1;
@@ -978,7 +1004,7 @@ struct mid_init_cb_24xx {
 	uint16_t count;
 	uint16_t options;
 
-	struct mid_conf_entry_24xx entries[MAX_MID_VPS];
+	struct mid_conf_entry_24xx entries[MAX_MULTI_ID_FABRIC];
 };
 
 
@@ -996,10 +1022,6 @@ struct mid_db_entry_24xx {
 
 	uint8_t port_id[3];
 	uint8_t reserved_1;
-};
-
-struct mid_db_24xx {
-	struct mid_db_entry_24xx entries[MAX_MID_VPS];
 };
 
  /*

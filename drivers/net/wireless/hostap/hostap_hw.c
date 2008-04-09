@@ -825,7 +825,7 @@ static int hfa384x_get_rid(struct net_device *dev, u16 rid, void *buf, int len,
 	    local->hw_downloading)
 		return -ENODEV;
 
-	res = down_interruptible(&local->rid_bap_sem);
+	res = mutex_lock_interruptible(&local->rid_bap_mtx);
 	if (res)
 		return res;
 
@@ -834,7 +834,7 @@ static int hfa384x_get_rid(struct net_device *dev, u16 rid, void *buf, int len,
 		printk(KERN_DEBUG "%s: hfa384x_get_rid: CMDCODE_ACCESS failed "
 		       "(res=%d, rid=%04x, len=%d)\n",
 		       dev->name, res, rid, len);
-		up(&local->rid_bap_sem);
+		mutex_unlock(&local->rid_bap_mtx);
 		return res;
 	}
 
@@ -861,7 +861,7 @@ static int hfa384x_get_rid(struct net_device *dev, u16 rid, void *buf, int len,
 		res = hfa384x_from_bap(dev, BAP0, buf, len);
 
 	spin_unlock_bh(&local->baplock);
-	up(&local->rid_bap_sem);
+	mutex_unlock(&local->rid_bap_mtx);
 
 	if (res) {
 		if (res != -ENODATA)
@@ -902,7 +902,7 @@ static int hfa384x_set_rid(struct net_device *dev, u16 rid, void *buf, int len)
 	/* RID len in words and +1 for rec.rid */
 	rec.len = cpu_to_le16(len / 2 + len % 2 + 1);
 
-	res = down_interruptible(&local->rid_bap_sem);
+	res = mutex_lock_interruptible(&local->rid_bap_mtx);
 	if (res)
 		return res;
 
@@ -917,12 +917,12 @@ static int hfa384x_set_rid(struct net_device *dev, u16 rid, void *buf, int len)
 	if (res) {
 		printk(KERN_DEBUG "%s: hfa384x_set_rid (rid=%04x, len=%d) - "
 		       "failed - res=%d\n", dev->name, rid, len, res);
-		up(&local->rid_bap_sem);
+		mutex_unlock(&local->rid_bap_mtx);
 		return res;
 	}
 
 	res = hfa384x_cmd(dev, HFA384X_CMDCODE_ACCESS_WRITE, rid, NULL, NULL);
-	up(&local->rid_bap_sem);
+	mutex_unlock(&local->rid_bap_mtx);
 
 	if (res) {
 		printk(KERN_DEBUG "%s: hfa384x_set_rid: CMDCODE_ACCESS_WRITE "
@@ -1075,7 +1075,7 @@ static int prism2_setup_rids(struct net_device *dev)
 {
 	struct hostap_interface *iface;
 	local_info_t *local;
-	u16 tmp;
+	__le16 tmp;
 	int ret = 0;
 
 	iface = netdev_priv(dev);
@@ -1084,11 +1084,11 @@ static int prism2_setup_rids(struct net_device *dev)
 	hostap_set_word(dev, HFA384X_RID_TICKTIME, 2000);
 
 	if (!local->fw_ap) {
-		tmp = hostap_get_porttype(local);
-		ret = hostap_set_word(dev, HFA384X_RID_CNFPORTTYPE, tmp);
+		u16 tmp1 = hostap_get_porttype(local);
+		ret = hostap_set_word(dev, HFA384X_RID_CNFPORTTYPE, tmp1);
 		if (ret) {
 			printk("%s: Port type setting to %d failed\n",
-			       dev->name, tmp);
+			       dev->name, tmp1);
 			goto fail;
 		}
 	}
@@ -1117,7 +1117,7 @@ static int prism2_setup_rids(struct net_device *dev)
 		ret = -EINVAL;
 		goto fail;
 	}
-	local->channel_mask = __le16_to_cpu(tmp);
+	local->channel_mask = le16_to_cpu(tmp);
 
 	if (local->channel < 1 || local->channel > 14 ||
 	    !(local->channel_mask & (1 << (local->channel - 1)))) {
@@ -1852,7 +1852,7 @@ static int prism2_tx_80211(struct sk_buff *skb, struct net_device *dev)
 	tx_control = local->tx_control;
 	if (meta->tx_cb_idx) {
 		tx_control |= HFA384X_TX_CTRL_TX_OK;
-		txdesc.sw_support = cpu_to_le16(meta->tx_cb_idx);
+		txdesc.sw_support = cpu_to_le32(meta->tx_cb_idx);
 	}
 	txdesc.tx_control = cpu_to_le16(tx_control);
 	txdesc.tx_rate = meta->rate;
@@ -2190,7 +2190,7 @@ static void hostap_tx_callback(local_info_t *local,
 		return;
 	}
 
-	sw_support = le16_to_cpu(txdesc->sw_support);
+	sw_support = le32_to_cpu(txdesc->sw_support);
 
 	spin_lock(&local->lock);
 	cb = local->tx_callback;
@@ -2335,6 +2335,10 @@ static void prism2_txexc(local_info_t *local)
 	int show_dump, res;
 	char *payload = NULL;
 	struct hfa384x_tx_frame txdesc;
+	DECLARE_MAC_BUF(mac);
+	DECLARE_MAC_BUF(mac2);
+	DECLARE_MAC_BUF(mac3);
+	DECLARE_MAC_BUF(mac4);
 
 	show_dump = local->frame_dump & PRISM2_DUMP_TXEXC_HDR;
 	local->stats.tx_errors++;
@@ -2400,10 +2404,9 @@ static void prism2_txexc(local_info_t *local)
 	       WLAN_FC_GET_STYPE(fc) >> 4,
 	       fc & IEEE80211_FCTL_TODS ? " ToDS" : "",
 	       fc & IEEE80211_FCTL_FROMDS ? " FromDS" : "");
-	PDEBUG(DEBUG_EXTRA, "   A1=" MACSTR " A2=" MACSTR " A3="
-	       MACSTR " A4=" MACSTR "\n",
-	       MAC2STR(txdesc.addr1), MAC2STR(txdesc.addr2),
-	       MAC2STR(txdesc.addr3), MAC2STR(txdesc.addr4));
+	PDEBUG(DEBUG_EXTRA, "   A1=%s A2=%s A3=%s A4=%s\n",
+	       print_mac(mac, txdesc.addr1), print_mac(mac2, txdesc.addr2),
+	       print_mac(mac3, txdesc.addr3), print_mac(mac4, txdesc.addr4));
 }
 
 
@@ -2445,18 +2448,16 @@ static void prism2_info(local_info_t *local)
 		goto out;
 	}
 
-	le16_to_cpus(&info.len);
-	le16_to_cpus(&info.type);
-	left = (info.len - 1) * 2;
+	left = (le16_to_cpu(info.len) - 1) * 2;
 
-	if (info.len & 0x8000 || info.len == 0 || left > 2060) {
+	if (info.len & cpu_to_le16(0x8000) || info.len == 0 || left > 2060) {
 		/* data register seems to give 0x8000 in some error cases even
 		 * though busy bit is not set in offset register;
 		 * in addition, length must be at least 1 due to type field */
 		spin_unlock(&local->baplock);
 		printk(KERN_DEBUG "%s: Received info frame with invalid "
-		       "length 0x%04x (type 0x%04x)\n", dev->name, info.len,
-		       info.type);
+		       "length 0x%04x (type 0x%04x)\n", dev->name,
+		       le16_to_cpu(info.len), le16_to_cpu(info.type));
 		goto out;
 	}
 
@@ -2473,8 +2474,8 @@ static void prism2_info(local_info_t *local)
 	{
 		spin_unlock(&local->baplock);
 		printk(KERN_WARNING "%s: Info frame read failed (fid=0x%04x, "
-		       "len=0x%04x, type=0x%04x\n",
-		       dev->name, fid, info.len, info.type);
+		       "len=0x%04x, type=0x%04x\n", dev->name, fid,
+		       le16_to_cpu(info.len), le16_to_cpu(info.type));
 		dev_kfree_skb(skb);
 		goto out;
 	}
@@ -2621,7 +2622,7 @@ static void prism2_check_magic(local_info_t *local)
 /* Called only from hardware IRQ */
 static irqreturn_t prism2_interrupt(int irq, void *dev_id)
 {
-	struct net_device *dev = (struct net_device *) dev_id;
+	struct net_device *dev = dev_id;
 	struct hostap_interface *iface;
 	local_info_t *local;
 	int events = 0;
@@ -3171,7 +3172,7 @@ prism2_init_local_data(struct prism2_helper_functions *funcs, int card_idx,
 	spin_lock_init(&local->cmdlock);
 	spin_lock_init(&local->baplock);
 	spin_lock_init(&local->lock);
-	init_MUTEX(&local->rid_bap_sem);
+	mutex_init(&local->rid_bap_mtx);
 
 	if (card_idx < 0 || card_idx >= MAX_PARM_DEVICES)
 		card_idx = 0;
@@ -3254,12 +3255,11 @@ while (0)
 
 	INIT_LIST_HEAD(&local->bss_list);
 
-	hostap_setup_dev(dev, local, 1);
-	local->saved_eth_header_parse = dev->hard_header_parse;
+	hostap_setup_dev(dev, local, HOSTAP_INTERFACE_MASTER);
 
 	dev->hard_start_xmit = hostap_master_start_xmit;
 	dev->type = ARPHRD_IEEE80211;
-	dev->hard_header_parse = hostap_80211_header_parse;
+	dev->header_ops = &hostap_80211_ops;
 
 	rtnl_lock();
 	ret = dev_alloc_name(dev, "wifi%d");
@@ -3424,7 +3424,7 @@ static void prism2_suspend(struct net_device *dev)
 	struct local_info *local;
 	union iwreq_data wrqu;
 
-	iface = dev->priv;
+	iface = netdev_priv(dev);
 	local = iface->local;
 
 	/* Send disconnect event, e.g., to trigger reassociation after resume

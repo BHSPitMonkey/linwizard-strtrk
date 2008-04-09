@@ -20,7 +20,6 @@
 #include <linux/nfsd/debug.h>
 #include <linux/nfsd/nfsfh.h>
 #include <linux/nfsd/export.h>
-#include <linux/nfsd/auth.h>
 #include <linux/nfsd/stats.h>
 /*
  * nfsd version
@@ -70,9 +69,9 @@ void		nfsd_racache_shutdown(void);
 int		nfsd_cross_mnt(struct svc_rqst *rqstp, struct dentry **dpp,
 		                struct svc_export **expp);
 __be32		nfsd_lookup(struct svc_rqst *, struct svc_fh *,
-				const char *, int, struct svc_fh *);
+				const char *, unsigned int, struct svc_fh *);
 __be32		 nfsd_lookup_dentry(struct svc_rqst *, struct svc_fh *,
-				const char *, int,
+				const char *, unsigned int,
 				struct svc_export **, struct dentry **);
 __be32		nfsd_setattr(struct svc_rqst *, struct svc_fh *,
 				struct iattr *, int, time_t);
@@ -153,19 +152,21 @@ extern int nfsd_max_blksize;
  */
 #ifdef CONFIG_NFSD_V4
 extern unsigned int max_delegations;
-void nfs4_state_init(void);
-int nfs4_state_start(void);
+int nfs4_state_init(void);
+void nfsd4_free_slabs(void);
+void nfs4_state_start(void);
 void nfs4_state_shutdown(void);
 time_t nfs4_lease_time(void);
 void nfs4_reset_lease(time_t leasetime);
 int nfs4_reset_recoverydir(char *recdir);
 #else
-static inline void nfs4_state_init(void){};
-static inline int nfs4_state_start(void){return 0;}
-static inline void nfs4_state_shutdown(void){}
-static inline time_t nfs4_lease_time(void){return 0;}
-static inline void nfs4_reset_lease(time_t leasetime){}
-static inline int nfs4_reset_recoverydir(char *recdir) {return 0;}
+static inline int nfs4_state_init(void) { return 0; }
+static inline void nfsd4_free_slabs(void) { }
+static inline void nfs4_state_start(void) { }
+static inline void nfs4_state_shutdown(void) { }
+static inline time_t nfs4_lease_time(void) { return 0; }
+static inline void nfs4_reset_lease(time_t leasetime) { }
+static inline int nfs4_reset_recoverydir(char *recdir) { return 0; }
 #endif
 
 /*

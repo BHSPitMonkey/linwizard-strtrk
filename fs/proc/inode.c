@@ -43,13 +43,8 @@ void de_put(struct proc_dir_entry *de)
 			return;
 		}
 
-		if (atomic_dec_and_test(&de->count)) {
-			if (de->deleted) {
-				printk("de_put: deferred delete of %s\n",
-					de->name);
-				free_proc_entry(de);
-			}
-		}		
+		if (atomic_dec_and_test(&de->count))
+			free_proc_entry(de);
 		unlock_kernel();
 	}
 }
@@ -78,11 +73,6 @@ static void proc_delete_inode(struct inode *inode)
 
 struct vfsmount *proc_mnt;
 
-static void proc_read_inode(struct inode * inode)
-{
-	inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME;
-}
-
 static struct kmem_cache * proc_inode_cachep;
 
 static struct inode *proc_alloc_inode(struct super_block *sb)
@@ -107,7 +97,7 @@ static void proc_destroy_inode(struct inode *inode)
 	kmem_cache_free(proc_inode_cachep, PROC_I(inode));
 }
 
-static void init_once(void * foo, struct kmem_cache * cachep, unsigned long flags)
+static void init_once(struct kmem_cache * cachep, void *foo)
 {
 	struct proc_inode *ei = (struct proc_inode *) foo;
 
@@ -119,10 +109,8 @@ int __init proc_init_inodecache(void)
 	proc_inode_cachep = kmem_cache_create("proc_inode_cache",
 					     sizeof(struct proc_inode),
 					     0, (SLAB_RECLAIM_ACCOUNT|
-						SLAB_MEM_SPREAD),
+						SLAB_MEM_SPREAD|SLAB_PANIC),
 					     init_once);
-	if (proc_inode_cachep == NULL)
-		return -ENOMEM;
 	return 0;
 }
 
@@ -135,7 +123,6 @@ static int proc_remount(struct super_block *sb, int *flags, char *data)
 static const struct super_operations proc_sops = {
 	.alloc_inode	= proc_alloc_inode,
 	.destroy_inode	= proc_destroy_inode,
-	.read_inode	= proc_read_inode,
 	.drop_inode	= generic_delete_inode,
 	.delete_inode	= proc_delete_inode,
 	.statfs		= simple_statfs,
@@ -408,39 +395,41 @@ struct inode *proc_get_inode(struct super_block *sb, unsigned int ino,
 	if (de != NULL && !try_module_get(de->owner))
 		goto out_mod;
 
-	inode = iget(sb, ino);
+	inode = iget_locked(sb, ino);
 	if (!inode)
 		goto out_ino;
-
-	PROC_I(inode)->fd = 0;
-	PROC_I(inode)->pde = de;
-	if (de) {
-		if (de->mode) {
-			inode->i_mode = de->mode;
-			inode->i_uid = de->uid;
-			inode->i_gid = de->gid;
-		}
-		if (de->size)
-			inode->i_size = de->size;
-		if (de->nlink)
-			inode->i_nlink = de->nlink;
-		if (de->proc_iops)
-			inode->i_op = de->proc_iops;
-		if (de->proc_fops) {
-			if (S_ISREG(inode->i_mode)) {
-#ifdef CONFIG_COMPAT
-				if (!de->proc_fops->compat_ioctl)
-					inode->i_fop =
-						&proc_reg_file_ops_no_compat;
-				else
-#endif
-					inode->i_fop = &proc_reg_file_ops;
+	if (inode->i_state & I_NEW) {
+		inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME;
+		PROC_I(inode)->fd = 0;
+		PROC_I(inode)->pde = de;
+		if (de) {
+			if (de->mode) {
+				inode->i_mode = de->mode;
+				inode->i_uid = de->uid;
+				inode->i_gid = de->gid;
 			}
-			else
-				inode->i_fop = de->proc_fops;
+			if (de->size)
+				inode->i_size = de->size;
+			if (de->nlink)
+				inode->i_nlink = de->nlink;
+			if (de->proc_iops)
+				inode->i_op = de->proc_iops;
+			if (de->proc_fops) {
+				if (S_ISREG(inode->i_mode)) {
+#ifdef CONFIG_COMPAT
+					if (!de->proc_fops->compat_ioctl)
+						inode->i_fop =
+							&proc_reg_file_ops_no_compat;
+					else
+#endif
+						inode->i_fop = &proc_reg_file_ops;
+				} else {
+					inode->i_fop = de->proc_fops;
+				}
+			}
 		}
+		unlock_new_inode(inode);
 	}
-
 	return inode;
 
 out_ino:
@@ -450,7 +439,7 @@ out_mod:
 	return NULL;
 }			
 
-int proc_fill_super(struct super_block *s, void *data, int silent)
+int proc_fill_super(struct super_block *s)
 {
 	struct inode * root_inode;
 
@@ -478,4 +467,3 @@ out_no_root:
 	de_put(&proc_root);
 	return -ENOMEM;
 }
-MODULE_LICENSE("GPL");

@@ -141,15 +141,16 @@ static int memcpy_real(void *dest, unsigned long src, size_t count)
 
 	if (count == 0)
 		return 0;
-	flags = __raw_local_irq_stnsm(0xf8); /* switch to real mode */
+	flags = __raw_local_irq_stnsm(0xf8UL); /* switch to real mode */
 	asm volatile (
 		"0:	mvcle	%1,%2,0x0\n"
 		"1:	jo	0b\n"
 		"	lhi	%0,0x0\n"
 		"2:\n"
 		EX_TABLE(1b,2b)
-		: "+d" (rc)
-		: "d" (_dest), "d" (_src), "d" (_len1), "d" (_len2)
+		: "+d" (rc), "+d" (_dest), "+d" (_src), "+d" (_len1),
+		  "+d" (_len2), "=m" (*((long*)dest))
+		: "m" (*((long*)src))
 		: "cc", "memory");
 	__raw_local_irq_ssm(flags);
 
@@ -469,7 +470,7 @@ static loff_t zcore_lseek(struct file *file, loff_t offset, int orig)
 	return rc;
 }
 
-static struct file_operations zcore_fops = {
+static const struct file_operations zcore_fops = {
 	.owner		= THIS_MODULE,
 	.llseek		= zcore_lseek,
 	.read		= zcore_read,

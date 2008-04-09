@@ -14,6 +14,7 @@
 
 #include <linux/types.h>
 #include <linux/linkage.h>
+#include <linux/kernel.h>
 
 struct thread_struct;
 
@@ -233,7 +234,7 @@ extern void free_initmem(void);
 		break;								\
 										\
 	default:								\
-		__xg_orig = 0;							\
+		__xg_orig = (__typeof__(__xg_orig))0;				\
 		asm volatile("break");						\
 		break;								\
 	}									\
@@ -253,9 +254,12 @@ extern uint32_t __cmpxchg_32(uint32_t *v, uint32_t test, uint32_t new);
 	__typeof__(*(ptr)) __xg_new = (new);					\
 										\
 	switch (sizeof(__xg_orig)) {						\
-	case 4: __xg_orig = __cmpxchg_32(__xg_ptr, __xg_test, __xg_new); break;	\
+	case 4: __xg_orig = (__force __typeof__(*ptr))				\
+			__cmpxchg_32((__force uint32_t *)__xg_ptr,		\
+					 (__force uint32_t)__xg_test,		\
+					 (__force uint32_t)__xg_new); break;	\
 	default:								\
-		__xg_orig = 0;							\
+		__xg_orig = (__typeof__(__xg_orig))0;				\
 		asm volatile("break");						\
 		break;								\
 	}									\
@@ -265,5 +269,29 @@ extern uint32_t __cmpxchg_32(uint32_t *v, uint32_t test, uint32_t new);
 
 #endif
 
+#include <asm-generic/cmpxchg-local.h>
+
+static inline unsigned long __cmpxchg_local(volatile void *ptr,
+				      unsigned long old,
+				      unsigned long new, int size)
+{
+	switch (size) {
+	case 4:
+		return cmpxchg((unsigned long *)ptr, old, new);
+	default:
+		return __cmpxchg_local_generic(ptr, old, new, size);
+	}
+
+	return old;
+}
+
+/*
+ * cmpxchg_local and cmpxchg64_local are atomic wrt current CPU. Always make
+ * them available.
+ */
+#define cmpxchg_local(ptr, o, n)				  	\
+	((__typeof__(*(ptr)))__cmpxchg_local((ptr), (unsigned long)(o),	\
+			(unsigned long)(n), sizeof(*(ptr))))
+#define cmpxchg64_local(ptr, o, n) __cmpxchg64_local_generic((ptr), (o), (n))
 
 #endif /* _ASM_SYSTEM_H */

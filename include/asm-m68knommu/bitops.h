@@ -10,6 +10,10 @@
 
 #ifdef __KERNEL__
 
+#ifndef _LINUX_BITOPS_H
+#error only <linux/bitops.h> can be included directly
+#endif
+
 #include <asm-generic/bitops/ffs.h>
 #include <asm-generic/bitops/__ffs.h>
 #include <asm-generic/bitops/sched.h>
@@ -160,6 +164,7 @@ static __inline__ int __test_bit(int nr, const volatile unsigned long * addr)
 
 #include <asm-generic/bitops/find.h>
 #include <asm-generic/bitops/hweight.h>
+#include <asm-generic/bitops/lock.h>
 
 static __inline__ int ext2_set_bit(int nr, volatile void * addr)
 {
@@ -257,7 +262,7 @@ static __inline__ unsigned long ext2_find_next_zero_bit(void *addr, unsigned lon
 		 * tmp = __swab32(*(p++));
 		 * tmp |= ~0UL >> (32-offset);
 		 *
-		 * but this would decrease preformance, so we change the
+		 * but this would decrease performance, so we change the
 		 * shift:
 		 */
 		tmp = *(p++);
@@ -289,6 +294,8 @@ found_middle:
 	return result + ffz(__swab32(tmp));
 }
 
+#define ext2_find_next_bit(addr, size, off) \
+	generic_find_next_le_bit((unsigned long *)(addr), (size), (off))
 #include <asm-generic/bitops/minix.h>
 
 #endif /* __KERNEL__ */

@@ -21,9 +21,6 @@
 #ifndef _CELLEB_BEAT_H
 #define _CELLEB_BEAT_H
 
-#define DABRX_KERNEL		(1UL<<1)
-#define DABRX_USER		(1UL<<0)
-
 int64_t beat_get_term_char(uint64_t,uint64_t*,uint64_t*,uint64_t*);
 int64_t beat_put_term_char(uint64_t,uint64_t,uint64_t,uint64_t);
 int64_t beat_repository_encode(int, const char *, uint64_t[4]);
@@ -36,5 +33,7 @@ ssize_t beat_nvram_get_size(void);
 ssize_t beat_nvram_read(char *, size_t, loff_t *);
 ssize_t beat_nvram_write(char *, size_t, loff_t *);
 int beat_set_xdabr(unsigned long);
+void beat_power_save(void);
+void beat_kexec_cpu_down(int, int);
 
 #endif /* _CELLEB_BEAT_H */

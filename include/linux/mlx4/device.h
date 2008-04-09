@@ -49,6 +49,10 @@ enum {
 };
 
 enum {
+	MLX4_BOARD_ID_LEN = 64
+};
+
+enum {
 	MLX4_DEV_CAP_FLAG_RC		= 1 <<  0,
 	MLX4_DEV_CAP_FLAG_UC		= 1 <<  1,
 	MLX4_DEV_CAP_FLAG_UD		= 1 <<  2,
@@ -129,6 +133,11 @@ enum {
 	MLX4_STAT_RATE_OFFSET	= 5
 };
 
+static inline u64 mlx4_fw_ver(u64 major, u64 minor, u64 subminor)
+{
+	return (major << 32) | (minor << 16) | subminor;
+}
+
 struct mlx4_caps {
 	u64			fw_ver;
 	int			num_ports;
@@ -185,10 +194,8 @@ struct mlx4_buf_list {
 };
 
 struct mlx4_buf {
-	union {
-		struct mlx4_buf_list	direct;
-		struct mlx4_buf_list   *page_list;
-	} u;
+	struct mlx4_buf_list	direct;
+	struct mlx4_buf_list   *page_list;
 	int			nbufs;
 	int			npages;
 	int			page_shift;
@@ -208,6 +215,17 @@ struct mlx4_mr {
 	u32			pd;
 	u32			access;
 	int			enabled;
+};
+
+struct mlx4_fmr {
+	struct mlx4_mr		mr;
+	struct mlx4_mpt_entry  *mpt;
+	__be64		       *mtts;
+	dma_addr_t		dma_handle;
+	int			max_pages;
+	int			max_maps;
+	int			maps;
+	u8			page_shift;
 };
 
 struct mlx4_uar {
@@ -272,6 +290,8 @@ struct mlx4_dev {
 	unsigned long		flags;
 	struct mlx4_caps	caps;
 	struct radix_tree_root	qp_table_tree;
+	u32			rev_id;
+	char			board_id[MLX4_BOARD_ID_LEN];
 };
 
 struct mlx4_init_port_param {
@@ -291,6 +311,14 @@ struct mlx4_init_port_param {
 int mlx4_buf_alloc(struct mlx4_dev *dev, int size, int max_direct,
 		   struct mlx4_buf *buf);
 void mlx4_buf_free(struct mlx4_dev *dev, int size, struct mlx4_buf *buf);
+static inline void *mlx4_buf_offset(struct mlx4_buf *buf, int offset)
+{
+	if (BITS_PER_LONG == 64 || buf->nbufs == 1)
+		return buf->direct.buf + offset;
+	else
+		return buf->page_list[offset >> PAGE_SHIFT].buf +
+			(offset & (PAGE_SIZE - 1));
+}
 
 int mlx4_pd_alloc(struct mlx4_dev *dev, u32 *pdn);
 void mlx4_pd_free(struct mlx4_dev *dev, u32 pdn);
@@ -330,5 +358,15 @@ int mlx4_CLOSE_PORT(struct mlx4_dev *dev, int port);
 
 int mlx4_multicast_attach(struct mlx4_dev *dev, struct mlx4_qp *qp, u8 gid[16]);
 int mlx4_multicast_detach(struct mlx4_dev *dev, struct mlx4_qp *qp, u8 gid[16]);
+
+int mlx4_map_phys_fmr(struct mlx4_dev *dev, struct mlx4_fmr *fmr, u64 *page_list,
+		      int npages, u64 iova, u32 *lkey, u32 *rkey);
+int mlx4_fmr_alloc(struct mlx4_dev *dev, u32 pd, u32 access, int max_pages,
+		   int max_maps, u8 page_shift, struct mlx4_fmr *fmr);
+int mlx4_fmr_enable(struct mlx4_dev *dev, struct mlx4_fmr *fmr);
+void mlx4_fmr_unmap(struct mlx4_dev *dev, struct mlx4_fmr *fmr,
+		    u32 *lkey, u32 *rkey);
+int mlx4_fmr_free(struct mlx4_dev *dev, struct mlx4_fmr *fmr);
+int mlx4_SYNC_TPT(struct mlx4_dev *dev);
 
 #endif /* MLX4_DEVICE_H */

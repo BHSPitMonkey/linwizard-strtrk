@@ -22,6 +22,7 @@
 #include <linux/netdevice.h>
 #include <linux/atmclip.h>
 #include <linux/init.h> /* for __init */
+#include <net/net_namespace.h>
 #include <net/atmclip.h>
 #include <asm/uaccess.h>
 #include <asm/atomic.h>
@@ -141,6 +142,7 @@ static int vcc_seq_release(struct inode *inode, struct file *file)
 }
 
 static void *vcc_seq_start(struct seq_file *seq, loff_t *pos)
+	__acquires(vcc_sklist_lock)
 {
 	struct vcc_state *state = seq->private;
 	loff_t left = *pos;
@@ -151,6 +153,7 @@ static void *vcc_seq_start(struct seq_file *seq, loff_t *pos)
 }
 
 static void vcc_seq_stop(struct seq_file *seq, void *v)
+	__releases(vcc_sklist_lock)
 {
 	read_unlock(&vcc_sklist_lock);
 }
@@ -175,7 +178,7 @@ static void pvc_info(struct seq_file *seq, struct atm_vcc *vcc)
 
 	seq_printf(seq, "%3d %3d %5d %-3s %7d %-5s %7d %-6s",
 	    vcc->dev->number,vcc->vpi,vcc->vci,
-	    vcc->qos.aal >= sizeof(aal_name)/sizeof(aal_name[0]) ? "err" :
+	    vcc->qos.aal >= ARRAY_SIZE(aal_name) ? "err" :
 	    aal_name[vcc->qos.aal],vcc->qos.rxtp.min_pcr,
 	    class_name[vcc->qos.rxtp.traffic_class],vcc->qos.txtp.min_pcr,
 	    class_name[vcc->qos.txtp.traffic_class]);
@@ -432,11 +435,11 @@ int atm_proc_dev_register(struct atm_dev *dev)
 		goto err_out;
 	sprintf(dev->proc_name,"%s:%d",dev->type, dev->number);
 
-	dev->proc_entry = create_proc_entry(dev->proc_name, 0, atm_proc_root);
+	dev->proc_entry = proc_create(dev->proc_name, 0, atm_proc_root,
+				      &proc_atm_dev_ops);
 	if (!dev->proc_entry)
 		goto err_free_name;
 	dev->proc_entry->data = dev;
-	dev->proc_entry->proc_fops = &proc_atm_dev_ops;
 	dev->proc_entry->owner = THIS_MODULE;
 	return 0;
 err_free_name:
@@ -475,7 +478,7 @@ static void atm_proc_dirs_remove(void)
 		if (e->dirent)
 			remove_proc_entry(e->name, atm_proc_root);
 	}
-	remove_proc_entry("net/atm", NULL);
+	proc_net_remove(&init_net, "atm");
 }
 
 int __init atm_proc_init(void)
@@ -483,16 +486,16 @@ int __init atm_proc_init(void)
 	static struct atm_proc_entry *e;
 	int ret;
 
-	atm_proc_root = proc_mkdir("net/atm",NULL);
+	atm_proc_root = proc_net_mkdir(&init_net, "atm", init_net.proc_net);
 	if (!atm_proc_root)
 		goto err_out;
 	for (e = atm_proc_ents; e->name; e++) {
 		struct proc_dir_entry *dirent;
 
-		dirent = create_proc_entry(e->name, S_IRUGO, atm_proc_root);
+		dirent = proc_create(e->name, S_IRUGO,
+				     atm_proc_root, e->proc_fops);
 		if (!dirent)
 			goto err_out_remove;
-		dirent->proc_fops = e->proc_fops;
 		dirent->owner = THIS_MODULE;
 		e->dirent = dirent;
 	}

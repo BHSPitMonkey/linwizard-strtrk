@@ -8,6 +8,7 @@ mainmenu "uClinux/68k (w/o MMU) Kernel Configuration"
 config M68K
 	bool
 	default y
+	select HAVE_IDE
 
 config MMU
 	bool
@@ -53,11 +54,18 @@ config GENERIC_CALIBRATE_DELAY
 	bool
 	default y
 
+config GENERIC_TIME
+	bool
+	default y
+
 config TIME_LOW_RES
 	bool
 	default y
 
 config NO_IOPORT
+	def_bool y
+
+config ARCH_SUPPORTS_AOUT
 	def_bool y
 
 source "init/Kconfig"
@@ -451,6 +459,12 @@ config MOD5272
 	help
 	  Support for the Netburner MOD-5272 board.
 
+config SAVANTrosie1
+	bool "Savant Rosie1 board support"
+	depends on M523x
+	help
+	  Support for the Savant Rosie1 board.
+
 config ROMFS_FROM_ROM
 	bool "ROMFS image not RAM resident"
 	depends on (NETtel || SNAPGEAR)
@@ -492,7 +506,12 @@ config SNEHA
         bool
 	default y
 	depends on CPU16B
-	
+
+config SAVANT
+	bool
+	default y
+	depends on SAVANTrosie1
+
 config AVNET
 	bool
 	default y
@@ -506,6 +525,11 @@ config 4KSTACKS
 	  kernel stack attached to each process/thread. This facilitates
 	  running more threads on a system and also reduces the pressure
 	  on the VM subsystem for higher order allocations.
+
+config HZ
+	int
+	default 1000 if CLEOPATRA
+	default 100
 
 comment "RAM configuration"
 

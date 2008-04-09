@@ -1,6 +1,6 @@
 /*
  * Copyright (C) Sistina Software, Inc.  1997-2003 All rights reserved.
- * Copyright (C) 2004-2006 Red Hat, Inc.  All rights reserved.
+ * Copyright (C) 2004-2007 Red Hat, Inc.  All rights reserved.
  *
  * This copyrighted material is made available to anyone wishing to use,
  * modify, copy, or redistribute it subject to the terms and conditions
@@ -21,6 +21,7 @@
 
 #include "gfs2.h"
 #include "incore.h"
+#include "bmap.h"
 #include "daemon.h"
 #include "glock.h"
 #include "glops.h"
@@ -28,17 +29,17 @@
 #include "lm.h"
 #include "mount.h"
 #include "ops_fstype.h"
+#include "ops_dentry.h"
 #include "ops_super.h"
 #include "recovery.h"
 #include "rgrp.h"
 #include "super.h"
 #include "sys.h"
 #include "util.h"
+#include "log.h"
 
 #define DO 0
 #define UNDO 1
-
-extern struct dentry_operations gfs2_dops;
 
 static struct gfs2_sbd *init_sbd(struct super_block *sb)
 {
@@ -59,7 +60,6 @@ static struct gfs2_sbd *init_sbd(struct super_block *sb)
 
 	mutex_init(&sdp->sd_inum_mutex);
 	spin_lock_init(&sdp->sd_statfs_spin);
-	mutex_init(&sdp->sd_statfs_mutex);
 
 	spin_lock_init(&sdp->sd_rindex_spin);
 	mutex_init(&sdp->sd_rindex_mutex);
@@ -77,18 +77,19 @@ static struct gfs2_sbd *init_sbd(struct super_block *sb)
 
 	spin_lock_init(&sdp->sd_log_lock);
 
-	INIT_LIST_HEAD(&sdp->sd_log_le_gl);
 	INIT_LIST_HEAD(&sdp->sd_log_le_buf);
 	INIT_LIST_HEAD(&sdp->sd_log_le_revoke);
 	INIT_LIST_HEAD(&sdp->sd_log_le_rg);
 	INIT_LIST_HEAD(&sdp->sd_log_le_databuf);
+	INIT_LIST_HEAD(&sdp->sd_log_le_ordered);
 
 	mutex_init(&sdp->sd_log_reserve_mutex);
 	INIT_LIST_HEAD(&sdp->sd_ail1_list);
 	INIT_LIST_HEAD(&sdp->sd_ail2_list);
 
 	init_rwsem(&sdp->sd_log_flush_lock);
-	INIT_LIST_HEAD(&sdp->sd_log_flush_list);
+	atomic_set(&sdp->sd_log_in_flight, 0);
+	init_waitqueue_head(&sdp->sd_log_flush_wait);
 
 	INIT_LIST_HEAD(&sdp->sd_revoke_list);
 
@@ -145,7 +146,8 @@ static int init_names(struct gfs2_sbd *sdp, int silent)
 	snprintf(sdp->sd_proto_name, GFS2_FSNAME_LEN, "%s", proto);
 	snprintf(sdp->sd_table_name, GFS2_FSNAME_LEN, "%s", table);
 
-	while ((table = strchr(sdp->sd_table_name, '/')))
+	table = sdp->sd_table_name;
+	while ((table = strchr(table, '/')))
 		*table = '_';
 
 out:
@@ -160,14 +162,6 @@ static int init_locking(struct gfs2_sbd *sdp, struct gfs2_holder *mount_gh,
 
 	if (undo)
 		goto fail_trans;
-
-	p = kthread_run(gfs2_scand, sdp, "gfs2_scand");
-	error = IS_ERR(p);
-	if (error) {
-		fs_err(sdp, "can't start scand thread: %d\n", error);
-		return error;
-	}
-	sdp->sd_scand_process = p;
 
 	for (sdp->sd_glockd_num = 0;
 	     sdp->sd_glockd_num < sdp->sd_args.ar_num_glockd;
@@ -229,14 +223,13 @@ fail:
 	while (sdp->sd_glockd_num--)
 		kthread_stop(sdp->sd_glockd_process[sdp->sd_glockd_num]);
 
-	kthread_stop(sdp->sd_scand_process);
 	return error;
 }
 
 static inline struct inode *gfs2_lookup_root(struct super_block *sb,
 					     u64 no_addr)
 {
-	return gfs2_inode_lookup(sb, DT_DIR, no_addr, 0);
+	return gfs2_inode_lookup(sb, DT_DIR, no_addr, 0, 0);
 }
 
 static int init_sb(struct gfs2_sbd *sdp, int silent, int undo)
@@ -301,11 +294,73 @@ static int init_sb(struct gfs2_sbd *sdp, int silent, int undo)
 		fs_err(sdp, "can't get root dentry\n");
 		error = -ENOMEM;
 		iput(inode);
-	}
-	sb->s_root->d_op = &gfs2_dops;
+	} else
+		sb->s_root->d_op = &gfs2_dops;
+	
 out:
 	gfs2_glock_dq_uninit(&sb_gh);
 	return error;
+}
+
+/**
+ * map_journal_extents - create a reusable "extent" mapping from all logical
+ * blocks to all physical blocks for the given journal.  This will save
+ * us time when writing journal blocks.  Most journals will have only one
+ * extent that maps all their logical blocks.  That's because gfs2.mkfs
+ * arranges the journal blocks sequentially to maximize performance.
+ * So the extent would map the first block for the entire file length.
+ * However, gfs2_jadd can happen while file activity is happening, so
+ * those journals may not be sequential.  Less likely is the case where
+ * the users created their own journals by mounting the metafs and
+ * laying it out.  But it's still possible.  These journals might have
+ * several extents.
+ *
+ * TODO: This should be done in bigger chunks rather than one block at a time,
+ *       but since it's only done at mount time, I'm not worried about the
+ *       time it takes.
+ */
+static int map_journal_extents(struct gfs2_sbd *sdp)
+{
+	struct gfs2_jdesc *jd = sdp->sd_jdesc;
+	unsigned int lb;
+	u64 db, prev_db; /* logical block, disk block, prev disk block */
+	struct gfs2_inode *ip = GFS2_I(jd->jd_inode);
+	struct gfs2_journal_extent *jext = NULL;
+	struct buffer_head bh;
+	int rc = 0;
+
+	prev_db = 0;
+
+	for (lb = 0; lb < ip->i_di.di_size >> sdp->sd_sb.sb_bsize_shift; lb++) {
+		bh.b_state = 0;
+		bh.b_blocknr = 0;
+		bh.b_size = 1 << ip->i_inode.i_blkbits;
+		rc = gfs2_block_map(jd->jd_inode, lb, &bh, 0);
+		db = bh.b_blocknr;
+		if (rc || !db) {
+			printk(KERN_INFO "GFS2 journal mapping error %d: lb="
+			       "%u db=%llu\n", rc, lb, (unsigned long long)db);
+			break;
+		}
+		if (!prev_db || db != prev_db + 1) {
+			jext = kzalloc(sizeof(struct gfs2_journal_extent),
+				       GFP_KERNEL);
+			if (!jext) {
+				printk(KERN_INFO "GFS2 error: out of memory "
+				       "mapping journal extents.\n");
+				rc = -ENOMEM;
+				break;
+			}
+			jext->dblock = db;
+			jext->lblock = lb;
+			jext->blocks = 1;
+			list_add_tail(&jext->extent_list, &jd->extent_list);
+		} else {
+			jext->blocks++;
+		}
+		prev_db = db;
+	}
+	return rc;
 }
 
 static int init_journal(struct gfs2_sbd *sdp, int undo)
@@ -345,7 +400,7 @@ static int init_journal(struct gfs2_sbd *sdp, int undo)
 
 	if (sdp->sd_args.ar_spectator) {
 		sdp->sd_jdesc = gfs2_jdesc_find(sdp, 0);
-		sdp->sd_log_blks_free = sdp->sd_jdesc->jd_blocks;
+		atomic_set(&sdp->sd_log_blks_free, sdp->sd_jdesc->jd_blocks);
 	} else {
 		if (sdp->sd_lockstruct.ls_jid >= gfs2_jindex_size(sdp)) {
 			fs_err(sdp, "can't mount journal #%u\n",
@@ -368,7 +423,7 @@ static int init_journal(struct gfs2_sbd *sdp, int undo)
 
 		ip = GFS2_I(sdp->sd_jdesc->jd_inode);
 		error = gfs2_glock_nq_init(ip->i_gl, LM_ST_SHARED,
-					   LM_FLAG_NOEXP | GL_EXACT,
+					   LM_FLAG_NOEXP | GL_EXACT | GL_NOCACHE,
 					   &sdp->sd_jinode_gh);
 		if (error) {
 			fs_err(sdp, "can't acquire journal inode glock: %d\n",
@@ -382,7 +437,10 @@ static int init_journal(struct gfs2_sbd *sdp, int undo)
 			       sdp->sd_jdesc->jd_jid, error);
 			goto fail_jinode_gh;
 		}
-		sdp->sd_log_blks_free = sdp->sd_jdesc->jd_blocks;
+		atomic_set(&sdp->sd_log_blks_free, sdp->sd_jdesc->jd_blocks);
+
+		/* Map the extents for this journal's blocks */
+		map_journal_extents(sdp);
 	}
 
 	if (sdp->sd_lockstruct.ls_first) {
@@ -818,7 +876,6 @@ static struct super_block* get_gfs2_sb(const char *dev_name)
 	struct nameidata nd;
 	struct file_system_type *fstype;
 	struct super_block *sb = NULL, *s;
-	struct list_head *l;
 	int error;
 
 	error = path_lookup(dev_name, LOOKUP_FOLLOW, &nd);
@@ -827,13 +884,13 @@ static struct super_block* get_gfs2_sb(const char *dev_name)
 		       dev_name);
 		goto out;
 	}
-	error = vfs_getattr(nd.mnt, nd.dentry, &stat);
+	error = vfs_getattr(nd.path.mnt, nd.path.dentry, &stat);
 
 	fstype = get_fs_type("gfs2");
-	list_for_each(l, &fstype->fs_supers) {
-		s = list_entry(l, struct super_block, s_instances);
+	list_for_each_entry(s, &fstype->fs_supers, s_instances) {
 		if ((S_ISBLK(stat.mode) && s->s_dev == stat.rdev) ||
-		    (S_ISDIR(stat.mode) && s == nd.dentry->d_inode->i_sb)) {
+		    (S_ISDIR(stat.mode) &&
+		     s == nd.path.dentry->d_inode->i_sb)) {
 			sb = s;
 			goto free_nd;
 		}
@@ -843,7 +900,7 @@ static struct super_block* get_gfs2_sb(const char *dev_name)
 	       "mount point %s\n", dev_name);
 
 free_nd:
-	path_release(&nd);
+	path_put(&nd.path);
 out:
 	return sb;
 }
@@ -861,7 +918,7 @@ static int gfs2_get_sb_meta(struct file_system_type *fs_type, int flags,
 		error = -ENOENT;
 		goto error;
 	}
-	sdp = (struct gfs2_sbd*) sb->s_fs_info;
+	sdp = sb->s_fs_info;
 	if (sdp->sd_vfs_meta) {
 		printk(KERN_WARNING "GFS2: gfs2meta mount already exists\n");
 		error = -EBUSY;
@@ -896,7 +953,10 @@ error:
 
 static void gfs2_kill_sb(struct super_block *sb)
 {
-	gfs2_delete_debugfs_file(sb->s_fs_info);
+	if (sb->s_fs_info) {
+		gfs2_delete_debugfs_file(sb->s_fs_info);
+		gfs2_meta_syncfs(sb->s_fs_info);
+	}
 	kill_block_super(sb);
 }
 

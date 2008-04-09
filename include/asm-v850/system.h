@@ -66,8 +66,7 @@ static inline int irqs_disabled (void)
 #define rmb()			mb ()
 #define wmb()			mb ()
 #define read_barrier_depends()	((void)0)
-#define set_rmb(var, value)	do { xchg (&var, value); } while (0)
-#define set_mb(var, value)	set_rmb (var, value)
+#define set_mb(var, value)	do { xchg (&var, value); } while (0)
 
 #define smp_mb()	mb ()
 #define smp_rmb()	rmb ()
@@ -103,6 +102,21 @@ static inline unsigned long __xchg (unsigned long with,
 
 	return tmp;
 }
+
+#include <asm-generic/cmpxchg-local.h>
+
+/*
+ * cmpxchg_local and cmpxchg64_local are atomic wrt current CPU. Always make
+ * them available.
+ */
+#define cmpxchg_local(ptr, o, n)				  	       \
+	((__typeof__(*(ptr)))__cmpxchg_local_generic((ptr), (unsigned long)(o),\
+			(unsigned long)(n), sizeof(*(ptr))))
+#define cmpxchg64_local(ptr, o, n) __cmpxchg64_local_generic((ptr), (o), (n))
+
+#ifndef CONFIG_SMP
+#include <asm-generic/cmpxchg.h>
+#endif
 
 #define arch_align_stack(x) (x)
 

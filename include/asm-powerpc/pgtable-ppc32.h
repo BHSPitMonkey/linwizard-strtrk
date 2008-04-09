@@ -11,6 +11,11 @@
 extern unsigned long va_to_phys(unsigned long address);
 extern pte_t *va_to_pte(unsigned long address);
 extern unsigned long ioremap_bot, ioremap_base;
+
+#ifdef CONFIG_44x
+extern int icache_44x_need_flush;
+#endif
+
 #endif /* __ASSEMBLY__ */
 
 /*
@@ -81,6 +86,11 @@ extern unsigned long ioremap_bot, ioremap_base;
  * entries per page directory level: our page-table tree is two-level, so
  * we don't really have any PMD directory.
  */
+#ifndef __ASSEMBLY__
+#define PTE_TABLE_SIZE	(sizeof(pte_t) << PTE_SHIFT)
+#define PGD_TABLE_SIZE	(sizeof(pgd_t) << (32 - PGDIR_SHIFT))
+#endif	/* __ASSEMBLY__ */
+
 #define PTRS_PER_PTE	(1 << PTE_SHIFT)
 #define PTRS_PER_PMD	1
 #define PTRS_PER_PGD	(1 << (32 - PGDIR_SHIFT))
@@ -329,14 +339,6 @@ extern unsigned long ioremap_bot, ioremap_base;
 #define _PMD_PAGE_MASK	0x000c
 #define _PMD_PAGE_8M	0x000c
 
-/*
- * The 8xx TLB miss handler allegedly sets _PAGE_ACCESSED in the PTE
- * for an address even if _PAGE_PRESENT is not set, as a performance
- * optimization.  This is a bug if you ever want to use swap unless
- * _PAGE_ACCESSED is 2, which it isn't, or unless you have 8xx-specific
- * definitions for __swp_entry etc. below, which would be gross.
- *  -- paulus
- */
 #define _PTE_NONE_MASK _PAGE_ACCESSED
 
 #else /* CONFIG_6xx */
@@ -562,6 +564,10 @@ static inline unsigned long pte_update(pte_t *p, unsigned long clr,
 	: "=&r" (old), "=&r" (tmp), "=m" (*p)
 	: "r" (p), "r" (clr), "r" (set), "m" (*p)
 	: "cc" );
+#ifdef CONFIG_44x
+	if ((old & _PAGE_USER) && (old & _PAGE_HWEXEC))
+		icache_44x_need_flush = 1;
+#endif
 	return old;
 }
 #else
@@ -582,6 +588,10 @@ static inline unsigned long long pte_update(pte_t *p, unsigned long clr,
 	: "=&r" (old), "=&r" (tmp), "=m" (*p)
 	: "r" (p), "r" ((unsigned long)(p) + 4), "r" (clr), "r" (set), "m" (*p)
 	: "cc" );
+#ifdef CONFIG_44x
+	if ((old & _PAGE_USER) && (old & _PAGE_HWEXEC))
+		icache_44x_need_flush = 1;
+#endif
 	return old;
 }
 #endif

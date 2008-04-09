@@ -21,12 +21,6 @@
 #include "gunzip_util.h"
 #include "mv64x60.h"
 
-extern char _end[];
-extern char _vmlinux_start[], _vmlinux_end[];
-extern char _dtb_start[], _dtb_end[];
-
-extern void udelay(long delay);
-
 #define KB	1024U
 #define MB	(KB*KB)
 #define GB	(KB*MB)
@@ -553,8 +547,7 @@ void platform_init(unsigned long r3, unsigned long r4, unsigned long r5,
 	if (!dtb)
 		exit();
 	memmove(dtb, _dtb_start, dt_size);
-	if (ft_init(dtb, dt_size, 16))
-		exit();
+	fdt_init(dtb);
 
 	bridge_base = mv64x60_get_bridge_base();
 

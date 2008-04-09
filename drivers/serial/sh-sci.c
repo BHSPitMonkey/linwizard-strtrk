@@ -4,6 +4,7 @@
  * SuperH on-chip serial module support.  (SCI with no FIFO / with FIFO)
  *
  *  Copyright (C) 2002 - 2006  Paul Mundt
+ *  Modified to support SH7720 SCIF. Markus Brunner, Mark Jonas (Jul 2007).
  *
  * based off of the old drivers/char/sh-sci.c by:
  *
@@ -40,6 +41,7 @@
 #include <linux/delay.h>
 #include <linux/console.h>
 #include <linux/platform_device.h>
+#include <linux/serial_sci.h>
 
 #ifdef CONFIG_CPU_FREQ
 #include <linux/notifier.h>
@@ -53,7 +55,6 @@
 #include <asm/kgdb.h>
 #endif
 
-#include <asm/sci.h>
 #include "sh-sci.h"
 
 struct sci_port {
@@ -301,6 +302,38 @@ static void sci_init_pins_scif(struct uart_port* port, unsigned int cflag)
 	}
 	sci_out(port, SCFCR, fcr_val);
 }
+#elif defined(CONFIG_CPU_SUBTYPE_SH7720) || defined(CONFIG_CPU_SUBTYPE_SH7721)
+static void sci_init_pins_scif(struct uart_port *port, unsigned int cflag)
+{
+	unsigned int fcr_val = 0;
+	unsigned short data;
+
+	if (cflag & CRTSCTS) {
+		/* enable RTS/CTS */
+		if (port->mapbase == 0xa4430000) { /* SCIF0 */
+			/* Clear PTCR bit 9-2; enable all scif pins but sck */
+			data = ctrl_inw(PORT_PTCR);
+			ctrl_outw((data & 0xfc03), PORT_PTCR);
+		} else if (port->mapbase == 0xa4438000) { /* SCIF1 */
+			/* Clear PVCR bit 9-2 */
+			data = ctrl_inw(PORT_PVCR);
+			ctrl_outw((data & 0xfc03), PORT_PVCR);
+		}
+		fcr_val |= SCFCR_MCE;
+	} else {
+		if (port->mapbase == 0xa4430000) { /* SCIF0 */
+			/* Clear PTCR bit 5-2; enable only tx and rx  */
+			data = ctrl_inw(PORT_PTCR);
+			ctrl_outw((data & 0xffc3), PORT_PTCR);
+		} else if (port->mapbase == 0xa4438000) { /* SCIF1 */
+			/* Clear PVCR bit 5-2 */
+			data = ctrl_inw(PORT_PVCR);
+			ctrl_outw((data & 0xffc3), PORT_PVCR);
+		}
+	}
+	sci_out(port, SCFCR, fcr_val);
+}
+
 #elif defined(CONFIG_CPU_SH3)
 /* For SH7705, SH7706, SH7707, SH7709, SH7709A, SH7729 */
 static void sci_init_pins_scif(struct uart_port *port, unsigned int cflag)
@@ -360,9 +393,10 @@ static void sci_init_pins_scif(struct uart_port *port, unsigned int cflag)
 	if (cflag & CRTSCTS) {
 		fcr_val |= SCFCR_MCE;
 	} else {
-#ifdef CONFIG_CPU_SUBTYPE_SH7343
+#if defined(CONFIG_CPU_SUBTYPE_SH7343) || defined(CONFIG_CPU_SUBTYPE_SH7366)
 		/* Nothing */
-#elif defined(CONFIG_CPU_SUBTYPE_SH7780) || \
+#elif defined(CONFIG_CPU_SUBTYPE_SH7763) || \
+      defined(CONFIG_CPU_SUBTYPE_SH7780) || \
       defined(CONFIG_CPU_SUBTYPE_SH7785) || \
       defined(CONFIG_CPU_SUBTYPE_SHX3)
 		ctrl_outw(0x0080, SCSPTR0); /* Set RTS = 1 */
@@ -375,16 +409,17 @@ static void sci_init_pins_scif(struct uart_port *port, unsigned int cflag)
 #endif
 
 #if defined(CONFIG_CPU_SUBTYPE_SH7760) || \
+    defined(CONFIG_CPU_SUBTYPE_SH7763) || \
     defined(CONFIG_CPU_SUBTYPE_SH7780) || \
     defined(CONFIG_CPU_SUBTYPE_SH7785)
 static inline int scif_txroom(struct uart_port *port)
 {
-	return SCIF_TXROOM_MAX - (sci_in(port, SCTFDR) & 0x7f);
+	return SCIF_TXROOM_MAX - (sci_in(port, SCTFDR) & 0xff);
 }
 
 static inline int scif_rxroom(struct uart_port *port)
 {
-	return sci_in(port, SCRFDR) & 0x7f;
+	return sci_in(port, SCRFDR) & 0xff;
 }
 #else
 static inline int scif_txroom(struct uart_port *port)
@@ -1276,7 +1311,7 @@ static int __init sci_console_init(void)
 console_initcall(sci_console_init);
 #endif /* CONFIG_SERIAL_SH_SCI_CONSOLE */
 
-#ifdef CONFIG_SH_KGDB
+#ifdef CONFIG_SH_KGDB_CONSOLE
 /*
  * FIXME: Most of this can go away.. at the moment, we rely on
  * arch/sh/kernel/setup.c to do the command line parsing for kgdb, though
@@ -1334,9 +1369,7 @@ int __init kgdb_console_setup(struct console *co, char *options)
 
 	return uart_set_options(port, co, baud, parity, bits, flow);
 }
-#endif /* CONFIG_SH_KGDB */
 
-#ifdef CONFIG_SH_KGDB_CONSOLE
 static struct console kgdb_console = {
 	.name		= "ttySC",
 	.device		= uart_console_device,
@@ -1432,7 +1465,7 @@ static int __devinit sci_probe(struct platform_device *dev)
 
 #ifdef CONFIG_CPU_FREQ
 	cpufreq_register_notifier(&sci_nb, CPUFREQ_TRANSITION_NOTIFIER);
-	dev_info(&dev->dev, "sci: CPU frequency notifier registered\n");
+	dev_info(&dev->dev, "CPU frequency notifier registered\n");
 #endif
 
 #ifdef CONFIG_SH_STANDARD_BIOS

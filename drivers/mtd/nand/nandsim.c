@@ -210,7 +210,7 @@ MODULE_PARM_DESC(overridesize,   "Specifies the NAND Flash size overriding the I
 #define STATE_CMD_RESET        0x0000000C /* reset */
 #define STATE_CMD_MASK         0x0000000F /* command states mask */
 
-/* After an addres is input, the simulator goes to one of these states */
+/* After an address is input, the simulator goes to one of these states */
 #define STATE_ADDR_PAGE        0x00000010 /* full (row, column) address is accepted */
 #define STATE_ADDR_SEC         0x00000020 /* sector address was accepted */
 #define STATE_ADDR_ZERO        0x00000030 /* one byte zero address was accepted */
@@ -511,7 +511,7 @@ static int init_nandsim(struct mtd_info *mtd)
 	}
 
 	if (ns->options & OPT_SMALLPAGE) {
-		if (ns->geom.totsz < (64 << 20)) {
+		if (ns->geom.totsz < (32 << 20)) {
 			ns->geom.pgaddrbytes  = 3;
 			ns->geom.secaddrbytes = 2;
 		} else {
@@ -1272,7 +1272,13 @@ static int prog_page(struct nandsim *ns, int num)
 	mypage = NS_GET_PAGE(ns);
 	if (mypage->byte == NULL) {
 		NS_DBG("prog_page: allocating page %d\n", ns->regs.row);
-		mypage->byte = kmalloc(ns->geom.pgszoob, GFP_KERNEL);
+		/*
+		 * We allocate memory with GFP_NOFS because a flash FS may
+		 * utilize this. If it is holding an FS lock, then gets here,
+		 * then kmalloc runs writeback which goes to the FS again
+		 * and deadlocks. This was seen in practice.
+		 */
+		mypage->byte = kmalloc(ns->geom.pgszoob, GFP_NOFS);
 		if (mypage->byte == NULL) {
 			NS_ERR("prog_page: error allocating memory for page %d\n", ns->regs.row);
 			return -1;

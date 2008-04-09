@@ -45,7 +45,7 @@ struct net_protocol {
 #if defined(CONFIG_IPV6) || defined (CONFIG_IPV6_MODULE)
 struct inet6_protocol 
 {
-	int	(*handler)(struct sk_buff **skb);
+	int	(*handler)(struct sk_buff *skb);
 
 	void	(*err_handler)(struct sk_buff *skb,
 			       struct inet6_skb_parm *opt,
@@ -102,7 +102,7 @@ extern void	inet_unregister_protosw(struct inet_protosw *p);
 #if defined(CONFIG_IPV6) || defined (CONFIG_IPV6_MODULE)
 extern int	inet6_add_protocol(struct inet6_protocol *prot, unsigned char num);
 extern int	inet6_del_protocol(struct inet6_protocol *prot, unsigned char num);
-extern void	inet6_register_protosw(struct inet_protosw *p);
+extern int	inet6_register_protosw(struct inet_protosw *p);
 extern void	inet6_unregister_protosw(struct inet_protosw *p);
 #endif
 

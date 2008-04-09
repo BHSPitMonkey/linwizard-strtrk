@@ -70,10 +70,11 @@
 
 #include <asm/io.h>
 #include <asm/irq.h>
+#include <asm/gpio.h>
+
 #include <asm/mach/mmc.h>
 #include <asm/arch/board.h>
 #include <asm/arch/cpu.h>
-#include <asm/arch/gpio.h>
 #include <asm/arch/at91_mci.h>
 
 #define DRIVER_NAME "at91_mci"
@@ -149,7 +150,7 @@ static inline void at91_mci_sg_to_dma(struct at91mci_host *host, struct mmc_data
 
 		sg = &data->sg[i];
 
-		sgbuffer = kmap_atomic(sg->page, KM_BIO_SRC_IRQ) + sg->offset;
+		sgbuffer = kmap_atomic(sg_page(sg), KM_BIO_SRC_IRQ) + sg->offset;
 		amount = min(size, sg->length);
 		size -= amount;
 
@@ -226,7 +227,7 @@ static void at91_mci_pre_dma_read(struct at91mci_host *host)
 		sg = &data->sg[host->transfer_index++];
 		pr_debug("sg = %p\n", sg);
 
-		sg->dma_address = dma_map_page(NULL, sg->page, sg->offset, sg->length, DMA_FROM_DEVICE);
+		sg->dma_address = dma_map_page(NULL, sg_page(sg), sg->offset, sg->length, DMA_FROM_DEVICE);
 
 		pr_debug("dma address = %08X, length = %d\n", sg->dma_address, sg->length);
 
@@ -283,7 +284,7 @@ static void at91_mci_post_dma_read(struct at91mci_host *host)
 			int index;
 
 			/* Swap the contents of the buffer */
-			buffer = kmap_atomic(sg->page, KM_BIO_SRC_IRQ) + sg->offset;
+			buffer = kmap_atomic(sg_page(sg), KM_BIO_SRC_IRQ) + sg->offset;
 			pr_debug("buffer = %p, length = %d\n", buffer, sg->length);
 
 			for (index = 0; index < (sg->length / 4); index++)
@@ -292,7 +293,7 @@ static void at91_mci_post_dma_read(struct at91mci_host *host)
 			kunmap_atomic(buffer, KM_BIO_SRC_IRQ);
 		}
 
-		flush_dcache_page(sg->page);
+		flush_dcache_page(sg_page(sg));
 	}
 
 	/* Is there another transfer to trigger? */
@@ -328,7 +329,7 @@ static void at91_mci_handle_transmitted(struct at91mci_host *host)
 	data = cmd->data;
 	if (!data) return;
 
-	if (cmd->data->flags & MMC_DATA_MULTI) {
+	if (cmd->data->blocks > 1) {
 		pr_debug("multiple write : wait for BLKE...\n");
 		at91_mci_write(host, AT91_MCI_IER, AT91_MCI_BLKE);
 	} else
@@ -428,6 +429,14 @@ static void at91_mci_send_command(struct at91mci_host *host, struct mmc_command 
 	}
 
 	if (data) {
+
+		if ( data->blksz & 0x3 ) {
+			pr_debug("Unsupported block size\n");
+			cmd->error = -EINVAL;
+			mmc_request_done(host->mmc, host->request);
+			return;
+		}
+
 		block_length = data->blksz;
 		blocks = data->blocks;
 
@@ -439,7 +448,7 @@ static void at91_mci_send_command(struct at91mci_host *host, struct mmc_command 
 
 		if (data->flags & MMC_DATA_STREAM)
 			cmdr |= AT91_MCI_TRTYP_STREAM;
-		if (data->flags & MMC_DATA_MULTI)
+		if (data->blocks > 1)
 			cmdr |= AT91_MCI_TRTYP_MULTIPLE;
 	}
 	else {
@@ -573,28 +582,24 @@ static void at91_mci_completed_command(struct at91mci_host *host)
 	pr_debug("Status = %08X [%08X %08X %08X %08X]\n",
 		 status, cmd->resp[0], cmd->resp[1], cmd->resp[2], cmd->resp[3]);
 
-	if (status & (AT91_MCI_RINDE | AT91_MCI_RDIRE | AT91_MCI_RCRCE |
-			AT91_MCI_RENDE | AT91_MCI_RTOE | AT91_MCI_DCRCE |
-			AT91_MCI_DTOE | AT91_MCI_OVRE | AT91_MCI_UNRE)) {
+	if (status & AT91_MCI_ERRORS) {
 		if ((status & AT91_MCI_RCRCE) && !(mmc_resp_type(cmd) & MMC_RSP_CRC)) {
-			cmd->error = MMC_ERR_NONE;
+			cmd->error = 0;
 		}
 		else {
 			if (status & (AT91_MCI_RTOE | AT91_MCI_DTOE))
-				cmd->error = MMC_ERR_TIMEOUT;
+				cmd->error = -ETIMEDOUT;
 			else if (status & (AT91_MCI_RCRCE | AT91_MCI_DCRCE))
-				cmd->error = MMC_ERR_BADCRC;
-			else if (status & (AT91_MCI_OVRE | AT91_MCI_UNRE))
-				cmd->error = MMC_ERR_FIFO;
+				cmd->error = -EILSEQ;
 			else
-				cmd->error = MMC_ERR_FAILED;
+				cmd->error = -EIO;
 
 			pr_debug("Error detected and set to %d (cmd = %d, retries = %d)\n",
 				 cmd->error, cmd->opcode, cmd->retries);
 		}
 	}
 	else
-		cmd->error = MMC_ERR_NONE;
+		cmd->error = 0;
 
 	at91_mci_process_next(host);
 }
@@ -655,11 +660,11 @@ static void at91_mci_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 	if (host->board->vcc_pin) {
 		switch (ios->power_mode) {
 			case MMC_POWER_OFF:
-				at91_set_gpio_value(host->board->vcc_pin, 0);
+				gpio_set_value(host->board->vcc_pin, 0);
 				break;
 			case MMC_POWER_UP:
 			case MMC_POWER_ON:
-				at91_set_gpio_value(host->board->vcc_pin, 1);
+				gpio_set_value(host->board->vcc_pin, 1);
 				break;
 		}
 	}
@@ -764,7 +769,7 @@ static irqreturn_t at91_mci_irq(int irq, void *devid)
 static irqreturn_t at91_mmc_det_irq(int irq, void *_host)
 {
 	struct at91mci_host *host = _host;
-	int present = !at91_get_gpio_value(irq);
+	int present = !gpio_get_value(irq_to_gpio(irq));
 
 	/*
 	 * we expect this irq on both insert and remove,
@@ -789,7 +794,7 @@ static int at91_mci_get_ro(struct mmc_host *mmc)
 	struct at91mci_host *host = mmc_priv(mmc);
 
 	if (host->board->wp_pin) {
-		read_only = at91_get_gpio_value(host->board->wp_pin);
+		read_only = gpio_get_value(host->board->wp_pin);
 		printk(KERN_WARNING "%s: card is %s\n", mmc_hostname(mmc),
 				(read_only ? "read-only" : "read-write") );
 	}
@@ -816,8 +821,6 @@ static int __init at91_mci_probe(struct platform_device *pdev)
 	struct resource *res;
 	int ret;
 
-	pr_debug("Probe MCI devices\n");
-
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!res)
 		return -ENXIO;
@@ -827,16 +830,15 @@ static int __init at91_mci_probe(struct platform_device *pdev)
 
 	mmc = mmc_alloc_host(sizeof(struct at91mci_host), &pdev->dev);
 	if (!mmc) {
-		pr_debug("Failed to allocate mmc host\n");
-		release_mem_region(res->start, res->end - res->start + 1);
-		return -ENOMEM;
+		ret = -ENOMEM;
+		dev_dbg(&pdev->dev, "couldn't allocate mmc host\n");
+		goto fail6;
 	}
 
 	mmc->ops = &at91_mci_ops;
 	mmc->f_min = 375000;
 	mmc->f_max = 25000000;
 	mmc->ocr_avail = MMC_VDD_32_33 | MMC_VDD_33_34;
-	mmc->caps = MMC_CAP_BYTEBLOCK;
 
 	mmc->max_blk_size = 4095;
 	mmc->max_blk_count = mmc->max_req_size;
@@ -850,8 +852,34 @@ static int __init at91_mci_probe(struct platform_device *pdev)
 		if (cpu_is_at91sam9260() || cpu_is_at91sam9263())
 			mmc->caps |= MMC_CAP_4_BIT_DATA;
 		else
-			printk("AT91 MMC: 4 wire bus mode not supported"
+			dev_warn(&pdev->dev, "4 wire bus mode not supported"
 				" - using 1 wire\n");
+	}
+
+	/*
+	 * Reserve GPIOs ... board init code makes sure these pins are set
+	 * up as GPIOs with the right direction (input, except for vcc)
+	 */
+	if (host->board->det_pin) {
+		ret = gpio_request(host->board->det_pin, "mmc_detect");
+		if (ret < 0) {
+			dev_dbg(&pdev->dev, "couldn't claim card detect pin\n");
+			goto fail5;
+		}
+	}
+	if (host->board->wp_pin) {
+		ret = gpio_request(host->board->wp_pin, "mmc_wp");
+		if (ret < 0) {
+			dev_dbg(&pdev->dev, "couldn't claim wp sense pin\n");
+			goto fail4;
+		}
+	}
+	if (host->board->vcc_pin) {
+		ret = gpio_request(host->board->vcc_pin, "mmc_vcc");
+		if (ret < 0) {
+			dev_dbg(&pdev->dev, "couldn't claim vcc switch pin\n");
+			goto fail3;
+		}
 	}
 
 	/*
@@ -859,10 +887,9 @@ static int __init at91_mci_probe(struct platform_device *pdev)
 	 */
 	host->mci_clk = clk_get(&pdev->dev, "mci_clk");
 	if (IS_ERR(host->mci_clk)) {
-		printk(KERN_ERR "AT91 MMC: no clock defined.\n");
-		mmc_free_host(mmc);
-		release_mem_region(res->start, res->end - res->start + 1);
-		return -ENODEV;
+		ret = -ENODEV;
+		dev_dbg(&pdev->dev, "no mci_clk?\n");
+		goto fail2;
 	}
 
 	/*
@@ -870,10 +897,8 @@ static int __init at91_mci_probe(struct platform_device *pdev)
 	 */
 	host->baseaddr = ioremap(res->start, res->end - res->start + 1);
 	if (!host->baseaddr) {
-		clk_put(host->mci_clk);
-		mmc_free_host(mmc);
-		release_mem_region(res->start, res->end - res->start + 1);
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto fail1;
 	}
 
 	/*
@@ -887,15 +912,11 @@ static int __init at91_mci_probe(struct platform_device *pdev)
 	 * Allocate the MCI interrupt
 	 */
 	host->irq = platform_get_irq(pdev, 0);
-	ret = request_irq(host->irq, at91_mci_irq, IRQF_SHARED, DRIVER_NAME, host);
+	ret = request_irq(host->irq, at91_mci_irq, IRQF_SHARED,
+			mmc_hostname(mmc), host);
 	if (ret) {
-		printk(KERN_ERR "AT91 MMC: Failed to request MCI interrupt\n");
-		clk_disable(host->mci_clk);
-		clk_put(host->mci_clk);
-		mmc_free_host(mmc);
-		iounmap(host->baseaddr);
-		release_mem_region(res->start, res->end - res->start + 1);
-		return ret;
+		dev_dbg(&pdev->dev, "request MCI interrupt failed\n");
+		goto fail0;
 	}
 
 	platform_set_drvdata(pdev, mmc);
@@ -904,8 +925,7 @@ static int __init at91_mci_probe(struct platform_device *pdev)
 	 * Add host to MMC layer
 	 */
 	if (host->board->det_pin) {
-		host->present = !at91_get_gpio_value(host->board->det_pin);
-		device_init_wakeup(&pdev->dev, 1);
+		host->present = !gpio_get_value(host->board->det_pin);
 	}
 	else
 		host->present = -1;
@@ -916,15 +936,38 @@ static int __init at91_mci_probe(struct platform_device *pdev)
 	 * monitor card insertion/removal if we can
 	 */
 	if (host->board->det_pin) {
-		ret = request_irq(host->board->det_pin, at91_mmc_det_irq,
-				0, DRIVER_NAME, host);
+		ret = request_irq(gpio_to_irq(host->board->det_pin),
+				at91_mmc_det_irq, 0, mmc_hostname(mmc), host);
 		if (ret)
-			printk(KERN_ERR "AT91 MMC: Couldn't allocate MMC detect irq\n");
+			dev_warn(&pdev->dev, "request MMC detect irq failed\n");
+		else
+			device_init_wakeup(&pdev->dev, 1);
 	}
 
 	pr_debug("Added MCI driver\n");
 
 	return 0;
+
+fail0:
+	clk_disable(host->mci_clk);
+	iounmap(host->baseaddr);
+fail1:
+	clk_put(host->mci_clk);
+fail2:
+	if (host->board->vcc_pin)
+		gpio_free(host->board->vcc_pin);
+fail3:
+	if (host->board->wp_pin)
+		gpio_free(host->board->wp_pin);
+fail4:
+	if (host->board->det_pin)
+		gpio_free(host->board->det_pin);
+fail5:
+	mmc_free_host(mmc);
+fail6:
+	release_mem_region(res->start, res->end - res->start + 1);
+	dev_err(&pdev->dev, "probe failed, err %d\n", ret);
+	return ret;
 }
 
 /*
@@ -942,9 +985,10 @@ static int __exit at91_mci_remove(struct platform_device *pdev)
 	host = mmc_priv(mmc);
 
 	if (host->board->det_pin) {
+		if (device_can_wakeup(&pdev->dev))
+			free_irq(gpio_to_irq(host->board->det_pin), host);
 		device_init_wakeup(&pdev->dev, 0);
-		free_irq(host->board->det_pin, host);
-		cancel_delayed_work(&host->mmc->detect);
+		gpio_free(host->board->det_pin);
 	}
 
 	at91_mci_disable(host);
@@ -953,6 +997,11 @@ static int __exit at91_mci_remove(struct platform_device *pdev)
 
 	clk_disable(host->mci_clk);			/* Disable the peripheral clock */
 	clk_put(host->mci_clk);
+
+	if (host->board->vcc_pin)
+		gpio_free(host->board->vcc_pin);
+	if (host->board->wp_pin)
+		gpio_free(host->board->wp_pin);
 
 	iounmap(host->baseaddr);
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);

@@ -92,31 +92,33 @@ static void winbond_set_piomode(struct ata_port *ap, struct ata_device *adev)
 }
 
 
-static void winbond_data_xfer(struct ata_device *adev, unsigned char *buf, unsigned int buflen, int write_data)
+static unsigned int winbond_data_xfer(struct ata_device *dev,
+			unsigned char *buf, unsigned int buflen, int rw)
 {
-	struct ata_port *ap = adev->ap;
+	struct ata_port *ap = dev->link->ap;
 	int slop = buflen & 3;
 
-	if (ata_id_has_dword_io(adev->id)) {
-		if (write_data)
-			iowrite32_rep(ap->ioaddr.data_addr, buf, buflen >> 2);
-		else
+	if (ata_id_has_dword_io(dev->id)) {
+		if (rw == READ)
 			ioread32_rep(ap->ioaddr.data_addr, buf, buflen >> 2);
+		else
+			iowrite32_rep(ap->ioaddr.data_addr, buf, buflen >> 2);
 
 		if (unlikely(slop)) {
 			u32 pad;
-			if (write_data) {
-				memcpy(&pad, buf + buflen - slop, slop);
-				pad = le32_to_cpu(pad);
-				iowrite32(pad, ap->ioaddr.data_addr);
-			} else {
-				pad = ioread32(ap->ioaddr.data_addr);
-				pad = cpu_to_le16(pad);
+			if (rw == READ) {
+				pad = cpu_to_le32(ioread32(ap->ioaddr.data_addr));
 				memcpy(buf + buflen - slop, &pad, slop);
+			} else {
+				memcpy(&pad, buf + buflen - slop, slop);
+				iowrite32(le32_to_cpu(pad), ap->ioaddr.data_addr);
 			}
+			buflen += 4 - slop;
 		}
 	} else
-		ata_data_xfer(adev, buf, buflen, write_data);
+		buflen = ata_data_xfer(dev, buf, buflen, rw);
+
+	return buflen;
 }
 
 static struct scsi_host_template winbond_sht = {
@@ -138,7 +140,6 @@ static struct scsi_host_template winbond_sht = {
 };
 
 static struct ata_port_operations winbond_port_ops = {
-	.port_disable	= ata_port_disable,
 	.set_piomode	= winbond_set_piomode,
 
 	.tf_load	= ata_tf_load,
@@ -160,9 +161,8 @@ static struct ata_port_operations winbond_port_ops = {
 
 	.irq_clear	= ata_bmdma_irq_clear,
 	.irq_on		= ata_irq_on,
-	.irq_ack	= ata_irq_ack,
 
-	.port_start	= ata_port_start,
+	.port_start	= ata_sff_port_start,
 };
 
 /**
@@ -195,10 +195,11 @@ static __init int winbond_init_one(unsigned long port)
 	reg = winbond_readcfg(port, 0x81);
 
 	if (!(reg & 0x03))		/* Disabled */
-		return 0;
+		return -ENODEV;
 
 	for (i = 0; i < 2 ; i ++) {
 		unsigned long cmd_port = 0x1F0 - (0x80 * i);
+		unsigned long ctl_port = cmd_port + 0x206;
 		struct ata_host *host;
 		struct ata_port *ap;
 		void __iomem *cmd_addr, *ctl_addr;
@@ -214,14 +215,16 @@ static __init int winbond_init_one(unsigned long port)
 		host = ata_host_alloc(&pdev->dev, 1);
 		if (!host)
 			goto err_unregister;
+		ap = host->ports[0];
 
 		rc = -ENOMEM;
 		cmd_addr = devm_ioport_map(&pdev->dev, cmd_port, 8);
-		ctl_addr = devm_ioport_map(&pdev->dev, cmd_port + 0x0206, 1);
+		ctl_addr = devm_ioport_map(&pdev->dev, ctl_port, 1);
 		if (!cmd_addr || !ctl_addr)
 			goto err_unregister;
 
-		ap = host->ports[0];
+		ata_port_desc(ap, "cmd 0x%lx ctl 0x%lx", cmd_port, ctl_port);
+
 		ap->ops = &winbond_port_ops;
 		ap->pio_mask = 0x1F;
 		ap->flags |= ATA_FLAG_SLAVE_POSS;
@@ -278,7 +281,7 @@ static __init int winbond_init(void)
 
 			if (request_region(port, 2, "pata_winbond")) {
 				ret = winbond_init_one(port);
-				if(ret <= 0)
+				if (ret <= 0)
 					release_region(port, 2);
 				else ct+= ret;
 			}

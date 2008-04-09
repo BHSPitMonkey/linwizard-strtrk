@@ -76,7 +76,7 @@ static void dump_dev_cap_flags(struct mlx4_dev *dev, u32 flags)
 		[ 0] = "RC transport",
 		[ 1] = "UC transport",
 		[ 2] = "UD transport",
-		[ 3] = "SRC transport",
+		[ 3] = "XRC transport",
 		[ 4] = "reliable multicast",
 		[ 5] = "FCoIB support",
 		[ 6] = "SRQ support",
@@ -202,7 +202,7 @@ int mlx4_QUERY_DEV_CAP(struct mlx4_dev *dev, struct mlx4_dev_cap *dev_cap)
 	MLX4_GET(field, outbox, QUERY_DEV_CAP_RSVD_EQ_OFFSET);
 	dev_cap->reserved_eqs = 1 << (field & 0xf);
 	MLX4_GET(field, outbox, QUERY_DEV_CAP_MAX_EQ_OFFSET);
-	dev_cap->max_eqs = 1 << (field & 0x7);
+	dev_cap->max_eqs = 1 << (field & 0xf);
 	MLX4_GET(field, outbox, QUERY_DEV_CAP_RSVD_MTT_OFFSET);
 	dev_cap->reserved_mtts = 1 << (field >> 4);
 	MLX4_GET(field, outbox, QUERY_DEV_CAP_MAX_MRW_SZ_OFFSET);
@@ -617,9 +617,6 @@ int mlx4_QUERY_ADAPTER(struct mlx4_dev *dev, struct mlx4_adapter *adapter)
 	int err;
 
 #define QUERY_ADAPTER_OUT_SIZE             0x100
-#define QUERY_ADAPTER_VENDOR_ID_OFFSET     0x00
-#define QUERY_ADAPTER_DEVICE_ID_OFFSET     0x04
-#define QUERY_ADAPTER_REVISION_ID_OFFSET   0x08
 #define QUERY_ADAPTER_INTA_PIN_OFFSET      0x10
 #define QUERY_ADAPTER_VSD_OFFSET           0x20
 
@@ -633,9 +630,6 @@ int mlx4_QUERY_ADAPTER(struct mlx4_dev *dev, struct mlx4_adapter *adapter)
 	if (err)
 		goto out;
 
-	MLX4_GET(adapter->vendor_id, outbox,   QUERY_ADAPTER_VENDOR_ID_OFFSET);
-	MLX4_GET(adapter->device_id, outbox,   QUERY_ADAPTER_DEVICE_ID_OFFSET);
-	MLX4_GET(adapter->revision_id, outbox, QUERY_ADAPTER_REVISION_ID_OFFSET);
 	MLX4_GET(adapter->inta_pin, outbox,    QUERY_ADAPTER_INTA_PIN_OFFSET);
 
 	get_board_id(outbox + QUERY_ADAPTER_VSD_OFFSET / 4,
@@ -736,7 +730,7 @@ int mlx4_INIT_HCA(struct mlx4_dev *dev, struct mlx4_init_hca_param *param)
 	MLX4_PUT(inbox, (u8) (PAGE_SHIFT - 12), INIT_HCA_UAR_PAGE_SZ_OFFSET);
 	MLX4_PUT(inbox, param->log_uar_sz,      INIT_HCA_LOG_UAR_SZ_OFFSET);
 
-	err = mlx4_cmd(dev, mailbox->dma, 0, 0, MLX4_CMD_INIT_HCA, 1000);
+	err = mlx4_cmd(dev, mailbox->dma, 0, 0, MLX4_CMD_INIT_HCA, 10000);
 
 	if (err)
 		mlx4_err(dev, "INIT_HCA returns %d\n", err);

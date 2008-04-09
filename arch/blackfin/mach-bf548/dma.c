@@ -1,5 +1,5 @@
 /*
- * File:         arch/blackfin/mach-bf561/dma.c
+ * File:         arch/blackfin/mach-bf548/dma.c
  * Based on:
  * Author:
  *
@@ -7,7 +7,7 @@
  * Description:  This file contains the simple DMA Implementation for Blackfin
  *
  * Modified:
- *               Copyright 2004-2007 Analog Devices Inc.
+ *               Copyright 2004-2008 Analog Devices Inc.
  *
  * Bugs:         Enter bugs at http://blackfin.uclinux.org/
  *
@@ -26,6 +26,8 @@
  * to the Free Software Foundation, Inc.,
  * 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
+
+#include <linux/module.h>
 
 #include <asm/blackfin.h>
 #include <asm/dma.h>
@@ -64,6 +66,7 @@
 	(struct dma_register *) MDMA_D3_NEXT_DESC_PTR,
 	(struct dma_register *) MDMA_S3_NEXT_DESC_PTR,
 };
+EXPORT_SYMBOL(base_addr);
 
 int channel2irq(unsigned int channel)
 {

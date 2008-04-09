@@ -15,9 +15,12 @@
 #include "vp7045.h"
 
 /* debug */
-int dvb_usb_vp7045_debug;
+static int dvb_usb_vp7045_debug;
 module_param_named(debug,dvb_usb_vp7045_debug, int, 0644);
 MODULE_PARM_DESC(debug, "set debugging level (1=info,xfer=2,rc=4 (or-able))." DVB_USB_DEBUG_STATUS);
+#define deb_info(args...) dprintk(dvb_usb_vp7045_debug,0x01,args)
+#define deb_xfer(args...) dprintk(dvb_usb_vp7045_debug,0x02,args)
+#define deb_rc(args...)   dprintk(dvb_usb_vp7045_debug,0x04,args)
 
 int vp7045_usb_op(struct dvb_usb_device *d, u8 cmd, u8 *out, int outlen, u8 *in, int inlen, int msec)
 {
@@ -159,7 +162,7 @@ static int vp7045_rc_query(struct dvb_usb_device *d, u32 *event, int *state)
 		return 0;
 	}
 
-	for (i = 0; i < sizeof(vp7045_rc_keys)/sizeof(struct dvb_usb_rc_key); i++)
+	for (i = 0; i < ARRAY_SIZE(vp7045_rc_keys); i++)
 		if (vp7045_rc_keys[i].data == key) {
 			*state = REMOTE_KEY_PRESSED;
 			*event = vp7045_rc_keys[i].event;

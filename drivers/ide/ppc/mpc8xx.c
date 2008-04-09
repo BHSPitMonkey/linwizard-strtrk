@@ -1,6 +1,4 @@
 /*
- *  linux/drivers/ide/ppc/ide-m8xx.c
- *
  *  Copyright (C) 2000, 2001 Wolfgang Denk, wd@denx.de
  *  Modified for direct IDE interface
  *	by Thomas Lange, thomas@corelatus.com
@@ -19,7 +17,6 @@
 #include <linux/ptrace.h>
 #include <linux/slab.h>
 #include <linux/user.h>
-#include <linux/a.out.h>
 #include <linux/tty.h>
 #include <linux/major.h>
 #include <linux/interrupt.h>
@@ -45,7 +42,7 @@ static void print_funcid (int func);
 static int check_ide_device (unsigned long base);
 
 static void ide_interrupt_ack (void *dev);
-static void m8xx_ide_tuneproc(ide_drive_t *drive, u8 pio);
+static void m8xx_ide_set_pio_mode(ide_drive_t *drive, const u8 pio);
 
 typedef	struct ide_ioport_desc {
 	unsigned long	base_off;		/* Offset to PCMCIA memory	*/
@@ -314,11 +311,10 @@ m8xx_ide_init_hwif_ports(hw_regs_t *hw, unsigned long data_port,
 #endif	/* CONFIG_IDE_8xx_PCCARD */
 	}
 
-	/* register routine to tune PIO mode */
 	ide_hwifs[data_port].pio_mask = ATA_PIO4;
-	ide_hwifs[data_port].tuneproc = m8xx_ide_tuneproc;
+	ide_hwifs[data_port].set_pio_mode = m8xx_ide_set_pio_mode;
+	ide_hwifs[data_port].ack_intr = (ide_ack_intr_t *)ide_interrupt_ack;
 
-	hw->ack_intr = (ide_ack_intr_t *) ide_interrupt_ack;
 	/* Enable Harddisk Interrupt,
 	 * and make it edge sensitive
 	 */
@@ -401,11 +397,10 @@ void m8xx_ide_init_hwif_ports (hw_regs_t *hw,
 		*irq = ioport_dsc[data_port].irq;
 	}
 
-	/* register routine to tune PIO mode */
 	ide_hwifs[data_port].pio_mask = ATA_PIO4;
-	ide_hwifs[data_port].tuneproc = m8xx_ide_tuneproc;
+	ide_hwifs[data_port].set_pio_mode = m8xx_ide_set_pio_mode;
+	ide_hwifs[data_port].ack_intr = (ide_ack_intr_t *)ide_interrupt_ack;
 
-	hw->ack_intr = (ide_ack_intr_t *) ide_interrupt_ack;
 	/* Enable Harddisk Interrupt,
 	 * and make it edge sensitive
 	 */
@@ -427,24 +422,13 @@ void m8xx_ide_init_hwif_ports (hw_regs_t *hw,
 #define PCMCIA_SL(t) ((t==32) ? 0 : ((t & 0x1F)<<7)) /* Strobe Length	*/
 #endif
 
-
 /* Calculate PIO timings */
-static void
-m8xx_ide_tuneproc(ide_drive_t *drive, u8 pio)
+static void m8xx_ide_set_pio_mode(ide_drive_t *drive, const u8 pio)
 {
 #if defined(CONFIG_IDE_8xx_PCCARD) || defined(CONFIG_IDE_8xx_DIRECT)
 	volatile pcmconf8xx_t	*pcmp;
 	ulong timing, mask, reg;
-#endif
 
-	pio = ide_get_best_pio_mode(drive, pio, 4);
-
-#if 1
-	printk("%s[%d] %s: best PIO mode: %d\n",
-		__FILE__,__LINE__,__FUNCTION__, pio);
-#endif
-
-#if defined(CONFIG_IDE_8xx_PCCARD) || defined(CONFIG_IDE_8xx_DIRECT)
 	pcmp = (pcmconf8xx_t *)(&(((immap_t *)IMAP_ADDR)->im_pcmcia));
 
 	mask = ~(PCMCIA_SHT(0xFF) | PCMCIA_SST(0xFF) | PCMCIA_SL(0xFF));
@@ -851,3 +835,23 @@ void m8xx_ide_init(void)
 	ppc_ide_md.default_io_base      = m8xx_ide_default_io_base;
 	ppc_ide_md.ide_init_hwif        = m8xx_ide_init_hwif_ports;
 }
+
+static int __init mpc8xx_ide_probe(void)
+{
+	u8 idx[4] = { 0xff, 0xff, 0xff, 0xff };
+
+#ifdef IDE0_BASE_OFFSET
+	idx[0] = 0;
+#ifdef IDE1_BASE_OFFSET
+	idx[1] = 1;
+#endif
+#endif
+
+	ide_device_add(idx, NULL);
+
+	return 0;
+}
+
+module_init(mpc8xx_ide_probe);
+
+MODULE_LICENSE("GPL");

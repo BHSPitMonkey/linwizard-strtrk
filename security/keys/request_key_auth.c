@@ -127,6 +127,7 @@ static void request_key_auth_destroy(struct key *key)
 	}
 
 	key_put(rka->target_key);
+	kfree(rka->callout_info);
 	kfree(rka);
 
 } /* end request_key_auth_destroy() */
@@ -149,6 +150,12 @@ struct key *request_key_auth_new(struct key *target, const char *callout_info)
 	rka = kmalloc(sizeof(*rka), GFP_KERNEL);
 	if (!rka) {
 		kleave(" = -ENOMEM");
+		return ERR_PTR(-ENOMEM);
+	}
+	rka->callout_info = kmalloc(strlen(callout_info) + 1, GFP_KERNEL);
+	if (!rka->callout_info) {
+		kleave(" = -ENOMEM");
+		kfree(rka);
 		return ERR_PTR(-ENOMEM);
 	}
 
@@ -179,7 +186,7 @@ struct key *request_key_auth_new(struct key *target, const char *callout_info)
 	}
 
 	rka->target_key = key_get(target);
-	rka->callout_info = callout_info;
+	strcpy(rka->callout_info, callout_info);
 
 	/* allocate the auth key */
 	sprintf(desc, "%x", target->serial);
@@ -203,6 +210,7 @@ struct key *request_key_auth_new(struct key *target, const char *callout_info)
 
 auth_key_revoked:
 	up_read(&current->request_key_auth->sem);
+	kfree(rka->callout_info);
 	kfree(rka);
 	kleave("= -EKEYREVOKED");
 	return ERR_PTR(-EKEYREVOKED);
@@ -212,6 +220,7 @@ error_inst:
 	key_put(authkey);
 error_alloc:
 	key_put(rka->target_key);
+	kfree(rka->callout_info);
 	kfree(rka);
 	kleave("= %d", ret);
 	return ERR_PTR(ret);
@@ -252,7 +261,7 @@ struct key *key_get_instantiation_authkey(key_serial_t target_id)
 		current);
 
 	if (IS_ERR(authkey_ref)) {
-		authkey = ERR_PTR(PTR_ERR(authkey_ref));
+		authkey = ERR_CAST(authkey_ref);
 		goto error;
 	}
 

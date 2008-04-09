@@ -4,23 +4,14 @@
 /*
  * Userspace interface for /dev/kvm - kernel based virtual machine
  *
- * Note: this interface is considered experimental and may change without
- *       notice.
+ * Note: you must update KVM_API_VERSION if you change this interface.
  */
 
 #include <asm/types.h>
 #include <linux/ioctl.h>
+#include <asm/kvm.h>
 
 #define KVM_API_VERSION 12
-
-/*
- * Architectural interrupt line count, and the size of the bitmap needed
- * to hold them.
- */
-#define KVM_NR_INTERRUPTS 256
-#define KVM_IRQ_BITMAP_SIZE_BYTES    ((KVM_NR_INTERRUPTS + 7) / 8)
-#define KVM_IRQ_BITMAP_SIZE(type)    (KVM_IRQ_BITMAP_SIZE_BYTES / sizeof(type))
-
 
 /* for KVM_CREATE_MEMORY_REGION */
 struct kvm_memory_region {
@@ -30,30 +21,58 @@ struct kvm_memory_region {
 	__u64 memory_size; /* bytes */
 };
 
+/* for KVM_SET_USER_MEMORY_REGION */
+struct kvm_userspace_memory_region {
+	__u32 slot;
+	__u32 flags;
+	__u64 guest_phys_addr;
+	__u64 memory_size; /* bytes */
+	__u64 userspace_addr; /* start of the userspace allocated memory */
+};
+
 /* for kvm_memory_region::flags */
 #define KVM_MEM_LOG_DIRTY_PAGES  1UL
 
-struct kvm_memory_alias {
-	__u32 slot;  /* this has a different namespace than memory slots */
-	__u32 flags;
-	__u64 guest_phys_addr;
-	__u64 memory_size;
-	__u64 target_phys_addr;
+
+/* for KVM_IRQ_LINE */
+struct kvm_irq_level {
+	/*
+	 * ACPI gsi notion of irq.
+	 * For IA-64 (APIC model) IOAPIC0: irq 0-23; IOAPIC1: irq 24-47..
+	 * For X86 (standard AT mode) PIC0/1: irq 0-15. IOAPIC0: 0-23..
+	 */
+	__u32 irq;
+	__u32 level;
 };
 
-enum kvm_exit_reason {
-	KVM_EXIT_UNKNOWN          = 0,
-	KVM_EXIT_EXCEPTION        = 1,
-	KVM_EXIT_IO               = 2,
-	KVM_EXIT_HYPERCALL        = 3,
-	KVM_EXIT_DEBUG            = 4,
-	KVM_EXIT_HLT              = 5,
-	KVM_EXIT_MMIO             = 6,
-	KVM_EXIT_IRQ_WINDOW_OPEN  = 7,
-	KVM_EXIT_SHUTDOWN         = 8,
-	KVM_EXIT_FAIL_ENTRY       = 9,
-	KVM_EXIT_INTR             = 10,
+
+struct kvm_irqchip {
+	__u32 chip_id;
+	__u32 pad;
+        union {
+		char dummy[512];  /* reserving space */
+#ifdef CONFIG_X86
+		struct kvm_pic_state pic;
+#endif
+#if defined(CONFIG_X86) || defined(CONFIG_IA64)
+		struct kvm_ioapic_state ioapic;
+#endif
+	} chip;
 };
+
+#define KVM_EXIT_UNKNOWN          0
+#define KVM_EXIT_EXCEPTION        1
+#define KVM_EXIT_IO               2
+#define KVM_EXIT_HYPERCALL        3
+#define KVM_EXIT_DEBUG            4
+#define KVM_EXIT_HLT              5
+#define KVM_EXIT_MMIO             6
+#define KVM_EXIT_IRQ_WINDOW_OPEN  7
+#define KVM_EXIT_SHUTDOWN         8
+#define KVM_EXIT_FAIL_ENTRY       9
+#define KVM_EXIT_INTR             10
+#define KVM_EXIT_SET_TPR          11
+#define KVM_EXIT_TPR_ACCESS       12
 
 /* for KVM_RUN, returned by mmap(vcpu_fd, offset=0) */
 struct kvm_run {
@@ -106,85 +125,21 @@ struct kvm_run {
 		} mmio;
 		/* KVM_EXIT_HYPERCALL */
 		struct {
+			__u64 nr;
 			__u64 args[6];
 			__u64 ret;
 			__u32 longmode;
 			__u32 pad;
 		} hypercall;
+		/* KVM_EXIT_TPR_ACCESS */
+		struct {
+			__u64 rip;
+			__u32 is_write;
+			__u32 pad;
+		} tpr_access;
+		/* Fix the size of the union. */
+		char padding[256];
 	};
-};
-
-/* for KVM_GET_REGS and KVM_SET_REGS */
-struct kvm_regs {
-	/* out (KVM_GET_REGS) / in (KVM_SET_REGS) */
-	__u64 rax, rbx, rcx, rdx;
-	__u64 rsi, rdi, rsp, rbp;
-	__u64 r8,  r9,  r10, r11;
-	__u64 r12, r13, r14, r15;
-	__u64 rip, rflags;
-};
-
-/* for KVM_GET_FPU and KVM_SET_FPU */
-struct kvm_fpu {
-	__u8  fpr[8][16];
-	__u16 fcw;
-	__u16 fsw;
-	__u8  ftwx;  /* in fxsave format */
-	__u8  pad1;
-	__u16 last_opcode;
-	__u64 last_ip;
-	__u64 last_dp;
-	__u8  xmm[16][16];
-	__u32 mxcsr;
-	__u32 pad2;
-};
-
-struct kvm_segment {
-	__u64 base;
-	__u32 limit;
-	__u16 selector;
-	__u8  type;
-	__u8  present, dpl, db, s, l, g, avl;
-	__u8  unusable;
-	__u8  padding;
-};
-
-struct kvm_dtable {
-	__u64 base;
-	__u16 limit;
-	__u16 padding[3];
-};
-
-/* for KVM_GET_SREGS and KVM_SET_SREGS */
-struct kvm_sregs {
-	/* out (KVM_GET_SREGS) / in (KVM_SET_SREGS) */
-	struct kvm_segment cs, ds, es, fs, gs, ss;
-	struct kvm_segment tr, ldt;
-	struct kvm_dtable gdt, idt;
-	__u64 cr0, cr2, cr3, cr4, cr8;
-	__u64 efer;
-	__u64 apic_base;
-	__u64 interrupt_bitmap[KVM_IRQ_BITMAP_SIZE(__u64)];
-};
-
-struct kvm_msr_entry {
-	__u32 index;
-	__u32 reserved;
-	__u64 data;
-};
-
-/* for KVM_GET_MSRS and KVM_SET_MSRS */
-struct kvm_msrs {
-	__u32 nmsrs; /* number of msrs in entries */
-	__u32 pad;
-
-	struct kvm_msr_entry entries[0];
-};
-
-/* for KVM_GET_MSR_INDEX_LIST */
-struct kvm_msr_list {
-	__u32 nmsrs; /* number of msrs in entries */
-	__u32 indices[0];
 };
 
 /* for KVM_TRANSLATE */
@@ -231,26 +186,22 @@ struct kvm_dirty_log {
 	};
 };
 
-struct kvm_cpuid_entry {
-	__u32 function;
-	__u32 eax;
-	__u32 ebx;
-	__u32 ecx;
-	__u32 edx;
-	__u32 padding;
-};
-
-/* for KVM_SET_CPUID */
-struct kvm_cpuid {
-	__u32 nent;
-	__u32 padding;
-	struct kvm_cpuid_entry entries[0];
-};
-
 /* for KVM_SET_SIGNAL_MASK */
 struct kvm_signal_mask {
 	__u32 len;
 	__u8  sigset[0];
+};
+
+/* for KVM_TPR_ACCESS_REPORTING */
+struct kvm_tpr_access_ctl {
+	__u32 enabled;
+	__u32 flags;
+	__u32 reserved[8];
+};
+
+/* for KVM_SET_VAPIC_ADDR */
+struct kvm_vapic_addr {
+	__u64 vapic_addr;
 };
 
 #define KVMIO 0xAE
@@ -270,11 +221,28 @@ struct kvm_signal_mask {
  * Get size for mmap(vcpu_fd)
  */
 #define KVM_GET_VCPU_MMAP_SIZE    _IO(KVMIO,   0x04) /* in bytes */
+#define KVM_GET_SUPPORTED_CPUID   _IOWR(KVMIO, 0x05, struct kvm_cpuid2)
+
+/*
+ * Extension capability list.
+ */
+#define KVM_CAP_IRQCHIP	  0
+#define KVM_CAP_HLT	  1
+#define KVM_CAP_MMU_SHADOW_CACHE_CONTROL 2
+#define KVM_CAP_USER_MEMORY 3
+#define KVM_CAP_SET_TSS_ADDR 4
+#define KVM_CAP_VAPIC 6
+#define KVM_CAP_EXT_CPUID 7
 
 /*
  * ioctls for VM fds
  */
 #define KVM_SET_MEMORY_REGION     _IOW(KVMIO, 0x40, struct kvm_memory_region)
+#define KVM_SET_NR_MMU_PAGES      _IO(KVMIO, 0x44)
+#define KVM_GET_NR_MMU_PAGES      _IO(KVMIO, 0x45)
+#define KVM_SET_USER_MEMORY_REGION _IOW(KVMIO, 0x46,\
+					struct kvm_userspace_memory_region)
+#define KVM_SET_TSS_ADDR          _IO(KVMIO, 0x47)
 /*
  * KVM_CREATE_VCPU receives as a parameter the vcpu slot, and returns
  * a vcpu fd.
@@ -282,6 +250,11 @@ struct kvm_signal_mask {
 #define KVM_CREATE_VCPU           _IO(KVMIO,  0x41)
 #define KVM_GET_DIRTY_LOG         _IOW(KVMIO, 0x42, struct kvm_dirty_log)
 #define KVM_SET_MEMORY_ALIAS      _IOW(KVMIO, 0x43, struct kvm_memory_alias)
+/* Device model IOC */
+#define KVM_CREATE_IRQCHIP	  _IO(KVMIO,  0x60)
+#define KVM_IRQ_LINE		  _IOW(KVMIO, 0x61, struct kvm_irq_level)
+#define KVM_GET_IRQCHIP		  _IOWR(KVMIO, 0x62, struct kvm_irqchip)
+#define KVM_SET_IRQCHIP		  _IOR(KVMIO,  0x63, struct kvm_irqchip)
 
 /*
  * ioctls for vcpu fds
@@ -300,5 +273,13 @@ struct kvm_signal_mask {
 #define KVM_SET_SIGNAL_MASK       _IOW(KVMIO,  0x8b, struct kvm_signal_mask)
 #define KVM_GET_FPU               _IOR(KVMIO,  0x8c, struct kvm_fpu)
 #define KVM_SET_FPU               _IOW(KVMIO,  0x8d, struct kvm_fpu)
+#define KVM_GET_LAPIC             _IOR(KVMIO,  0x8e, struct kvm_lapic_state)
+#define KVM_SET_LAPIC             _IOW(KVMIO,  0x8f, struct kvm_lapic_state)
+#define KVM_SET_CPUID2            _IOW(KVMIO,  0x90, struct kvm_cpuid2)
+#define KVM_GET_CPUID2            _IOWR(KVMIO, 0x91, struct kvm_cpuid2)
+/* Available with KVM_CAP_VAPIC */
+#define KVM_TPR_ACCESS_REPORTING  _IOWR(KVMIO,  0x92, struct kvm_tpr_access_ctl)
+/* Available with KVM_CAP_VAPIC */
+#define KVM_SET_VAPIC_ADDR        _IOW(KVMIO,  0x93, struct kvm_vapic_addr)
 
 #endif

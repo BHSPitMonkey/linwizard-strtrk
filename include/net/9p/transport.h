@@ -4,7 +4,7 @@
  * Transport Definition
  *
  *  Copyright (C) 2005 by Latchesar Ionkov <lucho@ionkov.net>
- *  Copyright (C) 2004 by Eric Van Hensbergen <ericvh@gmail.com>
+ *  Copyright (C) 2004-2008 by Eric Van Hensbergen <ericvh@gmail.com>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License version 2
@@ -26,24 +26,32 @@
 #ifndef NET_9P_TRANSPORT_H
 #define NET_9P_TRANSPORT_H
 
-enum p9_transport_status {
+enum p9_trans_status {
 	Connected,
 	Disconnected,
 	Hung,
 };
 
-struct p9_transport {
-	enum p9_transport_status status;
+struct p9_trans {
+	enum p9_trans_status status;
+	int msize;
+	unsigned char extended;
 	void *priv;
-
-	int (*write) (struct p9_transport *, void *, int);
-	int (*read) (struct p9_transport *, void *, int);
-	void (*close) (struct p9_transport *);
-	unsigned int (*poll)(struct p9_transport *, struct poll_table_struct *);
+	void (*close) (struct p9_trans *);
+	int (*rpc) (struct p9_trans *t, struct p9_fcall *tc,
+							struct p9_fcall **rc);
 };
 
-struct p9_transport *p9_trans_create_tcp(const char *addr, int port);
-struct p9_transport *p9_trans_create_unix(const char *addr);
-struct p9_transport *p9_trans_create_fd(int rfd, int wfd);
+struct p9_trans_module {
+	struct list_head list;
+	char *name;		/* name of transport */
+	int maxsize;		/* max message size of transport */
+	int def;		/* this transport should be default */
+	struct p9_trans * (*create)(const char *, char *, int, unsigned char);
+};
+
+void v9fs_register_trans(struct p9_trans_module *m);
+struct p9_trans_module *v9fs_match_trans(const substring_t *name);
+struct p9_trans_module *v9fs_default_trans(void);
 
 #endif /* NET_9P_TRANSPORT_H */

@@ -31,15 +31,13 @@
 #include <linux/mm.h>
 #include <linux/sched.h>
 #include <linux/bootmem.h>
-#include <asm/addrspace.h>
-#include <asm/bootinfo.h>
 #include <linux/string.h>
 #include <linux/kernel.h>
 
-int prom_argc;
-char **prom_argv, **prom_envp;
-extern void  __init prom_init_cmdline(void);
-extern char *prom_getenv(char *envname);
+#include <asm/addrspace.h>
+#include <asm/bootinfo.h>
+
+#include <prom.h>
 
 const char *get_system_type(void)
 {
@@ -58,19 +56,6 @@ void __init prom_init(void)
 	prom_argc = fw_arg0;
 	prom_argv = (char **) fw_arg1;
 	prom_envp = (char **) fw_arg2;
-
-	mips_machgroup = MACH_GROUP_ALCHEMY;
-
-	/* Set the platform # */
-#if	defined (CONFIG_MIPS_DB1550)
-	mips_machtype = MACH_DB1550;
-#elif	defined (CONFIG_MIPS_DB1500)
-	mips_machtype = MACH_DB1500;
-#elif	defined (CONFIG_MIPS_DB1100)
-	mips_machtype = MACH_DB1100;
-#else
-	mips_machtype = MACH_DB1000;
-#endif
 
 	prom_init_cmdline();
 

@@ -61,9 +61,9 @@ module_param_named(domain, ap_domain_index, int, 0000);
 MODULE_PARM_DESC(domain, "domain index for ap devices");
 EXPORT_SYMBOL(ap_domain_index);
 
-static int ap_thread_flag = 1;
+static int ap_thread_flag = 0;
 module_param_named(poll_thread, ap_thread_flag, int, 0000);
-MODULE_PARM_DESC(poll_thread, "Turn on/off poll thread, default is 1 (on).");
+MODULE_PARM_DESC(poll_thread, "Turn on/off poll thread, default is 0 (off).");
 
 static struct device *ap_root_device = NULL;
 static DEFINE_SPINLOCK(ap_device_lock);
@@ -458,28 +458,22 @@ static int ap_bus_match(struct device *dev, struct device_driver *drv)
  * uevent function for AP devices. It sets up a single environment
  * variable DEV_TYPE which contains the hardware device type.
  */
-static int ap_uevent (struct device *dev, char **envp, int num_envp,
-		       char *buffer, int buffer_size)
+static int ap_uevent (struct device *dev, struct kobj_uevent_env *env)
 {
 	struct ap_device *ap_dev = to_ap_dev(dev);
-	int retval = 0, length = 0, i = 0;
+	int retval = 0;
 
 	if (!ap_dev)
 		return -ENODEV;
 
 	/* Set up DEV_TYPE environment variable. */
-	retval = add_uevent_var(envp, num_envp, &i,
-				buffer, buffer_size, &length,
-				"DEV_TYPE=%04X", ap_dev->device_type);
+	retval = add_uevent_var(env, "DEV_TYPE=%04X", ap_dev->device_type);
 	if (retval)
 		return retval;
 
 	/* Add MODALIAS= */
-	retval = add_uevent_var(envp, num_envp, &i,
-				buffer, buffer_size, &length,
-				"MODALIAS=ap:t%02X", ap_dev->device_type);
+	retval = add_uevent_var(env, "MODALIAS=ap:t%02X", ap_dev->device_type);
 
-	envp[i] = NULL;
 	return retval;
 }
 
@@ -496,10 +490,12 @@ static int ap_device_probe(struct device *dev)
 	int rc;
 
 	ap_dev->drv = ap_drv;
-	spin_lock_bh(&ap_device_lock);
-	list_add(&ap_dev->list, &ap_device_list);
-	spin_unlock_bh(&ap_device_lock);
 	rc = ap_drv->probe ? ap_drv->probe(ap_dev) : -ENODEV;
+	if (!rc) {
+		spin_lock_bh(&ap_device_lock);
+		list_add(&ap_dev->list, &ap_device_list);
+		spin_unlock_bh(&ap_device_lock);
+	}
 	return rc;
 }
 
@@ -538,11 +534,11 @@ static int ap_device_remove(struct device *dev)
 
 	ap_flush_queue(ap_dev);
 	del_timer_sync(&ap_dev->timeout);
-	if (ap_drv->remove)
-		ap_drv->remove(ap_dev);
 	spin_lock_bh(&ap_device_lock);
 	list_del_init(&ap_dev->list);
 	spin_unlock_bh(&ap_device_lock);
+	if (ap_drv->remove)
+		ap_drv->remove(ap_dev);
 	spin_lock_bh(&ap_dev->lock);
 	atomic_sub(ap_dev->queue_count, &ap_poll_requests);
 	spin_unlock_bh(&ap_dev->lock);
@@ -1231,8 +1227,9 @@ static void ap_reset_domain(void)
 {
 	int i;
 
-	for (i = 0; i < AP_DEVICES; i++)
-		ap_reset_queue(AP_MKQID(i, ap_domain_index));
+	if (ap_domain_index != -1)
+		for (i = 0; i < AP_DEVICES; i++)
+			ap_reset_queue(AP_MKQID(i, ap_domain_index));
 }
 
 static void ap_reset_all(void)

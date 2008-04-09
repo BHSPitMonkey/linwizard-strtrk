@@ -15,6 +15,7 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/interrupt.h>
+#include <linux/sysdev.h>
 
 #include <asm/hardware.h>
 #include <asm/irq.h>
@@ -38,33 +39,11 @@ static void pxa_unmask_low_irq(unsigned int irq)
 	ICMR |= (1 << irq);
 }
 
-static int pxa_set_wake(unsigned int irq, unsigned int on)
-{
-	u32	mask;
-
-	switch (irq) {
-	case IRQ_RTCAlrm:
-		mask = PWER_RTC;
-		break;
-#ifdef CONFIG_PXA27x
-	/* REVISIT can handle USBH1, USBH2, USB, MSL, USIM, ... */
-#endif
-	default:
-		return -EINVAL;
-	}
-	if (on)
-		PWER |= mask;
-	else
-		PWER &= ~mask;
-	return 0;
-}
-
 static struct irq_chip pxa_internal_chip_low = {
 	.name		= "SC",
 	.ack		= pxa_mask_low_irq,
 	.mask		= pxa_mask_low_irq,
 	.unmask		= pxa_unmask_low_irq,
-	.set_wake	= pxa_set_wake,
 };
 
 void __init pxa_init_irq_low(void)
@@ -87,7 +66,7 @@ void __init pxa_init_irq_low(void)
 	}
 }
 
-#ifdef CONFIG_PXA27x
+#if defined(CONFIG_PXA27x) || defined(CONFIG_PXA3xx)
 
 /*
  * This is for the second set of internal IRQs as found on the PXA27x.
@@ -125,26 +104,6 @@ void __init pxa_init_irq_high(void)
 }
 #endif
 
-/* Note that if an input/irq line ever gets changed to an output during
- * suspend, the relevant PWER, PRER, and PFER bits should be cleared.
- */
-#ifdef CONFIG_PXA27x
-
-/* PXA27x:  Various gpios can issue wakeup events.  This logic only
- * handles the simple cases, not the WEMUX2 and WEMUX3 options
- */
-#define PXA27x_GPIO_NOWAKE_MASK \
-	((1 << 8) | (1 << 7) | (1 << 6) | (1 << 5) | (1 << 2))
-#define	WAKEMASK(gpio) \
-	(((gpio) <= 15) \
-		? ((1 << (gpio)) & ~PXA27x_GPIO_NOWAKE_MASK) \
-		: ((gpio == 35) ? (1 << 24) : 0))
-#else
-
-/* pxa 210, 250, 255, 26x:  gpios 0..15 can issue wakeups */
-#define	WAKEMASK(gpio) (((gpio) <= 15) ? (1 << (gpio)) : 0)
-#endif
-
 /*
  * PXA GPIO edge detection for IRQs:
  * IRQs are generated on Falling-Edge, Rising-Edge, or both.
@@ -158,11 +117,9 @@ static long GPIO_IRQ_mask[4];
 static int pxa_gpio_irq_type(unsigned int irq, unsigned int type)
 {
 	int gpio, idx;
-	u32 mask;
 
 	gpio = IRQ_TO_GPIO(irq);
 	idx = gpio >> 5;
-	mask = WAKEMASK(gpio);
 
 	if (type == IRQT_PROBE) {
 	    /* Don't mess with enabled GPIOs using preconfigured edges or
@@ -182,19 +139,15 @@ static int pxa_gpio_irq_type(unsigned int irq, unsigned int type)
 	if (type & __IRQT_RISEDGE) {
 		/* printk("rising "); */
 		__set_bit (gpio, GPIO_IRQ_rising_edge);
-		PRER |= mask;
 	} else {
 		__clear_bit (gpio, GPIO_IRQ_rising_edge);
-		PRER &= ~mask;
 	}
 
 	if (type & __IRQT_FALEDGE) {
 		/* printk("falling "); */
 		__set_bit (gpio, GPIO_IRQ_falling_edge);
-		PFER |= mask;
 	} else {
 		__clear_bit (gpio, GPIO_IRQ_falling_edge);
-		PFER &= ~mask;
 	}
 
 	/* printk("edges\n"); */
@@ -213,29 +166,12 @@ static void pxa_ack_low_gpio(unsigned int irq)
 	GEDR0 = (1 << (irq - IRQ_GPIO0));
 }
 
-static int pxa_set_gpio_wake(unsigned int irq, unsigned int on)
-{
-	int	gpio = IRQ_TO_GPIO(irq);
-	u32	mask = WAKEMASK(gpio);
-
-	if (!mask)
-		return -EINVAL;
-
-	if (on)
-		PWER |= mask;
-	else
-		PWER &= ~mask;
-	return 0;
-}
-
-
 static struct irq_chip pxa_low_gpio_chip = {
 	.name		= "GPIO-l",
 	.ack		= pxa_ack_low_gpio,
 	.mask		= pxa_mask_low_irq,
 	.unmask		= pxa_unmask_low_irq,
 	.set_type	= pxa_gpio_irq_type,
-	.set_wake	= pxa_set_gpio_wake,
 };
 
 /*
@@ -342,12 +278,13 @@ static struct irq_chip pxa_muxed_gpio_chip = {
 	.mask		= pxa_mask_muxed_gpio,
 	.unmask		= pxa_unmask_muxed_gpio,
 	.set_type	= pxa_gpio_irq_type,
-	.set_wake	= pxa_set_gpio_wake,
 };
 
 void __init pxa_init_irq_gpio(int gpio_nr)
 {
 	int irq, i;
+
+	pxa_last_gpio = gpio_nr - 1;
 
 	/* clear all GPIO edge detects */
 	for (i = 0; i < gpio_nr; i += 32) {
@@ -374,4 +311,77 @@ void __init pxa_init_irq_gpio(int gpio_nr)
 	/* Install handler for GPIO>=2 edge detect interrupts */
 	set_irq_chip(IRQ_GPIO_2_x, &pxa_internal_chip_low);
 	set_irq_chained_handler(IRQ_GPIO_2_x, pxa_gpio_demux_handler);
+
+	pxa_init_gpio(gpio_nr);
 }
+
+void __init pxa_init_irq_set_wake(int (*set_wake)(unsigned int, unsigned int))
+{
+	pxa_internal_chip_low.set_wake = set_wake;
+#ifdef CONFIG_PXA27x
+	pxa_internal_chip_high.set_wake = set_wake;
+#endif
+	pxa_low_gpio_chip.set_wake = set_wake;
+	pxa_muxed_gpio_chip.set_wake = set_wake;
+}
+
+#ifdef CONFIG_PM
+static unsigned long saved_icmr[2];
+
+static int pxa_irq_suspend(struct sys_device *dev, pm_message_t state)
+{
+	switch (dev->id) {
+	case 0:
+		saved_icmr[0] = ICMR;
+		ICMR = 0;
+		break;
+#if defined(CONFIG_PXA27x) || defined(CONFIG_PXA3xx)
+	case 1:
+		saved_icmr[1] = ICMR2;
+		ICMR2 = 0;
+		break;
+#endif
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int pxa_irq_resume(struct sys_device *dev)
+{
+	switch (dev->id) {
+	case 0:
+		ICMR = saved_icmr[0];
+		ICLR = 0;
+		ICCR = 1;
+		break;
+#if defined(CONFIG_PXA27x) || defined(CONFIG_PXA3xx)
+	case 1:
+		ICMR2 = saved_icmr[1];
+		ICLR2 = 0;
+		break;
+#endif
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+#else
+#define pxa_irq_suspend		NULL
+#define pxa_irq_resume		NULL
+#endif
+
+struct sysdev_class pxa_irq_sysclass = {
+	.name		= "irq",
+	.suspend	= pxa_irq_suspend,
+	.resume		= pxa_irq_resume,
+};
+
+static int __init pxa_irq_init(void)
+{
+	return sysdev_class_register(&pxa_irq_sysclass);
+}
+
+core_initcall(pxa_irq_init);

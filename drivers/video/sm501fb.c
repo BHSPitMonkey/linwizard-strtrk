@@ -28,6 +28,7 @@
 #include <linux/wait.h>
 #include <linux/platform_device.h>
 #include <linux/clk.h>
+#include <linux/console.h>
 
 #include <asm/io.h>
 #include <asm/uaccess.h>
@@ -47,7 +48,7 @@ enum sm501_controller {
 	HEAD_PANEL	= 1,
 };
 
-/* SM501 memory adress */
+/* SM501 memory address */
 struct sm501_mem {
 	unsigned long	 size;
 	unsigned long	 sm_addr;
@@ -61,6 +62,8 @@ struct sm501fb_info {
 	struct resource		*fbmem_res;	/* framebuffer resource */
 	struct resource		*regs_res;	/* registers resource */
 	struct sm501_platdata_fb *pdata;	/* our platform data */
+
+	unsigned long		 pm_crt_ctrl;	/* pm: crt ctrl save */
 
 	int			 irq;
 	int			 swap_endian;	/* set to swap rgb=>bgr */
@@ -234,12 +237,14 @@ static int sm501fb_check_var(struct fb_var_screeninfo *var,
 
 	/* check we can fit these values into the registers */
 
-	if (var->hsync_len > 255 || var->vsync_len > 255)
+	if (var->hsync_len > 255 || var->vsync_len > 63)
 		return -EINVAL;
 
-	if ((var->xres + var->right_margin) >= 4096)
+	/* hdisplay end and hsync start */
+	if ((var->xres + var->right_margin) > 4096)
 		return -EINVAL;
 
+	/* vdisplay end and vsync start */
 	if ((var->yres + var->lower_margin) > 2048)
 		return -EINVAL;
 
@@ -278,19 +283,21 @@ static int sm501fb_check_var(struct fb_var_screeninfo *var,
 		var->blue.length	= var->bits_per_pixel;
 		var->blue.offset	= 0;
 		var->transp.length	= 0;
+		var->transp.offset	= 0;
 
 		break;
 
 	case 16:
 		if (sm->pdata->flags & SM501_FBPD_SWAP_FB_ENDIAN) {
-			var->red.offset		= 11;
-			var->green.offset	= 5;
-			var->blue.offset	= 0;
-		} else {
 			var->blue.offset	= 11;
 			var->green.offset	= 5;
 			var->red.offset		= 0;
+		} else {
+			var->red.offset		= 11;
+			var->green.offset	= 5;
+			var->blue.offset	= 0;
 		}
+		var->transp.offset	= 0;
 
 		var->red.length		= 5;
 		var->green.length	= 6;
@@ -394,7 +401,7 @@ static int sm501fb_set_par_common(struct fb_info *info,
 		break;
 
 	case 16:
-		info->fix.visual = FB_VISUAL_DIRECTCOLOR;
+		info->fix.visual = FB_VISUAL_TRUECOLOR;
 		break;
 
 	case 32:
@@ -610,6 +617,7 @@ static int sm501fb_set_par_crt(struct fb_info *info)
 
 	case 16:
 		control |= SM501_DC_CRT_CONTROL_16BPP;
+		sm501fb_setup_gamma(fbi, SM501_DC_CRT_PALETTE);
 		break;
 
 	case 32:
@@ -638,6 +646,7 @@ static void sm501fb_panel_power(struct sm501fb_info *fbi, int to)
 {
 	unsigned long control;
 	void __iomem *ctrl_reg = fbi->regs + SM501_DC_PANEL_CONTROL;
+	struct sm501_platdata_fbsub *pd = fbi->pdata->fb_pnl;
 
 	control = readl(ctrl_reg);
 
@@ -654,26 +663,34 @@ static void sm501fb_panel_power(struct sm501fb_info *fbi, int to)
 		sm501fb_sync_regs(fbi);
 		mdelay(10);
 
-		control |= SM501_DC_PANEL_CONTROL_BIAS;	/* VBIASEN */
-		writel(control, ctrl_reg);
-		sm501fb_sync_regs(fbi);
-		mdelay(10);
+		if (pd->flags & SM501FB_FLAG_PANEL_USE_VBIASEN) {
+			control |= SM501_DC_PANEL_CONTROL_BIAS;	/* VBIASEN */
+			writel(control, ctrl_reg);
+			sm501fb_sync_regs(fbi);
+			mdelay(10);
+		}
 
-		control |= SM501_DC_PANEL_CONTROL_FPEN;
-		writel(control, ctrl_reg);
-
+		if (pd->flags & SM501FB_FLAG_PANEL_USE_FPEN) {
+			control |= SM501_DC_PANEL_CONTROL_FPEN;
+			writel(control, ctrl_reg);
+			sm501fb_sync_regs(fbi);
+			mdelay(10);
+		}
 	} else if (!to && (control & SM501_DC_PANEL_CONTROL_VDD) != 0) {
 		/* disable panel power */
+		if (pd->flags & SM501FB_FLAG_PANEL_USE_FPEN) {
+			control &= ~SM501_DC_PANEL_CONTROL_FPEN;
+			writel(control, ctrl_reg);
+			sm501fb_sync_regs(fbi);
+			mdelay(10);
+		}
 
-		control &= ~SM501_DC_PANEL_CONTROL_FPEN;
-		writel(control, ctrl_reg);
-		sm501fb_sync_regs(fbi);
-		mdelay(10);
-
-		control &= ~SM501_DC_PANEL_CONTROL_BIAS;
-		writel(control, ctrl_reg);
-		sm501fb_sync_regs(fbi);
-		mdelay(10);
+		if (pd->flags & SM501FB_FLAG_PANEL_USE_VBIASEN) {
+			control &= ~SM501_DC_PANEL_CONTROL_BIAS;
+			writel(control, ctrl_reg);
+			sm501fb_sync_regs(fbi);
+			mdelay(10);
+		}
 
 		control &= ~SM501_DC_PANEL_CONTROL_DATA;
 		writel(control, ctrl_reg);
@@ -738,6 +755,7 @@ static int sm501fb_set_par_pnl(struct fb_info *info)
 
 	case 16:
 		control |= SM501_DC_PANEL_CONTROL_16BPP;
+		sm501fb_setup_gamma(fbi, SM501_DC_PANEL_PALETTE);
 		break;
 
 	case 32:
@@ -773,6 +791,11 @@ static int sm501fb_set_par_pnl(struct fb_info *info)
 
 	writel(control, fbi->regs + SM501_DC_PANEL_CONTROL);
 	sm501fb_sync_regs(fbi);
+
+	/* ensure the panel interface is not tristated at this point */
+
+	sm501_modify_reg(fbi->dev->parent, SM501_SYSTEM_CONTROL,
+			 0, SM501_SYSCTRL_PANEL_TRISTATE);
 
 	/* power the panel up */
 	sm501fb_panel_power(fbi, 1);
@@ -1259,6 +1282,7 @@ static int sm501fb_start(struct sm501fb_info *info,
 {
 	struct resource	*res;
 	struct device *dev;
+	int k;
 	int ret;
 
 	info->dev = dev = &pdev->dev;
@@ -1319,6 +1343,13 @@ static int sm501fb_start(struct sm501fb_info *info,
 	}
 
 	info->fbmem_len = (res->end - res->start)+1;
+
+	/* clear framebuffer memory - avoids garbage data on unused fb */
+	memset(info->fbmem, 0, info->fbmem_len);
+
+	/* clear palette ram - undefined at power on */
+	for (k = 0; k < (256 * 3); k++)
+		writel(0, info->regs + SM501_DC_PANEL_PALETTE + (k * 4));
 
 	/* enable display controller */
 	sm501_unit_power(dev->parent, SM501_GATE_DISPLAY, 1);
@@ -1673,6 +1704,15 @@ static int sm501fb_suspend_fb(struct sm501fb_info *info,
 	if (par->screen.size == 0)
 		return 0;
 
+	/* blank the relevant interface to ensure unit power minimised */
+	(par->ops.fb_blank)(FB_BLANK_POWERDOWN, fbi);
+
+	/* tell console/fb driver we are suspending */
+
+	acquire_console_sem();
+	fb_set_suspend(fbi, 1);
+	release_console_sem();
+
 	/* backup copies in case chip is powered down over suspend */
 
 	par->store_fb = vmalloc(par->screen.size);
@@ -1687,19 +1727,19 @@ static int sm501fb_suspend_fb(struct sm501fb_info *info,
 		goto err_nocursor;
 	}
 
+	dev_dbg(info->dev, "suspending screen to %p\n", par->store_fb);
+	dev_dbg(info->dev, "suspending cursor to %p\n", par->store_cursor);
+
 	memcpy_fromio(par->store_fb, par->screen.k_addr, par->screen.size);
 	memcpy_fromio(par->store_cursor, par->cursor.k_addr, par->cursor.size);
-
-	/* blank the relevant interface to ensure unit power minimised */
-	(par->ops.fb_blank)(FB_BLANK_POWERDOWN, fbi);
 
 	return 0;
 
  err_nocursor:
 	vfree(par->store_fb);
+	par->store_fb = NULL;
 
 	return -ENOMEM;
-
 }
 
 static void sm501fb_resume_fb(struct sm501fb_info *info,
@@ -1717,8 +1757,20 @@ static void sm501fb_resume_fb(struct sm501fb_info *info,
 
 	/* restore the data */
 
-	memcpy_toio(par->screen.k_addr, par->store_fb, par->screen.size);
-	memcpy_toio(par->cursor.k_addr, par->store_cursor, par->cursor.size);
+	dev_dbg(info->dev, "restoring screen from %p\n", par->store_fb);
+	dev_dbg(info->dev, "restoring cursor from %p\n", par->store_cursor);
+
+	if (par->store_fb)
+		memcpy_toio(par->screen.k_addr, par->store_fb,
+			    par->screen.size);
+
+	if (par->store_cursor)
+		memcpy_toio(par->cursor.k_addr, par->store_cursor,
+			    par->cursor.size);
+
+	acquire_console_sem();
+	fb_set_suspend(fbi, 0);
+	release_console_sem();
 
 	vfree(par->store_fb);
 	vfree(par->store_cursor);
@@ -1731,6 +1783,9 @@ static int sm501fb_suspend(struct platform_device *pdev, pm_message_t state)
 {
 	struct sm501fb_info *info = platform_get_drvdata(pdev);
 
+	/* store crt control to resume with */
+	info->pm_crt_ctrl = readl(info->regs + SM501_DC_CRT_CONTROL);
+
 	sm501fb_suspend_fb(info, HEAD_CRT);
 	sm501fb_suspend_fb(info, HEAD_PANEL);
 
@@ -1740,11 +1795,23 @@ static int sm501fb_suspend(struct platform_device *pdev, pm_message_t state)
 	return 0;
 }
 
+#define SM501_CRT_CTRL_SAVE (SM501_DC_CRT_CONTROL_TVP |        \
+			     SM501_DC_CRT_CONTROL_SEL)
+
+
 static int sm501fb_resume(struct platform_device *pdev)
 {
 	struct sm501fb_info *info = platform_get_drvdata(pdev);
+	unsigned long crt_ctrl;
 
 	sm501_unit_power(info->dev->parent, SM501_GATE_DISPLAY, 1);
+
+	/* restore the items we want to be saved for crt control */
+
+	crt_ctrl = readl(info->regs + SM501_DC_CRT_CONTROL);
+	crt_ctrl &= ~SM501_CRT_CTRL_SAVE;
+	crt_ctrl |= info->pm_crt_ctrl & SM501_CRT_CTRL_SAVE;
+	writel(crt_ctrl, info->regs + SM501_DC_CRT_CONTROL);
 
 	sm501fb_resume_fb(info, HEAD_CRT);
 	sm501fb_resume_fb(info, HEAD_PANEL);

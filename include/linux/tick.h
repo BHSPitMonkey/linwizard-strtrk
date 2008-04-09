@@ -39,7 +39,10 @@ enum tick_nohz_mode {
  * @idle_calls:		Total number of idle calls
  * @idle_sleeps:	Number of idle calls, where the sched tick was stopped
  * @idle_entrytime:	Time when the idle call was entered
+ * @idle_waketime:	Time when the idle was interrupted
+ * @idle_exittime:	Time when the idle state was left
  * @idle_sleeptime:	Sum of the time slept in idle with sched tick stopped
+ * @sleep_length:	Duration of the current idle sleep
  */
 struct tick_sched {
 	struct hrtimer			sched_timer;
@@ -50,8 +53,13 @@ struct tick_sched {
 	unsigned long			idle_jiffies;
 	unsigned long			idle_calls;
 	unsigned long			idle_sleeps;
+	int				idle_active;
 	ktime_t				idle_entrytime;
+	ktime_t				idle_waketime;
+	ktime_t				idle_exittime;
 	ktime_t				idle_sleeptime;
+	ktime_t				idle_lastupdate;
+	ktime_t				sleep_length;
 	unsigned long			last_jiffies;
 	unsigned long			next_jiffies;
 	ktime_t				idle_expires;
@@ -100,10 +108,21 @@ static inline int tick_check_oneshot_change(int allow_nohz) { return 0; }
 extern void tick_nohz_stop_sched_tick(void);
 extern void tick_nohz_restart_sched_tick(void);
 extern void tick_nohz_update_jiffies(void);
+extern ktime_t tick_nohz_get_sleep_length(void);
+extern void tick_nohz_stop_idle(int cpu);
+extern u64 get_cpu_idle_time_us(int cpu, u64 *last_update_time);
 # else
 static inline void tick_nohz_stop_sched_tick(void) { }
 static inline void tick_nohz_restart_sched_tick(void) { }
 static inline void tick_nohz_update_jiffies(void) { }
+static inline ktime_t tick_nohz_get_sleep_length(void)
+{
+	ktime_t len = { .tv64 = NSEC_PER_SEC/HZ };
+
+	return len;
+}
+static inline void tick_nohz_stop_idle(int cpu) { }
+static inline u64 get_cpu_idle_time_us(int cpu, u64 *unused) { return 0; }
 # endif /* !NO_HZ */
 
 #endif

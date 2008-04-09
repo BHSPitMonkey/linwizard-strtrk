@@ -4,7 +4,7 @@
  *  Copyright (c) 1999-2001 Vojtech Pavlik
  *
  *  Based on the work of:
- *	Andree Borrmann		Mats Sjövall
+ *	Andree Borrmann		Mats SjÃ¶vall
  */
 
 /*
@@ -33,7 +33,6 @@
 
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/moduleparam.h>
 #include <linux/delay.h>
 #include <linux/init.h>
 #include <linux/parport.h>
@@ -631,7 +630,7 @@ static struct db9 __init *db9_probe(int parport, int mode)
 		input_dev->open = db9_open;
 		input_dev->close = db9_close;
 
-		input_dev->evbit[0] = BIT(EV_KEY) | BIT(EV_ABS);
+		input_dev->evbit[0] = BIT_MASK(EV_KEY) | BIT_MASK(EV_ABS);
 		for (j = 0; j < db9_mode->n_buttons; j++)
 			set_bit(db9_mode->buttons[j], input_dev->keybit);
 		for (j = 0; j < db9_mode->n_axis; j++) {

@@ -293,16 +293,16 @@ xfs_ialloc_ag_alloc(
 		xfs_biozero(fbuf, 0, ninodes << args.mp->m_sb.sb_inodelog);
 		for (i = 0; i < ninodes; i++) {
 			free = XFS_MAKE_IPTR(args.mp, fbuf, i);
-			INT_SET(free->di_core.di_magic, ARCH_CONVERT, XFS_DINODE_MAGIC);
-			INT_SET(free->di_core.di_version, ARCH_CONVERT, version);
-			INT_SET(free->di_next_unlinked, ARCH_CONVERT, NULLAGINO);
+			free->di_core.di_magic = cpu_to_be16(XFS_DINODE_MAGIC);
+			free->di_core.di_version = version;
+			free->di_next_unlinked = cpu_to_be32(NULLAGINO);
 			xfs_ialloc_log_di(tp, fbuf, i,
 				XFS_DI_CORE_BITS | XFS_DI_NEXT_UNLINKED);
 		}
 		xfs_trans_inode_alloc_buf(tp, fbuf);
 	}
-	be32_add(&agi->agi_count, newlen);
-	be32_add(&agi->agi_freecount, newlen);
+	be32_add_cpu(&agi->agi_count, newlen);
+	be32_add_cpu(&agi->agi_freecount, newlen);
 	agno = be32_to_cpu(agi->agi_seqno);
 	down_read(&args.mp->m_peraglock);
 	args.mp->m_perag[agno].pagi_freecount += newlen;
@@ -885,7 +885,7 @@ nextag:
 	if ((error = xfs_inobt_update(cur, rec.ir_startino, rec.ir_freecount,
 			rec.ir_free)))
 		goto error0;
-	be32_add(&agi->agi_freecount, -1);
+	be32_add_cpu(&agi->agi_freecount, -1);
 	xfs_ialloc_log_agi(tp, agbp, XFS_AGI_FREECOUNT);
 	down_read(&mp->m_peraglock);
 	mp->m_perag[tagno].pagi_freecount--;
@@ -1053,7 +1053,7 @@ xfs_difree(
 	/*
 	 * When an inode cluster is free, it becomes eligible for removal
 	 */
-	if ((mp->m_flags & XFS_MOUNT_IDELETE) &&
+	if (!(mp->m_flags & XFS_MOUNT_IKEEP) &&
 	    (rec.ir_freecount == XFS_IALLOC_INODES(mp))) {
 
 		*delete = 1;
@@ -1065,8 +1065,8 @@ xfs_difree(
 		 * to be freed when the transaction is committed.
 		 */
 		ilen = XFS_IALLOC_INODES(mp);
-		be32_add(&agi->agi_count, -ilen);
-		be32_add(&agi->agi_freecount, -(ilen - 1));
+		be32_add_cpu(&agi->agi_count, -ilen);
+		be32_add_cpu(&agi->agi_freecount, -(ilen - 1));
 		xfs_ialloc_log_agi(tp, agbp, XFS_AGI_COUNT | XFS_AGI_FREECOUNT);
 		down_read(&mp->m_peraglock);
 		mp->m_perag[agno].pagi_freecount -= ilen - 1;
@@ -1095,7 +1095,7 @@ xfs_difree(
 		/* 
 		 * Change the inode free counts and log the ag/sb changes.
 		 */
-		be32_add(&agi->agi_freecount, 1);
+		be32_add_cpu(&agi->agi_freecount, 1);
 		xfs_ialloc_log_agi(tp, agbp, XFS_AGI_FREECOUNT);
 		down_read(&mp->m_peraglock);
 		mp->m_perag[agno].pagi_freecount++;

@@ -220,20 +220,8 @@ decreasing the likelihood of your MIME-attached change being accepted.
 Exception:  If your mailer is mangling patches then someone may ask
 you to re-send them using MIME.
 
-
-WARNING: Some mailers like Mozilla send your messages with
----- message header ----
-Content-Type: text/plain; charset=us-ascii; format=flowed
----- message header ----
-The problem is that "format=flowed" makes some of the mailers
-on receiving side to replace TABs with spaces and do similar
-changes. Thus the patches from you can look corrupted.
-
-To fix this just make your mozilla defaults/pref/mailnews.js file to look like:
-pref("mailnews.send_plaintext_flowed", false); // RFC 2646=======
-pref("mailnews.display.disable_format_flowed_support", true);
-
-
+See Documentation/email-clients.txt for hints about configuring
+your e-mail client so that it sends your patches untouched.
 
 8) E-mail size.
 
@@ -464,8 +452,8 @@ section Linus Computer Science 101.
 Nuff said.  If your code deviates too much from this, it is likely
 to be rejected without further review, and without comment.
 
-Once significant exception is when moving code from one file to
-another in this case you should not modify the moved code at all in
+One significant exception is when moving code from one file to
+another -- in this case you should not modify the moved code at all in
 the same patch which moves it.  This clearly delineates the act of
 moving the code and your changes.  This greatly aids review of the
 actual differences and allows tools to better track the history of
@@ -524,7 +512,7 @@ They provide type safety, have no length limitations, no formatting
 limitations, and under gcc they are as cheap as macros.
 
 Macros should only be used for cases where a static inline is clearly
-suboptimal [there a few, isolated cases of this in fast paths],
+suboptimal [there are a few, isolated cases of this in fast paths],
 or where it is impossible to use a static inline function [such as
 string-izing].
 

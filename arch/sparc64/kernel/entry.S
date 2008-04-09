@@ -429,16 +429,16 @@ do_ivec:
 	stxa		%g0, [%g0] ASI_INTR_RECEIVE
 	membar		#Sync
 
-	sethi		%hi(ivector_table), %g2
-	sllx		%g3, 3, %g3
-	or		%g2, %lo(ivector_table), %g2
+	sethi		%hi(ivector_table_pa), %g2
+	ldx		[%g2 + %lo(ivector_table_pa)], %g2
+	sllx		%g3, 4, %g3
 	add		%g2, %g3, %g3
 
-	TRAP_LOAD_IRQ_WORK(%g6, %g1)
+	TRAP_LOAD_IRQ_WORK_PA(%g6, %g1)
 
-	lduw		[%g6], %g5		/* g5 = irq_work(cpu) */
-	stw		%g5, [%g3 + 0x00]	/* bucket->irq_chain = g5 */
-	stw		%g3, [%g6]		/* irq_work(cpu) = bucket */
+	ldx		[%g6], %g5
+	stxa		%g5, [%g3] ASI_PHYS_USE_EC
+	stx		%g3, [%g6]
 	wr		%g0, 1 << PIL_DEVICE_IRQ, %set_softint
 	retry
 do_ivec_xcall:
@@ -1477,10 +1477,6 @@ sys32_rt_sigreturn:
 		 add		%o7, 1f-.-4, %o7
 		nop
 #endif
-sys_ptrace:	add		%sp, PTREGS_OFF, %o0
-		call		do_ptrace
-		 add		%o7, 1f-.-4, %o7
-		nop
 		.align		32
 1:		ldx		[%curptr + TI_FLAGS], %l5
 		andcc		%l5, (_TIF_SYSCALL_TRACE|_TIF_SECCOMP|_TIF_SYSCALL_AUDIT), %g0
@@ -1708,6 +1704,36 @@ __flushw_user:
 	 restore	%g0, %g0, %g0
 2:	retl
 	 nop
+
+	/* Flush %fp and %i7 to the stack for all register
+	 * windows active inside of the cpu.  This allows
+	 * show_stack_trace() to avoid using an expensive
+	 * 'flushw'.
+	 */
+	.globl		stack_trace_flush
+	.type		stack_trace_flush,#function
+stack_trace_flush:
+	rdpr		%pstate, %o0
+	wrpr		%o0, PSTATE_IE, %pstate
+
+	rdpr		%cwp, %g1
+	rdpr		%canrestore, %g2
+	sub		%g1, 1, %g3
+
+1:	brz,pn		%g2, 2f
+	 sub		%g2, 1, %g2
+	wrpr		%g3, %cwp
+	stx		%fp, [%sp + STACK_BIAS + RW_V9_I6]
+	stx		%i7, [%sp + STACK_BIAS + RW_V9_I7]
+	ba,pt		%xcc, 1b
+	 sub		%g3, 1, %g3
+
+2:	wrpr		%g1, %cwp
+	wrpr		%o0, %pstate
+
+	retl
+	 nop
+	.size		stack_trace_flush,.-stack_trace_flush
 
 #ifdef CONFIG_SMP
 	.globl		hard_smp_processor_id
@@ -2593,3 +2619,15 @@ sun4v_mmustat_info:
 	retl
 	 nop
 	.size	sun4v_mmustat_info, .-sun4v_mmustat_info
+
+	.globl	sun4v_mmu_demap_all
+	.type	sun4v_mmu_demap_all,#function
+sun4v_mmu_demap_all:
+	clr	%o0
+	clr	%o1
+	mov	HV_MMU_ALL, %o2
+	mov	HV_FAST_MMU_DEMAP_ALL, %o5
+	ta	HV_FAST_TRAP
+	retl
+	 nop
+	.size	sun4v_mmu_demap_all, .-sun4v_mmu_demap_all

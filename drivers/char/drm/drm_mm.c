@@ -38,7 +38,7 @@
  * Aligned allocations can also see improvement.
  *
  * Authors:
- * Thomas Hellström <thomas-at-tungstengraphics-dot-com>
+ * Thomas HellstrÃ¶m <thomas-at-tungstengraphics-dot-com>
  */
 
 #include "drmP.h"
@@ -293,4 +293,3 @@ void drm_mm_takedown(struct drm_mm * mm)
 
 	drm_free(entry, sizeof(*entry), DRM_MEM_MM);
 }
-

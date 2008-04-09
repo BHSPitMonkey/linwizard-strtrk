@@ -389,13 +389,6 @@ iop3xx_i2c_master_xfer(struct i2c_adapter *i2c_adap, struct i2c_msg *msgs,
 	return im;   
 }
 
-static int 
-iop3xx_i2c_algo_control(struct i2c_adapter *adapter, unsigned int cmd,
-			unsigned long arg)
-{
-	return 0;
-}
-
 static u32 
 iop3xx_i2c_func(struct i2c_adapter *adap)
 {
@@ -404,7 +397,6 @@ iop3xx_i2c_func(struct i2c_adapter *adap)
 
 static const struct i2c_algorithm iop3xx_i2c_algo = {
 	.master_xfer	= iop3xx_i2c_master_xfer,
-	.algo_control	= iop3xx_i2c_algo_control,
 	.functionality	= iop3xx_i2c_func,
 };
 
@@ -498,7 +490,6 @@ iop3xx_i2c_probe(struct platform_device *pdev)
 	 * Default values...should these come in from board code?
 	 */
 	new_adapter->timeout = 100;	
-	new_adapter->retries = 3;
 	new_adapter->algo = &iop3xx_i2c_algo;
 
 	init_waitqueue_head(&adapter_data->waitq);

@@ -4,11 +4,8 @@
  * OMAP2 I/O mapping code
  *
  * Copyright (C) 2005 Nokia Corporation
- * Copyright (C) 2007 Texas Instruments
- *
- * Author:
- *	Juha Yrjola <juha.yrjola@nokia.com>
- *	Syed Khasim <x0khasim@ti.com>
+ * Author: Juha Yrjölä <juha.yrjola@nokia.com>
+ * Updated map desc to add 2430 support : <x0khasim@ti.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -48,15 +45,25 @@ static struct map_desc omap24xx_io_desc[] __initdata = {
 		.type		= MT_DEVICE
 	},
 	{
-		.virtual	= L4_24XX_VIRT,
-		.pfn		= __phys_to_pfn(L4_24XX_PHYS),
-		.length		= L4_24XX_SIZE,
+		.virtual        = L4_24XX_VIRT,
+		.pfn            = __phys_to_pfn(L4_24XX_PHYS),
+		.length         = L4_24XX_SIZE,
+		.type           = MT_DEVICE
+	},
+#ifdef CONFIG_ARCH_OMAP2430
+	{
+		.virtual	= L4_WK_243X_VIRT,
+		.pfn		= __phys_to_pfn(L4_WK_243X_PHYS),
+		.length		= L4_WK_243X_SIZE,
 		.type		= MT_DEVICE
 	},
-};
-
-#ifdef CONFIG_ARCH_OMAP2420
-static struct map_desc omap242x_io_desc[] __initdata = {
+	{
+		.virtual	= OMAP243X_GPMC_VIRT,
+		.pfn		= __phys_to_pfn(OMAP243X_GPMC_PHYS),
+		.length		= OMAP243X_GPMC_SIZE,
+		.type		= MT_DEVICE
+	},
+#endif
 	{
 		.virtual	= DSP_MEM_24XX_VIRT,
 		.pfn		= __phys_to_pfn(DSP_MEM_24XX_PHYS),
@@ -189,6 +196,11 @@ void __init omap2_init_common_hw(void)
 {
 	omap2_mux_init();
 	omap2_clk_init();
+/*
+ * Need to Fix this for 2430
+ */
+#ifndef CONFIG_ARCH_OMAP2430
 	omap2_init_memory();
+#endif
 	gpmc_init();
 }

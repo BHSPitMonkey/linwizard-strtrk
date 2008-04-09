@@ -128,11 +128,6 @@ static char *buf_put_stringn(struct cbuf *buf, const char *s, u16 slen)
 	return ret;
 }
 
-static inline void buf_put_string(struct cbuf *buf, const char *s)
-{
-	buf_put_stringn(buf, s, strlen(s));
-}
-
 static u8 buf_get_int8(struct cbuf *buf)
 {
 	u8 ret = 0;
@@ -547,7 +542,8 @@ error:
 }
 EXPORT_SYMBOL(p9_create_tversion);
 
-struct p9_fcall *p9_create_tauth(u32 afid, char *uname, char *aname)
+struct p9_fcall *p9_create_tauth(u32 afid, char *uname, char *aname,
+	u32 n_uname, int dotu)
 {
 	int size;
 	struct p9_fcall *fc;
@@ -555,7 +551,16 @@ struct p9_fcall *p9_create_tauth(u32 afid, char *uname, char *aname)
 	struct cbuf *bufp = &buffer;
 
 	/* afid[4] uname[s] aname[s] */
-	size = 4 + 2 + strlen(uname) + 2 + strlen(aname);
+	size = 4 + 2 + 2;
+	if (uname)
+		size += strlen(uname);
+
+	if (aname)
+		size += strlen(aname);
+
+	if (dotu)
+		size += 4;	/* n_uname */
+
 	fc = p9_create_common(bufp, size, P9_TAUTH);
 	if (IS_ERR(fc))
 		goto error;
@@ -563,6 +568,8 @@ struct p9_fcall *p9_create_tauth(u32 afid, char *uname, char *aname)
 	p9_put_int32(bufp, afid, &fc->params.tauth.afid);
 	p9_put_str(bufp, uname, &fc->params.tauth.uname);
 	p9_put_str(bufp, aname, &fc->params.tauth.aname);
+	if (dotu)
+		p9_put_int32(bufp, n_uname, &fc->params.tauth.n_uname);
 
 	if (buf_check_overflow(bufp)) {
 		kfree(fc);
@@ -574,7 +581,8 @@ error:
 EXPORT_SYMBOL(p9_create_tauth);
 
 struct p9_fcall *
-p9_create_tattach(u32 fid, u32 afid, char *uname, char *aname)
+p9_create_tattach(u32 fid, u32 afid, char *uname, char *aname,
+	u32 n_uname, int dotu)
 {
 	int size;
 	struct p9_fcall *fc;
@@ -582,7 +590,16 @@ p9_create_tattach(u32 fid, u32 afid, char *uname, char *aname)
 	struct cbuf *bufp = &buffer;
 
 	/* fid[4] afid[4] uname[s] aname[s] */
-	size = 4 + 4 + 2 + strlen(uname) + 2 + strlen(aname);
+	size = 4 + 4 + 2 + 2;
+	if (uname)
+		size += strlen(uname);
+
+	if (aname)
+		size += strlen(aname);
+
+	if (dotu)
+		size += 4;	/* n_uname */
+
 	fc = p9_create_common(bufp, size, P9_TATTACH);
 	if (IS_ERR(fc))
 		goto error;
@@ -591,6 +608,8 @@ p9_create_tattach(u32 fid, u32 afid, char *uname, char *aname)
 	p9_put_int32(bufp, afid, &fc->params.tattach.afid);
 	p9_put_str(bufp, uname, &fc->params.tattach.uname);
 	p9_put_str(bufp, aname, &fc->params.tattach.aname);
+	if (dotu)
+		p9_put_int32(bufp, n_uname, &fc->params.tattach.n_uname);
 
 error:
 	return fc;

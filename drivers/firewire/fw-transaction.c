@@ -153,7 +153,7 @@ fw_fill_request(struct fw_packet *packet, int tcode, int tlabel,
 	int ext_tcode;
 
 	if (tcode > 0x10) {
-		ext_tcode = tcode - 0x10;
+		ext_tcode = tcode & ~0x10;
 		tcode = TCODE_LOCK_REQUEST;
 	} else
 		ext_tcode = 0;
@@ -228,7 +228,7 @@ fw_fill_request(struct fw_packet *packet, int tcode, int tlabel,
  *
  * @param card the card from which to send the request
  * @param tcode the tcode for this transaction.  Do not use
- *   TCODE_LOCK_REQUEST directly, insted use TCODE_LOCK_MASK_SWAP
+ *   TCODE_LOCK_REQUEST directly, instead use TCODE_LOCK_MASK_SWAP
  *   etc. to specify tcode and ext_tcode.
  * @param node_id the destination node ID (bus ID and PHY ID concatenated)
  * @param generation the generation for which node_id is valid
@@ -410,7 +410,12 @@ EXPORT_SYMBOL(fw_unit_space_region);
  * controller.  When a request is received that falls within the
  * specified address range, the specified callback is invoked.  The
  * parameters passed to the callback give the details of the
- * particular request
+ * particular request.
+ *
+ * Return value:  0 on success, non-zero otherwise.
+ * The start offset of the handler's address region is determined by
+ * fw_core_add_address_handler() and is returned in handler->offset.
+ * The offset is quadlet-aligned.
  */
 int
 fw_core_add_address_handler(struct fw_address_handler *handler,
@@ -422,14 +427,15 @@ fw_core_add_address_handler(struct fw_address_handler *handler,
 
 	spin_lock_irqsave(&address_handler_lock, flags);
 
-	handler->offset = region->start;
+	handler->offset = roundup(region->start, 4);
 	while (handler->offset + handler->length <= region->end) {
 		other =
 		    lookup_overlapping_address_handler(&address_handler_list,
 						       handler->offset,
 						       handler->length);
 		if (other != NULL) {
-			handler->offset += other->length;
+			handler->offset =
+			    roundup(other->offset + other->length, 4);
 		} else {
 			list_add_tail(&handler->link, &address_handler_list);
 			ret = 0;
@@ -644,7 +650,7 @@ fw_core_handle_request(struct fw_card *card, struct fw_packet *p)
 		 HEADER_GET_OFFSET_HIGH(p->header[1]) << 32) | p->header[2];
 	tcode       = HEADER_GET_TCODE(p->header[0]);
 	destination = HEADER_GET_DESTINATION(p->header[0]);
-	source      = HEADER_GET_SOURCE(p->header[0]);
+	source      = HEADER_GET_SOURCE(p->header[1]);
 
 	spin_lock_irqsave(&address_handler_lock, flags);
 	handler = lookup_enclosing_address_handler(&address_handler_list,
@@ -730,6 +736,12 @@ fw_core_handle_response(struct fw_card *card, struct fw_packet *p)
 		break;
 	}
 
+	/*
+	 * The response handler may be executed while the request handler
+	 * is still pending.  Cancel the request handler.
+	 */
+	card->driver->cancel_packet(card, &t->packet);
+
 	t->callback(card, rcode, data, data_length, t->callback_data);
 }
 EXPORT_SYMBOL(fw_core_handle_response);
@@ -745,7 +757,7 @@ handle_topology_map(struct fw_card *card, struct fw_request *request,
 		    void *payload, size_t length, void *callback_data)
 {
 	int i, start, end;
-	u32 *map;
+	__be32 *map;
 
 	if (!TCODE_IS_READ_REQUEST(tcode)) {
 		fw_send_response(card, request, RCODE_TYPE_ERROR);

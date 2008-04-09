@@ -32,6 +32,7 @@
 #include <asm/system.h>
 #include <asm/pgtable.h>
 #include <asm/s390_ext.h>
+#include <asm/mmu_context.h>
 
 #ifndef CONFIG_64BIT
 #define __FAIL_ADDR_MASK 0x7ffff000
@@ -211,14 +212,14 @@ static int do_out_of_memory(struct pt_regs *regs, unsigned long error_code,
 	struct mm_struct *mm = tsk->mm;
 
 	up_read(&mm->mmap_sem);
-	if (is_init(tsk)) {
+	if (is_global_init(tsk)) {
 		yield();
 		down_read(&mm->mmap_sem);
 		return 1;
 	}
 	printk("VM: killing process %s\n", tsk->comm);
 	if (regs->psw.mask & PSW_MASK_PSTATE)
-		do_exit(SIGKILL);
+		do_group_exit(SIGKILL);
 	do_no_context(regs, error_code, address);
 	return 0;
 }
@@ -444,6 +445,45 @@ void __kprobes do_dat_exception(struct pt_regs *regs, unsigned long error_code)
 	do_exception(regs, error_code & 0xff, 0);
 }
 
+#ifdef CONFIG_64BIT
+void __kprobes do_asce_exception(struct pt_regs *regs, unsigned long error_code)
+{
+	struct mm_struct *mm;
+	struct vm_area_struct *vma;
+	unsigned long address;
+	int space;
+
+	mm = current->mm;
+	address = S390_lowcore.trans_exc_code & __FAIL_ADDR_MASK;
+	space = check_space(current);
+
+	if (unlikely(space == 0 || in_atomic() || !mm))
+		goto no_context;
+
+	local_irq_enable();
+
+	down_read(&mm->mmap_sem);
+	vma = find_vma(mm, address);
+	up_read(&mm->mmap_sem);
+
+	if (vma) {
+		update_mm(mm, current);
+		return;
+	}
+
+	/* User mode accesses just cause a SIGSEGV */
+	if (regs->psw.mask & PSW_MASK_PSTATE) {
+		current->thread.prot_addr = address;
+		current->thread.trap_no = error_code;
+		do_sigsegv(regs, error_code, SEGV_MAPERR, address);
+		return;
+	}
+
+no_context:
+	do_no_context(regs, error_code, address);
+}
+#endif
+
 #ifdef CONFIG_PFAULT 
 /*
  * 'pfault' pseudo page faults routines.
@@ -468,7 +508,7 @@ typedef struct {
 	__u64 refselmk;
 	__u64 refcmpmk;
 	__u64 reserved;
-} __attribute__ ((packed)) pfault_refbk_t;
+} __attribute__ ((packed, aligned(8))) pfault_refbk_t;
 
 int pfault_init(void)
 {

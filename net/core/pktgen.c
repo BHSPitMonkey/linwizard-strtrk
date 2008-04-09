@@ -6,7 +6,7 @@
  *
  * Alexey Kuznetsov  <kuznet@ms2.inr.ac.ru>
  * Ben Greear <greearb@candelatech.com>
- * Jens Låås <jens.laas@data.slu.se>
+ * Jens LÃ¥Ã¥s <jens.laas@data.slu.se>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -152,6 +152,7 @@
 #include <linux/wait.h>
 #include <linux/etherdevice.h>
 #include <linux/kthread.h>
+#include <net/net_namespace.h>
 #include <net/checksum.h>
 #include <net/ipv6.h>
 #include <net/addrconf.h>
@@ -160,17 +161,15 @@
 #endif
 #include <asm/byteorder.h>
 #include <linux/rcupdate.h>
-#include <asm/bitops.h>
+#include <linux/bitops.h>
 #include <asm/io.h>
 #include <asm/dma.h>
 #include <asm/uaccess.h>
 #include <asm/div64.h>		/* do_div */
 #include <asm/timex.h>
 
-#define VERSION  "pktgen v2.68: Packet Generator for packet performance testing.\n"
+#define VERSION  "pktgen v2.69: Packet Generator for packet performance testing.\n"
 
-/* The buckets are exponential in 'width' */
-#define LAT_BUCKETS_MAX 32
 #define IP_NAME_SZ 32
 #define MAX_MPLS_LABELS 16 /* This is the max label stack depth */
 #define MPLS_STACK_BOTTOM htonl(0x00000100)
@@ -189,6 +188,7 @@
 #define F_SVID_RND    (1<<10)	/* Random SVLAN ID */
 #define F_FLOW_SEQ    (1<<11)	/* Sequential flows */
 #define F_IPSEC_ON    (1<<12)	/* ipsec on for flows */
+#define F_QUEUE_MAP_RND (1<<13)	/* queue map Random */
 
 /* Thread control flag bits */
 #define T_TERMINATE   (1<<0)
@@ -331,6 +331,7 @@ struct pktgen_dev {
 	__be32 cur_daddr;
 	__u16 cur_udp_dst;
 	__u16 cur_udp_src;
+	__u16 cur_queue_map;
 	__u32 cur_pkt_size;
 
 	__u8 hh[14];
@@ -358,6 +359,10 @@ struct pktgen_dev {
 	unsigned lflow;		/* Flow length  (config) */
 	unsigned nflows;	/* accumulated flows (stats) */
 	unsigned curfl;		/* current sequenced flow (state)*/
+
+	u16 queue_map_min;
+	u16 queue_map_max;
+
 #ifdef CONFIG_XFRM
 	__u8	ipsmode;		/* IPSEC mode (config) */
 	__u8	ipsproto;		/* IPSEC type (config) */
@@ -378,7 +383,6 @@ struct pktgen_thread {
 	struct list_head th_list;
 	struct task_struct *tsk;
 	char result[512];
-	u32 max_before_softirq;	/* We'll call do_softirq to prevent starvation. */
 
 	/* Field for thread to receive "posted" events terminate, stop ifs etc. */
 
@@ -391,62 +395,6 @@ struct pktgen_thread {
 #define REMOVE 1
 #define FIND   0
 
-/*  This code works around the fact that do_div cannot handle two 64-bit
-    numbers, and regular 64-bit division doesn't work on x86 kernels.
-    --Ben
-*/
-
-#define PG_DIV 0
-
-/* This was emailed to LMKL by: Chris Caputo <ccaputo@alt.net>
- * Function copied/adapted/optimized from:
- *
- *  nemesis.sourceforge.net/browse/lib/static/intmath/ix86/intmath.c.html
- *
- * Copyright 1994, University of Cambridge Computer Laboratory
- * All Rights Reserved.
- *
- */
-static inline s64 divremdi3(s64 x, s64 y, int type)
-{
-	u64 a = (x < 0) ? -x : x;
-	u64 b = (y < 0) ? -y : y;
-	u64 res = 0, d = 1;
-
-	if (b > 0) {
-		while (b < a) {
-			b <<= 1;
-			d <<= 1;
-		}
-	}
-
-	do {
-		if (a >= b) {
-			a -= b;
-			res += d;
-		}
-		b >>= 1;
-		d >>= 1;
-	}
-	while (d);
-
-	if (PG_DIV == type) {
-		return (((x ^ y) & (1ll << 63)) == 0) ? res : -(s64) res;
-	} else {
-		return ((x & (1ll << 63)) == 0) ? a : -(s64) a;
-	}
-}
-
-/* End of hacks to deal with 64-bit math on x86 */
-
-/** Convert to milliseconds */
-static inline __u64 tv_to_ms(const struct timeval *tv)
-{
-	__u64 ms = tv->tv_usec / 1000;
-	ms += (__u64) tv->tv_sec * (__u64) 1000;
-	return ms;
-}
-
 /** Convert to micro-seconds */
 static inline __u64 tv_to_us(const struct timeval *tv)
 {
@@ -455,49 +403,11 @@ static inline __u64 tv_to_us(const struct timeval *tv)
 	return us;
 }
 
-static inline __u64 pg_div(__u64 n, __u32 base)
-{
-	__u64 tmp = n;
-	do_div(tmp, base);
-	/* printk("pktgen: pg_div, n: %llu  base: %d  rv: %llu\n",
-	   n, base, tmp); */
-	return tmp;
-}
-
-static inline __u64 pg_div64(__u64 n, __u64 base)
-{
-	__u64 tmp = n;
-/*
- * How do we know if the architecture we are running on
- * supports division with 64 bit base?
- *
- */
-#if defined(__sparc_v9__) || defined(__powerpc64__) || defined(__alpha__) || defined(__x86_64__) || defined(__ia64__)
-
-	do_div(tmp, base);
-#else
-	tmp = divremdi3(n, base, PG_DIV);
-#endif
-	return tmp;
-}
-
-static inline __u64 getCurMs(void)
-{
-	struct timeval tv;
-	do_gettimeofday(&tv);
-	return tv_to_ms(&tv);
-}
-
-static inline __u64 getCurUs(void)
+static __u64 getCurUs(void)
 {
 	struct timeval tv;
 	do_gettimeofday(&tv);
 	return tv_to_us(&tv);
-}
-
-static inline __u64 tv_diff(const struct timeval *a, const struct timeval *b)
-{
-	return tv_to_us(a) - tv_to_us(b);
 }
 
 /* old include end */
@@ -593,11 +503,11 @@ static const struct file_operations pktgen_fops = {
 
 static int pktgen_if_show(struct seq_file *seq, void *v)
 {
-	int i;
 	struct pktgen_dev *pkt_dev = seq->private;
 	__u64 sa;
 	__u64 stopped;
 	__u64 now = getCurUs();
+	DECLARE_MAC_BUF(mac);
 
 	seq_printf(seq,
 		   "Params: count %llu  min_pkt_size: %u  max_pkt_size: %u\n",
@@ -612,6 +522,11 @@ static int pktgen_if_show(struct seq_file *seq, void *v)
 
 	seq_printf(seq, "     flows: %u flowlen: %u\n", pkt_dev->cflows,
 		   pkt_dev->lflow);
+
+	seq_printf(seq,
+		   "     queue_map_min: %u  queue_map_max: %u\n",
+		   pkt_dev->queue_map_min,
+		   pkt_dev->queue_map_max);
 
 	if (pkt_dev->flags & F_IPV6) {
 		char b1[128], b2[128], b3[128];
@@ -637,19 +552,12 @@ static int pktgen_if_show(struct seq_file *seq, void *v)
 
 	seq_puts(seq, "     src_mac: ");
 
-	if (is_zero_ether_addr(pkt_dev->src_mac))
-		for (i = 0; i < 6; i++)
-			seq_printf(seq, "%02X%s", pkt_dev->odev->dev_addr[i],
-				   i == 5 ? "  " : ":");
-	else
-		for (i = 0; i < 6; i++)
-			seq_printf(seq, "%02X%s", pkt_dev->src_mac[i],
-				   i == 5 ? "  " : ":");
+	seq_printf(seq, "%s ",
+		   print_mac(mac, is_zero_ether_addr(pkt_dev->src_mac) ?
+			     pkt_dev->odev->dev_addr : pkt_dev->src_mac));
 
 	seq_printf(seq, "dst_mac: ");
-	for (i = 0; i < 6; i++)
-		seq_printf(seq, "%02X%s", pkt_dev->dst_mac[i],
-			   i == 5 ? "\n" : ":");
+	seq_printf(seq, "%s\n", print_mac(mac, pkt_dev->dst_mac));
 
 	seq_printf(seq,
 		   "     udp_src_min: %d  udp_src_max: %d  udp_dst_min: %d  udp_dst_max: %d\n",
@@ -709,6 +617,9 @@ static int pktgen_if_show(struct seq_file *seq, void *v)
 	if (pkt_dev->flags & F_MPLS_RND)
 		seq_printf(seq,  "MPLS_RND  ");
 
+	if (pkt_dev->flags & F_QUEUE_MAP_RND)
+		seq_printf(seq,  "QUEUE_MAP_RND  ");
+
 	if (pkt_dev->cflows) {
 		if (pkt_dev->flags & F_FLOW_SEQ)
 			seq_printf(seq,  "FLOW_SEQ  "); /*in sequence flows*/
@@ -763,6 +674,8 @@ static int pktgen_if_show(struct seq_file *seq, void *v)
 
 	seq_printf(seq, "     cur_udp_dst: %d  cur_udp_src: %d\n",
 		   pkt_dev->cur_udp_dst, pkt_dev->cur_udp_src);
+
+	seq_printf(seq, "     cur_queue_map: %u\n", pkt_dev->cur_queue_map);
 
 	seq_printf(seq, "     flows: %u\n", pkt_dev->nflows);
 
@@ -1215,6 +1128,11 @@ static ssize_t pktgen_if_write(struct file *file,
 		else if (strcmp(f, "FLOW_SEQ") == 0)
 			pkt_dev->flags |= F_FLOW_SEQ;
 
+		else if (strcmp(f, "QUEUE_MAP_RND") == 0)
+			pkt_dev->flags |= F_QUEUE_MAP_RND;
+
+		else if (strcmp(f, "!QUEUE_MAP_RND") == 0)
+			pkt_dev->flags &= ~F_QUEUE_MAP_RND;
 #ifdef CONFIG_XFRM
 		else if (strcmp(f, "IPSEC") == 0)
 			pkt_dev->flags |= F_IPSEC_ON;
@@ -1526,16 +1444,40 @@ static ssize_t pktgen_if_write(struct file *file,
 		return count;
 	}
 
-	if (!strcmp(name, "mpls")) {
-		unsigned n, offset;
-		len = get_labels(&user_buffer[i], pkt_dev);
-		if (len < 0) { return len; }
+	if (!strcmp(name, "queue_map_min")) {
+		len = num_arg(&user_buffer[i], 5, &value);
+		if (len < 0) {
+			return len;
+		}
 		i += len;
-		offset = sprintf(pg_result, "OK: mpls=");
+		pkt_dev->queue_map_min = value;
+		sprintf(pg_result, "OK: queue_map_min=%u", pkt_dev->queue_map_min);
+		return count;
+	}
+
+	if (!strcmp(name, "queue_map_max")) {
+		len = num_arg(&user_buffer[i], 5, &value);
+		if (len < 0) {
+			return len;
+		}
+		i += len;
+		pkt_dev->queue_map_max = value;
+		sprintf(pg_result, "OK: queue_map_max=%u", pkt_dev->queue_map_max);
+		return count;
+	}
+
+	if (!strcmp(name, "mpls")) {
+		unsigned n, cnt;
+
+		len = get_labels(&user_buffer[i], pkt_dev);
+		if (len < 0)
+			return len;
+		i += len;
+		cnt = sprintf(pg_result, "OK: mpls=");
 		for (n = 0; n < pkt_dev->nr_labels; n++)
-			offset += sprintf(pg_result + offset,
-					  "%08x%s", ntohl(pkt_dev->labels[n]),
-					  n == pkt_dev->nr_labels-1 ? "" : ",");
+			cnt += sprintf(pg_result + cnt,
+				       "%08x%s", ntohl(pkt_dev->labels[n]),
+				       n == pkt_dev->nr_labels-1 ? "" : ",");
 
 		if (pkt_dev->nr_labels && pkt_dev->vlan_id != 0xffff) {
 			pkt_dev->vlan_id = 0xffff; /* turn off VLAN/SVLAN */
@@ -1718,9 +1660,6 @@ static int pktgen_thread_show(struct seq_file *seq, void *v)
 
 	BUG_ON(!t);
 
-	seq_printf(seq, "Name: %s  max_before_softirq: %d\n",
-		   t->tsk->comm, t->max_before_softirq);
-
 	seq_printf(seq, "Running: ");
 
 	if_lock(t);
@@ -1753,7 +1692,6 @@ static ssize_t pktgen_thread_write(struct file *file,
 	int i = 0, max, len, ret;
 	char name[40];
 	char *pg_result;
-	unsigned long value = 0;
 
 	if (count < 1) {
 		//      sprintf(pg_result, "Wrong command format");
@@ -1827,12 +1765,8 @@ static ssize_t pktgen_thread_write(struct file *file,
 	}
 
 	if (!strcmp(name, "max_before_softirq")) {
-		len = num_arg(&user_buffer[i], 10, &value);
-		mutex_lock(&pktgen_thread_lock);
-		t->max_before_softirq = value;
-		mutex_unlock(&pktgen_thread_lock);
+		sprintf(pg_result, "OK: Note! max_before_softirq is obsoleted -- Do not use");
 		ret = count;
-		sprintf(pg_result, "OK: max_before_softirq=%lu", value);
 		goto out;
 	}
 
@@ -1940,6 +1874,9 @@ static int pktgen_device_event(struct notifier_block *unused,
 {
 	struct net_device *dev = ptr;
 
+	if (dev->nd_net != &init_net)
+		return NOTIFY_DONE;
+
 	/* It is OK that we do not hold the group lock right now,
 	 * as we run under the RTNL lock.
 	 */
@@ -1970,7 +1907,7 @@ static int pktgen_setup_dev(struct pktgen_dev *pkt_dev, const char *ifname)
 		pkt_dev->odev = NULL;
 	}
 
-	odev = dev_get_by_name(ifname);
+	odev = dev_get_by_name(&init_net, ifname);
 	if (!odev) {
 		printk(KERN_ERR "pktgen: no such netdevice: \"%s\"\n", ifname);
 		return -ENODEV;
@@ -2105,13 +2042,11 @@ static void spin(struct pktgen_dev *pkt_dev, __u64 spin_until_us)
 	__u64 now;
 
 	start = now = getCurUs();
-	printk(KERN_INFO "sleeping for %d\n", (int)(spin_until_us - now));
 	while (now < spin_until_us) {
 		/* TODO: optimize sleeping behavior */
 		if (spin_until_us - now > jiffies_to_usecs(1) + 1)
 			schedule_timeout_interruptible(1);
 		else if (spin_until_us - now > 100) {
-			do_softirq();
 			if (!pkt_dev->running)
 				return;
 			if (need_resched())
@@ -2326,9 +2261,11 @@ static void mod_cur_headers(struct pktgen_dev *pkt_dev)
 					t = random32() % (imx - imn) + imn;
 					s = htonl(t);
 
-					while (LOOPBACK(s) || MULTICAST(s)
-					       || BADCLASS(s) || ZERONET(s)
-					       || LOCAL_MCAST(s)) {
+					while (ipv4_is_loopback(s) ||
+					       ipv4_is_multicast(s) ||
+					       ipv4_is_lbcast(s) ||
+					       ipv4_is_zeronet(s) ||
+					       ipv4_is_local_multicast(s)) {
 						t = random32() % (imx - imn) + imn;
 						s = htonl(t);
 					}
@@ -2387,6 +2324,20 @@ static void mod_cur_headers(struct pktgen_dev *pkt_dev)
 		pkt_dev->cur_pkt_size = t;
 	}
 
+	if (pkt_dev->queue_map_min < pkt_dev->queue_map_max) {
+		__u16 t;
+		if (pkt_dev->flags & F_QUEUE_MAP_RND) {
+			t = random32() %
+				(pkt_dev->queue_map_max - pkt_dev->queue_map_min + 1)
+				+ pkt_dev->queue_map_min;
+		} else {
+			t = pkt_dev->cur_queue_map + 1;
+			if (t > pkt_dev->queue_map_max)
+				t = pkt_dev->queue_map_min;
+		}
+		pkt_dev->cur_queue_map = t;
+	}
+
 	pkt_dev->flows[flow].count++;
 }
 
@@ -2408,7 +2359,7 @@ static int pktgen_output_ipsec(struct sk_buff *skb, struct pktgen_dev *pkt_dev)
 	spin_lock(&x->lock);
 	iph = ip_hdr(skb);
 
-	err = x->mode->output(x, skb);
+	err = x->outer_mode->output(x, skb);
 	if (err)
 		goto error;
 	err = x->type->output(x, skb);
@@ -2417,8 +2368,6 @@ static int pktgen_output_ipsec(struct sk_buff *skb, struct pktgen_dev *pkt_dev)
 
 	x->curlft.bytes +=skb->len;
 	x->curlft.packets++;
-	spin_unlock(&x->lock);
-
 error:
 	spin_unlock(&x->lock);
 	return err;
@@ -2557,7 +2506,7 @@ static struct sk_buff *fill_packet_ipv4(struct net_device *odev,
 	skb->network_header = skb->tail;
 	skb->transport_header = skb->network_header + sizeof(struct iphdr);
 	skb_put(skb, sizeof(struct iphdr) + sizeof(struct udphdr));
-
+	skb_set_queue_mapping(skb, pkt_dev->cur_queue_map);
 	iph = ip_hdr(skb);
 	udph = udp_hdr(skb);
 
@@ -2686,6 +2635,7 @@ static unsigned int scan_ip6(const char *s, char ip[16])
 	unsigned int prefixlen = 0;
 	unsigned int suffixlen = 0;
 	__be32 tmp;
+	char *pos;
 
 	for (i = 0; i < 16; i++)
 		ip[i] = 0;
@@ -2700,12 +2650,9 @@ static unsigned int scan_ip6(const char *s, char ip[16])
 			}
 			s++;
 		}
-		{
-			char *tmp;
-			u = simple_strtoul(s, &tmp, 16);
-			i = tmp - s;
-		}
 
+		u = simple_strtoul(s, &pos, 16);
+		i = pos - s;
 		if (!i)
 			return 0;
 		if (prefixlen == 12 && s[i] == '.') {
@@ -2733,11 +2680,9 @@ static unsigned int scan_ip6(const char *s, char ip[16])
 			len++;
 		} else if (suffixlen != 0)
 			break;
-		{
-			char *tmp;
-			u = simple_strtol(s, &tmp, 16);
-			i = tmp - s;
-		}
+
+		u = simple_strtol(s, &pos, 16);
+		i = pos - s;
 		if (!i) {
 			if (*s)
 				len--;
@@ -2898,7 +2843,7 @@ static struct sk_buff *fill_packet_ipv6(struct net_device *odev,
 	skb->network_header = skb->tail;
 	skb->transport_header = skb->network_header + sizeof(struct ipv6hdr);
 	skb_put(skb, sizeof(struct ipv6hdr) + sizeof(struct udphdr));
-
+	skb_set_queue_mapping(skb, pkt_dev->cur_queue_map);
 	iph = ipv6_hdr(skb);
 	udph = udp_hdr(skb);
 
@@ -3341,7 +3286,7 @@ static __inline__ void pktgen_xmit(struct pktgen_dev *pkt_dev)
 
 	if ((netif_queue_stopped(odev) ||
 	     (pkt_dev->skb &&
-	      netif_subqueue_stopped(odev, pkt_dev->skb->queue_mapping))) ||
+	      netif_subqueue_stopped(odev, pkt_dev->skb))) ||
 	    need_resched()) {
 		idle_start = getCurUs();
 
@@ -3358,7 +3303,7 @@ static __inline__ void pktgen_xmit(struct pktgen_dev *pkt_dev)
 		pkt_dev->idle_acc += getCurUs() - idle_start;
 
 		if (netif_queue_stopped(odev) ||
-		    netif_subqueue_stopped(odev, pkt_dev->skb->queue_mapping)) {
+		    netif_subqueue_stopped(odev, pkt_dev->skb)) {
 			pkt_dev->next_tx_us = getCurUs();	/* TODO */
 			pkt_dev->next_tx_ns = 0;
 			goto out;	/* Try the next interface */
@@ -3387,7 +3332,7 @@ static __inline__ void pktgen_xmit(struct pktgen_dev *pkt_dev)
 
 	netif_tx_lock_bh(odev);
 	if (!netif_queue_stopped(odev) &&
-	    !netif_subqueue_stopped(odev, pkt_dev->skb->queue_mapping)) {
+	    !netif_subqueue_stopped(odev, pkt_dev->skb)) {
 
 		atomic_inc(&(pkt_dev->skb->users));
 	      retry_now:
@@ -3465,16 +3410,12 @@ static int pktgen_thread_worker(void *arg)
 	struct pktgen_thread *t = arg;
 	struct pktgen_dev *pkt_dev = NULL;
 	int cpu = t->cpu;
-	u32 max_before_softirq;
-	u32 tx_since_softirq = 0;
 
 	BUG_ON(smp_processor_id() != cpu);
 
 	init_waitqueue_head(&t->queue);
 
-	pr_debug("pktgen: starting pktgen/%d:  pid=%d\n", cpu, current->pid);
-
-	max_before_softirq = t->max_before_softirq;
+	pr_debug("pktgen: starting pktgen/%d:  pid=%d\n", cpu, task_pid_nr(current));
 
 	set_current_state(TASK_INTERRUPTIBLE);
 
@@ -3494,23 +3435,8 @@ static int pktgen_thread_worker(void *arg)
 
 		__set_current_state(TASK_RUNNING);
 
-		if (pkt_dev) {
-
+		if (pkt_dev)
 			pktgen_xmit(pkt_dev);
-
-			/*
-			 * We like to stay RUNNING but must also give
-			 * others fair share.
-			 */
-
-			tx_since_softirq += pkt_dev->last_ok;
-
-			if (tx_since_softirq > max_before_softirq) {
-				if (local_softirq_pending())
-					do_softirq();
-				tx_since_softirq = 0;
-			}
-		}
 
 		if (t->control & T_STOP) {
 			pktgen_stop(t);
@@ -3644,14 +3570,14 @@ static int pktgen_add_device(struct pktgen_thread *t, const char *ifname)
 	if (err)
 		goto out1;
 
-	pkt_dev->entry = create_proc_entry(ifname, 0600, pg_proc_dir);
+	pkt_dev->entry = proc_create(ifname, 0600,
+				     pg_proc_dir, &pktgen_if_fops);
 	if (!pkt_dev->entry) {
 		printk(KERN_ERR "pktgen: cannot create %s/%s procfs entry.\n",
 		       PG_PROC_DIR, ifname);
 		err = -EINVAL;
 		goto out2;
 	}
-	pkt_dev->entry->proc_fops = &pktgen_if_fops;
 	pkt_dev->entry->data = pkt_dev;
 #ifdef CONFIG_XFRM
 	pkt_dev->ipsmode = XFRM_MODE_TRANSPORT;
@@ -3702,7 +3628,7 @@ static int __init pktgen_create_thread(int cpu)
 	kthread_bind(p, cpu);
 	t->tsk = p;
 
-	pe = create_proc_entry(t->tsk->comm, 0600, pg_proc_dir);
+	pe = proc_create(t->tsk->comm, 0600, pg_proc_dir, &pktgen_thread_fops);
 	if (!pe) {
 		printk(KERN_ERR "pktgen: cannot create %s/%s procfs entry.\n",
 		       PG_PROC_DIR, t->tsk->comm);
@@ -3712,7 +3638,6 @@ static int __init pktgen_create_thread(int cpu)
 		return -EINVAL;
 	}
 
-	pe->proc_fops = &pktgen_thread_fops;
 	pe->data = t;
 
 	wake_up_process(p);
@@ -3778,20 +3703,19 @@ static int __init pg_init(void)
 
 	printk(KERN_INFO "%s", version);
 
-	pg_proc_dir = proc_mkdir(PG_PROC_DIR, proc_net);
+	pg_proc_dir = proc_mkdir(PG_PROC_DIR, init_net.proc_net);
 	if (!pg_proc_dir)
 		return -ENODEV;
 	pg_proc_dir->owner = THIS_MODULE;
 
-	pe = create_proc_entry(PGCTRL, 0600, pg_proc_dir);
+	pe = proc_create(PGCTRL, 0600, pg_proc_dir, &pktgen_fops);
 	if (pe == NULL) {
 		printk(KERN_ERR "pktgen: ERROR: cannot create %s "
 		       "procfs entry.\n", PGCTRL);
-		proc_net_remove(PG_PROC_DIR);
+		proc_net_remove(&init_net, PG_PROC_DIR);
 		return -EINVAL;
 	}
 
-	pe->proc_fops = &pktgen_fops;
 	pe->data = NULL;
 
 	/* Register us to receive netdevice events */
@@ -3811,7 +3735,7 @@ static int __init pg_init(void)
 		       "all threads\n");
 		unregister_netdevice_notifier(&pktgen_notifier_block);
 		remove_proc_entry(PGCTRL, pg_proc_dir);
-		proc_net_remove(PG_PROC_DIR);
+		proc_net_remove(&init_net, PG_PROC_DIR);
 		return -ENODEV;
 	}
 
@@ -3838,7 +3762,7 @@ static void __exit pg_cleanup(void)
 
 	/* Clean up proc file system */
 	remove_proc_entry(PGCTRL, pg_proc_dir);
-	proc_net_remove(PG_PROC_DIR);
+	proc_net_remove(&init_net, PG_PROC_DIR);
 }
 
 module_init(pg_init);

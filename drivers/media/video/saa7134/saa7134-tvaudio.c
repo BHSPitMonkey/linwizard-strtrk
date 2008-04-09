@@ -23,11 +23,11 @@
 #include <linux/init.h>
 #include <linux/list.h>
 #include <linux/module.h>
-#include <linux/moduleparam.h>
 #include <linux/kernel.h>
 #include <linux/kthread.h>
 #include <linux/slab.h>
 #include <linux/delay.h>
+#include <linux/freezer.h>
 #include <asm/div64.h>
 
 #include "saa7134-reg.h"
@@ -163,32 +163,6 @@ static struct saa7134_tvaudio tvaudio[] = {
 
 /* ------------------------------------------------------------------ */
 
-static void tvaudio_init(struct saa7134_dev *dev)
-{
-	int clock = saa7134_boards[dev->board].audio_clock;
-
-	if (UNSET != audio_clock_override)
-		clock = audio_clock_override;
-
-	/* init all audio registers */
-	saa_writeb(SAA7134_AUDIO_PLL_CTRL,   0x00);
-	if (need_resched())
-		schedule();
-	else
-		udelay(10);
-
-	saa_writeb(SAA7134_AUDIO_CLOCK0,      clock        & 0xff);
-	saa_writeb(SAA7134_AUDIO_CLOCK1,     (clock >>  8) & 0xff);
-	saa_writeb(SAA7134_AUDIO_CLOCK2,     (clock >> 16) & 0xff);
-	/* frame locked audio is mandatory for NICAM */
-	saa_writeb(SAA7134_AUDIO_PLL_CTRL,   0x01);
-
-	saa_writeb(SAA7134_NICAM_ERROR_LOW,  0x14);
-	saa_writeb(SAA7134_NICAM_ERROR_HIGH, 0x50);
-	saa_writeb(SAA7134_MONITOR_SELECT,   0xa0);
-	saa_writeb(SAA7134_FM_DEMATRIX,      0x80);
-}
-
 static u32 tvaudio_carr2reg(u32 carrier)
 {
 	u64 a = carrier;
@@ -232,7 +206,7 @@ static void mute_input_7134(struct saa7134_dev *dev)
 	}
 
 	if (dev->hw_mute  == mute &&
-		dev->hw_input == in) {
+		dev->hw_input == in && !dev->insuspend) {
 		dprintk("mute/input: nothing to do [mute=%d,input=%s]\n",
 			mute,in->name);
 		return;
@@ -503,19 +477,27 @@ static int tvaudio_thread(void *data)
 	unsigned int i, audio, nscan;
 	int max1,max2,carrier,rx,mode,lastmode,default_carrier;
 
-	allow_signal(SIGTERM);
+
+	set_freezable();
+
 	for (;;) {
 		tvaudio_sleep(dev,-1);
-		if (kthread_should_stop() || signal_pending(current))
+		if (kthread_should_stop())
 			goto done;
 
 	restart:
+		try_to_freeze();
+
 		dev->thread.scan1 = dev->thread.scan2;
 		dprintk("tvaudio thread scan start [%d]\n",dev->thread.scan1);
 		dev->tvaudio  = NULL;
-		tvaudio_init(dev);
+
+		saa_writeb(SAA7134_MONITOR_SELECT,   0xa0);
+		saa_writeb(SAA7134_FM_DEMATRIX,      0x80);
+
 		if (dev->ctl_automute)
 			dev->automute = 1;
+
 		mute_input_7134(dev);
 
 		/* give the tuner some time */
@@ -613,9 +595,12 @@ static int tvaudio_thread(void *data)
 
 		lastmode = 42;
 		for (;;) {
+
+			try_to_freeze();
+
 			if (tvaudio_sleep(dev,5000))
 				goto restart;
-			if (kthread_should_stop() || signal_pending(current))
+			if (kthread_should_stop())
 				break;
 			if (UNSET == dev->thread.mode) {
 				rx = tvaudio_getstereo(dev,&tvaudio[i]);
@@ -631,6 +616,7 @@ static int tvaudio_thread(void *data)
 	}
 
  done:
+	dev->thread.stopped = 1;
 	return 0;
 }
 
@@ -776,25 +762,17 @@ static int mute_input_7133(struct saa7134_dev *dev)
 static int tvaudio_thread_ddep(void *data)
 {
 	struct saa7134_dev *dev = data;
-	u32 value, norms, clock;
+	u32 value, norms;
 
-	allow_signal(SIGTERM);
 
-	clock = saa7134_boards[dev->board].audio_clock;
-	if (UNSET != audio_clock_override)
-		clock = audio_clock_override;
-	saa_writel(0x598 >> 2, clock);
-
-	/* unmute */
-	saa_dsp_writel(dev, 0x474 >> 2, 0x00);
-	saa_dsp_writel(dev, 0x450 >> 2, 0x00);
-
+	set_freezable();
 	for (;;) {
 		tvaudio_sleep(dev,-1);
-		if (kthread_should_stop() || signal_pending(current))
+		if (kthread_should_stop())
 			goto done;
-
 	restart:
+		try_to_freeze();
+
 		dev->thread.scan1 = dev->thread.scan2;
 		dprintk("tvaudio thread scan start [%d]\n",dev->thread.scan1);
 
@@ -871,13 +849,14 @@ static int tvaudio_thread_ddep(void *data)
 	}
 
  done:
+	dev->thread.stopped = 1;
 	return 0;
 }
 
 /* ------------------------------------------------------------------ */
 /* common stuff + external entry points                               */
 
-static void saa7134_enable_i2s(struct saa7134_dev *dev)
+void saa7134_enable_i2s(struct saa7134_dev *dev)
 {
 	int i2s_format;
 
@@ -965,6 +944,38 @@ int saa7134_tvaudio_getstereo(struct saa7134_dev *dev)
 	return retval;
 }
 
+void saa7134_tvaudio_init(struct saa7134_dev *dev)
+{
+	int clock = saa7134_boards[dev->board].audio_clock;
+
+	if (UNSET != audio_clock_override)
+		clock = audio_clock_override;
+
+	switch (dev->pci->device) {
+	case PCI_DEVICE_ID_PHILIPS_SAA7134:
+		/* init all audio registers */
+		saa_writeb(SAA7134_AUDIO_PLL_CTRL,   0x00);
+		if (need_resched())
+			schedule();
+		else
+			udelay(10);
+
+		saa_writeb(SAA7134_AUDIO_CLOCK0,      clock        & 0xff);
+		saa_writeb(SAA7134_AUDIO_CLOCK1,     (clock >>  8) & 0xff);
+		saa_writeb(SAA7134_AUDIO_CLOCK2,     (clock >> 16) & 0xff);
+		/* frame locked audio is mandatory for NICAM */
+		saa_writeb(SAA7134_AUDIO_PLL_CTRL,   0x01);
+		saa_writeb(SAA7134_NICAM_ERROR_LOW,  0x14);
+		saa_writeb(SAA7134_NICAM_ERROR_HIGH, 0x50);
+		break;
+	case PCI_DEVICE_ID_PHILIPS_SAA7133:
+	case PCI_DEVICE_ID_PHILIPS_SAA7135:
+		saa_writel(0x598 >> 2, clock);
+		saa_dsp_writel(dev, 0x474 >> 2, 0x00);
+		saa_dsp_writel(dev, 0x450 >> 2, 0x00);
+	}
+}
+
 int saa7134_tvaudio_init2(struct saa7134_dev *dev)
 {
 	int (*my_thread)(void *data) = NULL;
@@ -981,6 +992,7 @@ int saa7134_tvaudio_init2(struct saa7134_dev *dev)
 
 	dev->thread.thread = NULL;
 	if (my_thread) {
+		saa7134_tvaudio_init(dev);
 		/* start tvaudio thread */
 		dev->thread.thread = kthread_run(my_thread, dev, "%s", dev->name);
 		if (IS_ERR(dev->thread.thread)) {
@@ -998,7 +1010,7 @@ int saa7134_tvaudio_init2(struct saa7134_dev *dev)
 int saa7134_tvaudio_fini(struct saa7134_dev *dev)
 {
 	/* shutdown tvaudio thread */
-	if (dev->thread.thread)
+	if (dev->thread.thread && !dev->thread.stopped)
 		kthread_stop(dev->thread.thread);
 
 	saa_andorb(SAA7134_ANALOG_IO_SELECT, 0x07, 0x00); /* LINE1 */
@@ -1014,7 +1026,9 @@ int saa7134_tvaudio_do_scan(struct saa7134_dev *dev)
 	} else if (dev->thread.thread) {
 		dev->thread.mode = UNSET;
 		dev->thread.scan2++;
-		wake_up_process(dev->thread.thread);
+
+		if (!dev->insuspend && !dev->thread.stopped)
+			wake_up_process(dev->thread.thread);
 	} else {
 		dev->automute = 0;
 		saa7134_tvaudio_setmute(dev);

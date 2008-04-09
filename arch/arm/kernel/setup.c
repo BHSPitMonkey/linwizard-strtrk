@@ -38,6 +38,7 @@
 #include <asm/mach/time.h>
 
 #include "compat.h"
+#include "atags.h"
 
 #ifndef MEM_SIZE
 #define MEM_SIZE	(16*1024*1024)
@@ -65,6 +66,7 @@ extern int root_mountflags;
 extern void _stext, _text, _etext, __data_start, _edata, _end;
 
 unsigned int processor_id;
+EXPORT_SYMBOL(processor_id);
 unsigned int __machine_arch_type;
 EXPORT_SYMBOL(__machine_arch_type);
 
@@ -308,10 +310,23 @@ int cpu_architecture(void)
 		cpu_arch = (processor_id >> 16) & 7;
 		if (cpu_arch)
 			cpu_arch += CPU_ARCH_ARMv3;
-	} else {
-		/* the revised CPUID */
-		cpu_arch = ((processor_id >> 12) & 0xf) - 0xb + CPU_ARCH_ARMv6;
-	}
+	} else if ((processor_id & 0x000f0000) == 0x000f0000) {
+		unsigned int mmfr0;
+
+		/* Revised CPUID format. Read the Memory Model Feature
+		 * Register 0 and check for VMSAv7 or PMSAv7 */
+		asm("mrc	p15, 0, %0, c0, c1, 4"
+		    : "=r" (mmfr0));
+		if ((mmfr0 & 0x0000000f) == 0x00000003 ||
+		    (mmfr0 & 0x000000f0) == 0x00000030)
+			cpu_arch = CPU_ARCH_ARMv7;
+		else if ((mmfr0 & 0x0000000f) == 0x00000002 ||
+			 (mmfr0 & 0x000000f0) == 0x00000020)
+			cpu_arch = CPU_ARCH_ARMv6;
+		else
+			cpu_arch = CPU_ARCH_UNKNOWN;
+	} else
+		cpu_arch = CPU_ARCH_UNKNOWN;
 
 	return cpu_arch;
 }
@@ -809,6 +824,7 @@ void __init setup_arch(char **cmdline_p)
 	if (tags->hdr.tag == ATAG_CORE) {
 		if (meminfo.nr_banks != 0)
 			squash_mem_tags(tags);
+		save_atags(tags);
 		parse_tags(tags);
 	}
 
@@ -1001,7 +1017,7 @@ static void c_stop(struct seq_file *m, void *v)
 {
 }
 
-struct seq_operations cpuinfo_op = {
+const struct seq_operations cpuinfo_op = {
 	.start	= c_start,
 	.next	= c_next,
 	.stop	= c_stop,

@@ -474,6 +474,7 @@ int usb_gadget_unregister_driver(struct usb_gadget_driver *driver)
 	spin_unlock_irqrestore(&dev->lock, flags);
 
 	driver->unbind(&dev->gadget);
+	dev->gadget.dev.driver = NULL;
 	device_del(&dev->gadget.dev);
 
 	udc_disable(dev);
@@ -1272,7 +1273,7 @@ static int lh7a40x_set_halt(struct usb_ep *_ep, int value)
 			/*
 			 * Attempts to halt IN endpoints will fail (returning -EAGAIN)
 			 * if any transfer requests are still queued, or if the controller
-			 * FIFO still holds bytes that the host hasn’t collected.
+			 * FIFO still holds bytes that the host hasn't collected.
 			 */
 			spin_unlock_irqrestore(&ep->dev->lock, flags);
 			DEBUG

@@ -41,25 +41,12 @@ struct scsi_disk {
 	u32		index;
 	u8		media_present;
 	u8		write_prot;
+	unsigned	previous_state : 1;
 	unsigned	WCE : 1;	/* state of disk WCE bit */
 	unsigned	RCD : 1;	/* state of disk RCD bit, unused */
 	unsigned	DPOFUA : 1;	/* state of disk DPOFUA bit */
 };
 #define to_scsi_disk(obj) container_of(obj,struct scsi_disk,cdev)
-
-static int  sd_revalidate_disk(struct gendisk *disk);
-static void sd_rw_intr(struct scsi_cmnd * SCpnt);
-static int  sd_probe(struct device *);
-static int  sd_remove(struct device *);
-static void sd_shutdown(struct device *dev);
-static int sd_suspend(struct device *dev, pm_message_t state);
-static int sd_resume(struct device *dev);
-static void sd_rescan(struct device *);
-static int  sd_init_command(struct scsi_cmnd *);
-static void sd_read_capacity(struct scsi_disk *sdkp, unsigned char *buffer);
-static void scsi_disk_release(struct class_device *cdev);
-static void sd_print_sense_hdr(struct scsi_disk *, struct scsi_sense_hdr *);
-static void sd_print_result(struct scsi_disk *, int);
 
 #define sd_printk(prefix, sdsk, fmt, a...)				\
         (sdsk)->disk ?							\

@@ -35,8 +35,8 @@ ccwgroup_bus_match (struct device * dev, struct device_driver * drv)
 	struct ccwgroup_device *gdev;
 	struct ccwgroup_driver *gdrv;
 
-	gdev = container_of(dev, struct ccwgroup_device, dev);
-	gdrv = container_of(drv, struct ccwgroup_driver, driver);
+	gdev = to_ccwgroupdev(dev);
+	gdrv = to_ccwgroupdrv(drv);
 
 	if (gdev->creator_id == gdrv->driver_id)
 		return 1;
@@ -44,8 +44,7 @@ ccwgroup_bus_match (struct device * dev, struct device_driver * drv)
 	return 0;
 }
 static int
-ccwgroup_uevent (struct device *dev, char **envp, int num_envp, char *buffer,
-		  int buffer_size)
+ccwgroup_uevent (struct device *dev, struct kobj_uevent_env *env)
 {
 	/* TODO */
 	return 0;
@@ -76,8 +75,10 @@ static void ccwgroup_ungroup_callback(struct device *dev)
 	struct ccwgroup_device *gdev = to_ccwgroupdev(dev);
 
 	mutex_lock(&gdev->reg_mutex);
-	__ccwgroup_remove_symlinks(gdev);
-	device_unregister(dev);
+	if (device_is_registered(&gdev->dev)) {
+		__ccwgroup_remove_symlinks(gdev);
+		device_unregister(dev);
+	}
 	mutex_unlock(&gdev->reg_mutex);
 }
 
@@ -112,7 +113,7 @@ ccwgroup_release (struct device *dev)
 	gdev = to_ccwgroupdev(dev);
 
 	for (i = 0; i < gdev->count; i++) {
-		gdev->cdev[i]->dev.driver_data = NULL;
+		dev_set_drvdata(&gdev->cdev[i]->dev, NULL);
 		put_device(&gdev->cdev[i]->dev);
 	}
 	kfree(gdev);
@@ -152,16 +153,24 @@ __ccwgroup_create_symlinks(struct ccwgroup_device *gdev)
 	return 0;
 }
 
-/*
- * try to add a new ccwgroup device for one driver
- * argc and argv[] are a list of bus_id's of devices
- * belonging to the driver.
+/**
+ * ccwgroup_create() - create and register a ccw group device
+ * @root: parent device for the new device
+ * @creator_id: identifier of creating driver
+ * @cdrv: ccw driver of slave devices
+ * @argc: number of slave devices
+ * @argv: bus ids of slave devices
+ *
+ * Create and register a new ccw group device as a child of @root. Slave
+ * devices are obtained from the list of bus ids given in @argv[] and must all
+ * belong to @cdrv.
+ * Returns:
+ *  %0 on success and an error code on failure.
+ * Context:
+ *  non-atomic
  */
-int
-ccwgroup_create(struct device *root,
-		unsigned int creator_id,
-		struct ccw_driver *cdrv,
-		int argc, char *argv[])
+int ccwgroup_create(struct device *root, unsigned int creator_id,
+		    struct ccw_driver *cdrv, int argc, char *argv[])
 {
 	struct ccwgroup_device *gdev;
 	int i;
@@ -189,11 +198,11 @@ ccwgroup_create(struct device *root,
 			goto error;
 		}
 		/* Don't allow a device to belong to more than one group. */
-		if (gdev->cdev[i]->dev.driver_data) {
+		if (dev_get_drvdata(&gdev->cdev[i]->dev)) {
 			rc = -EINVAL;
 			goto error;
 		}
-		gdev->cdev[i]->dev.driver_data = gdev;
+		dev_set_drvdata(&gdev->cdev[i]->dev, gdev);
 	}
 
 	gdev->creator_id = creator_id;
@@ -227,8 +236,8 @@ ccwgroup_create(struct device *root,
 error:
 	for (i = 0; i < argc; i++)
 		if (gdev->cdev[i]) {
-			if (gdev->cdev[i]->dev.driver_data == gdev)
-				gdev->cdev[i]->dev.driver_data = NULL;
+			if (dev_get_drvdata(&gdev->cdev[i]->dev) == gdev)
+				dev_set_drvdata(&gdev->cdev[i]->dev, NULL);
 			put_device(&gdev->cdev[i]->dev);
 		}
 	mutex_unlock(&gdev->reg_mutex);
@@ -382,20 +391,38 @@ ccwgroup_remove (struct device *dev)
 	return 0;
 }
 
+static void ccwgroup_shutdown(struct device *dev)
+{
+	struct ccwgroup_device *gdev;
+	struct ccwgroup_driver *gdrv;
+
+	gdev = to_ccwgroupdev(dev);
+	gdrv = to_ccwgroupdrv(dev->driver);
+	if (gdrv && gdrv->shutdown)
+		gdrv->shutdown(gdev);
+}
+
 static struct bus_type ccwgroup_bus_type = {
 	.name   = "ccwgroup",
 	.match  = ccwgroup_bus_match,
 	.uevent = ccwgroup_uevent,
 	.probe  = ccwgroup_probe,
 	.remove = ccwgroup_remove,
+	.shutdown = ccwgroup_shutdown,
 };
 
-int
-ccwgroup_driver_register (struct ccwgroup_driver *cdriver)
+/**
+ * ccwgroup_driver_register() - register a ccw group driver
+ * @cdriver: driver to be registered
+ *
+ * This function is mainly a wrapper around driver_register().
+ */
+int ccwgroup_driver_register(struct ccwgroup_driver *cdriver)
 {
 	/* register our new driver with the core */
 	cdriver->driver.bus = &ccwgroup_bus_type;
 	cdriver->driver.name = cdriver->name;
+	cdriver->driver.owner = cdriver->owner;
 
 	return driver_register(&cdriver->driver);
 }
@@ -406,8 +433,13 @@ __ccwgroup_match_all(struct device *dev, void *data)
 	return 1;
 }
 
-void
-ccwgroup_driver_unregister (struct ccwgroup_driver *cdriver)
+/**
+ * ccwgroup_driver_unregister() - deregister a ccw group driver
+ * @cdriver: driver to be deregistered
+ *
+ * This function is mainly a wrapper around driver_unregister().
+ */
+void ccwgroup_driver_unregister(struct ccwgroup_driver *cdriver)
 {
 	struct device *dev;
 
@@ -427,8 +459,16 @@ ccwgroup_driver_unregister (struct ccwgroup_driver *cdriver)
 	driver_unregister(&cdriver->driver);
 }
 
-int
-ccwgroup_probe_ccwdev(struct ccw_device *cdev)
+/**
+ * ccwgroup_probe_ccwdev() - probe function for slave devices
+ * @cdev: ccw device to be probed
+ *
+ * This is a dummy probe function for ccw devices that are slave devices in
+ * a ccw group device.
+ * Returns:
+ *  always %0
+ */
+int ccwgroup_probe_ccwdev(struct ccw_device *cdev)
 {
 	return 0;
 }
@@ -438,8 +478,8 @@ __ccwgroup_get_gdev_by_cdev(struct ccw_device *cdev)
 {
 	struct ccwgroup_device *gdev;
 
-	if (cdev->dev.driver_data) {
-		gdev = (struct ccwgroup_device *)cdev->dev.driver_data;
+	gdev = dev_get_drvdata(&cdev->dev);
+	if (gdev) {
 		if (get_device(&gdev->dev)) {
 			mutex_lock(&gdev->reg_mutex);
 			if (device_is_registered(&gdev->dev))
@@ -452,8 +492,15 @@ __ccwgroup_get_gdev_by_cdev(struct ccw_device *cdev)
 	return NULL;
 }
 
-void
-ccwgroup_remove_ccwdev(struct ccw_device *cdev)
+/**
+ * ccwgroup_remove_ccwdev() - remove function for slave devices
+ * @cdev: ccw device to be removed
+ *
+ * This is a remove function for ccw devices that are slave devices in a ccw
+ * group device. It sets the ccw device offline and also deregisters the
+ * embedding ccw group device.
+ */
+void ccwgroup_remove_ccwdev(struct ccw_device *cdev)
 {
 	struct ccwgroup_device *gdev;
 

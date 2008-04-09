@@ -71,9 +71,9 @@ struct tipc_sock {
 static u32 dispatch(struct tipc_port *tport, struct sk_buff *buf);
 static void wakeupdispatch(struct tipc_port *tport);
 
-static struct proto_ops packet_ops;
-static struct proto_ops stream_ops;
-static struct proto_ops msg_ops;
+static const struct proto_ops packet_ops;
+static const struct proto_ops stream_ops;
+static const struct proto_ops msg_ops;
 
 static struct proto tipc_proto;
 
@@ -162,12 +162,15 @@ static void advance_queue(struct tipc_sock *tsock)
  *
  * Returns 0 on success, errno otherwise
  */
-static int tipc_create(struct socket *sock, int protocol)
+static int tipc_create(struct net *net, struct socket *sock, int protocol)
 {
 	struct tipc_sock *tsock;
 	struct tipc_port *port;
 	struct sock *sk;
 	u32 ref;
+
+	if (net != &init_net)
+		return -EAFNOSUPPORT;
 
 	if (unlikely(protocol != 0))
 		return -EPROTONOSUPPORT;
@@ -198,7 +201,7 @@ static int tipc_create(struct socket *sock, int protocol)
 		return -EPROTOTYPE;
 	}
 
-	sk = sk_alloc(AF_TIPC, GFP_KERNEL, &tipc_proto, 1);
+	sk = sk_alloc(net, AF_TIPC, GFP_KERNEL, &tipc_proto);
 	if (!sk) {
 		tipc_deleteport(ref);
 		return -ENOMEM;
@@ -250,7 +253,7 @@ static int release(struct socket *sock)
 	dbg("sock_delete: %x\n",tsock);
 	if (!tsock)
 		return 0;
-	down_interruptible(&tsock->sem);
+	down(&tsock->sem);
 	if (!sock->sk) {
 		up(&tsock->sem);
 		return 0;
@@ -1372,7 +1375,7 @@ static int accept(struct socket *sock, struct socket *newsock, int flags)
 	}
 	buf = skb_peek(&sock->sk->sk_receive_queue);
 
-	res = tipc_create(newsock, 0);
+	res = tipc_create(sock->sk->sk_net, newsock, 0);
 	if (!res) {
 		struct tipc_sock *new_tsock = tipc_sk(newsock->sk);
 		struct tipc_portid id;
@@ -1612,7 +1615,7 @@ static int getsockopt(struct socket *sock,
  * Protocol switches for the various types of TIPC sockets
  */
 
-static struct proto_ops msg_ops = {
+static const struct proto_ops msg_ops = {
 	.owner 		= THIS_MODULE,
 	.family		= AF_TIPC,
 	.release	= release,
@@ -1633,7 +1636,7 @@ static struct proto_ops msg_ops = {
 	.sendpage	= sock_no_sendpage
 };
 
-static struct proto_ops packet_ops = {
+static const struct proto_ops packet_ops = {
 	.owner 		= THIS_MODULE,
 	.family		= AF_TIPC,
 	.release	= release,
@@ -1654,7 +1657,7 @@ static struct proto_ops packet_ops = {
 	.sendpage	= sock_no_sendpage
 };
 
-static struct proto_ops stream_ops = {
+static const struct proto_ops stream_ops = {
 	.owner 		= THIS_MODULE,
 	.family		= AF_TIPC,
 	.release	= release,
@@ -1675,7 +1678,7 @@ static struct proto_ops stream_ops = {
 	.sendpage	= sock_no_sendpage
 };
 
-static struct net_proto_family tipc_family_ops = {
+static const struct net_proto_family tipc_family_ops = {
 	.owner 		= THIS_MODULE,
 	.family		= AF_TIPC,
 	.create		= tipc_create

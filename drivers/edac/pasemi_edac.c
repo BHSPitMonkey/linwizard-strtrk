@@ -225,7 +225,7 @@ static int __devinit pasemi_edac_probe(struct pci_dev *pdev,
 		EDAC_FLAG_NONE;
 	mci->mod_name = MODULE_NAME;
 	mci->dev_name = pci_name(pdev);
-	mci->ctl_name = "pasemi,1682m-mc";
+	mci->ctl_name = "pasemi,pwrficient-mc";
 	mci->edac_check = pasemi_edac_check;
 	mci->ctl_page_to_phys = NULL;
 	pci_read_config_dword(pdev, MCCFG_SCRUB, &scrub);
@@ -270,6 +270,7 @@ static void __devexit pasemi_edac_remove(struct pci_dev *pdev)
 
 static const struct pci_device_id pasemi_edac_pci_tbl[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_PASEMI, 0xa00a) },
+	{ }
 };
 
 MODULE_DEVICE_TABLE(pci, pasemi_edac_pci_tbl);
@@ -296,4 +297,4 @@ module_exit(pasemi_edac_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Egor Martovetsky <egor@pasemi.com>");
-MODULE_DESCRIPTION("MC support for PA Semi PA6T-1682M memory controller");
+MODULE_DESCRIPTION("MC support for PA Semi PWRficient memory controller");

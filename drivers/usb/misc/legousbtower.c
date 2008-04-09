@@ -198,13 +198,14 @@ static struct usb_device_id tower_table [] = {
 };
 
 MODULE_DEVICE_TABLE (usb, tower_table);
+static DEFINE_MUTEX(open_disc_mutex);
 
 #define LEGO_USB_TOWER_MINOR_BASE	160
 
 
 /* Structure to hold all of our device specific stuff */
 struct lego_usb_tower {
-	struct semaphore	sem;		/* locks this structure */
+	struct mutex		lock;		/* locks this structure */
 	struct usb_device*	udev;		/* save off the usb device pointer */
 	unsigned char		minor;		/* the starting minor number for this device */
 
@@ -350,25 +351,31 @@ static int tower_open (struct inode *inode, struct file *file)
 		goto exit;
 	}
 
+	mutex_lock(&open_disc_mutex);
 	dev = usb_get_intfdata(interface);
 
 	if (!dev) {
+		mutex_unlock(&open_disc_mutex);
 		retval = -ENODEV;
 		goto exit;
 	}
 
 	/* lock this device */
-	if (down_interruptible (&dev->sem)) {
+	if (mutex_lock_interruptible(&dev->lock)) {
+		mutex_unlock(&open_disc_mutex);
 	        retval = -ERESTARTSYS;
 		goto exit;
 	}
 
+
 	/* allow opening only once */
 	if (dev->open_count) {
+		mutex_unlock(&open_disc_mutex);
 		retval = -EBUSY;
 		goto unlock_exit;
 	}
 	dev->open_count = 1;
+	mutex_unlock(&open_disc_mutex);
 
 	/* reset the tower */
 	result = usb_control_msg (dev->udev,
@@ -414,7 +421,7 @@ static int tower_open (struct inode *inode, struct file *file)
 	file->private_data = dev;
 
 unlock_exit:
-	up (&dev->sem);
+	mutex_unlock(&dev->lock);
 
 exit:
 	dbg(2, "%s: leave, return value %d ", __FUNCTION__, retval);
@@ -437,10 +444,11 @@ static int tower_release (struct inode *inode, struct file *file)
 	if (dev == NULL) {
 		dbg(1, "%s: object is NULL", __FUNCTION__);
 		retval = -ENODEV;
-		goto exit;
+		goto exit_nolock;
 	}
 
-	if (down_interruptible (&dev->sem)) {
+	mutex_lock(&open_disc_mutex);
+	if (mutex_lock_interruptible(&dev->lock)) {
 	        retval = -ERESTARTSYS;
 		goto exit;
 	}
@@ -452,7 +460,9 @@ static int tower_release (struct inode *inode, struct file *file)
 	}
 	if (dev->udev == NULL) {
 		/* the device was unplugged before the file was released */
-		up (&dev->sem);	/* unlock here as tower_delete frees dev */
+
+		/* unlock here as tower_delete frees dev */
+		mutex_unlock(&dev->lock);
 		tower_delete (dev);
 		goto exit;
 	}
@@ -465,9 +475,11 @@ static int tower_release (struct inode *inode, struct file *file)
 	dev->open_count = 0;
 
 unlock_exit:
-	up (&dev->sem);
+	mutex_unlock(&dev->lock);
 
 exit:
+	mutex_unlock(&open_disc_mutex);
+exit_nolock:
 	dbg(2, "%s: leave, return value %d", __FUNCTION__, retval);
 	return retval;
 }
@@ -576,7 +588,7 @@ static ssize_t tower_read (struct file *file, char __user *buffer, size_t count,
 	dev = (struct lego_usb_tower *)file->private_data;
 
 	/* lock this object */
-	if (down_interruptible (&dev->sem)) {
+	if (mutex_lock_interruptible(&dev->lock)) {
 		retval = -ERESTARTSYS;
 		goto exit;
 	}
@@ -643,7 +655,7 @@ static ssize_t tower_read (struct file *file, char __user *buffer, size_t count,
 
 unlock_exit:
 	/* unlock the device */
-	up (&dev->sem);
+	mutex_unlock(&dev->lock);
 
 exit:
 	dbg(2, "%s: leave, return value %d", __FUNCTION__, retval);
@@ -665,7 +677,7 @@ static ssize_t tower_write (struct file *file, const char __user *buffer, size_t
 	dev = (struct lego_usb_tower *)file->private_data;
 
 	/* lock this object */
-	if (down_interruptible (&dev->sem)) {
+	if (mutex_lock_interruptible(&dev->lock)) {
 		retval = -ERESTARTSYS;
 		goto exit;
 	}
@@ -727,7 +739,7 @@ static ssize_t tower_write (struct file *file, const char __user *buffer, size_t
 
 unlock_exit:
 	/* unlock the device */
-	up (&dev->sem);
+	mutex_unlock(&dev->lock);
 
 exit:
 	dbg(2, "%s: leave, return value %d", __FUNCTION__, retval);
@@ -852,7 +864,7 @@ static int tower_probe (struct usb_interface *interface, const struct usb_device
 		goto exit;
 	}
 
-	init_MUTEX (&dev->sem);
+	mutex_init(&dev->lock);
 
 	dev->udev = udev;
 	dev->open_count = 0;
@@ -989,6 +1001,7 @@ static void tower_disconnect (struct usb_interface *interface)
 	dbg(2, "%s: enter", __FUNCTION__);
 
 	dev = usb_get_intfdata (interface);
+	mutex_lock(&open_disc_mutex);
 	usb_set_intfdata (interface, NULL);
 
 	minor = dev->minor;
@@ -996,15 +1009,16 @@ static void tower_disconnect (struct usb_interface *interface)
 	/* give back our minor */
 	usb_deregister_dev (interface, &tower_class);
 
-	down (&dev->sem);
+	mutex_lock(&dev->lock);
+	mutex_unlock(&open_disc_mutex);
 
 	/* if the device is not opened, then we clean up right now */
 	if (!dev->open_count) {
-		up (&dev->sem);
+		mutex_unlock(&dev->lock);
 		tower_delete (dev);
 	} else {
 		dev->udev = NULL;
-		up (&dev->sem);
+		mutex_unlock(&dev->lock);
 	}
 
 	info("LEGO USB Tower #%d now disconnected", (minor - LEGO_USB_TOWER_MINOR_BASE));

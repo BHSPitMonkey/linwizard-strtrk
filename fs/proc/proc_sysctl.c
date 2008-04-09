@@ -9,7 +9,7 @@
 
 static struct dentry_operations proc_sys_dentry_operations;
 static const struct file_operations proc_sys_file_operations;
-static struct inode_operations proc_sys_inode_operations;
+static const struct inode_operations proc_sys_inode_operations;
 
 static void proc_sys_refresh_inode(struct inode *inode, struct ctl_table *table)
 {
@@ -171,7 +171,8 @@ static ssize_t proc_sys_read(struct file *filp, char __user *buf,
 	struct dentry *dentry = filp->f_dentry;
 	struct ctl_table_header *head;
 	struct ctl_table *table;
-	ssize_t error, res;
+	ssize_t error;
+	size_t res;
 
 	table = do_proc_sys_lookup(dentry->d_parent, &dentry->d_name, &head);
 	/* Has the sysctl entry disappeared on us? */
@@ -209,7 +210,8 @@ static ssize_t proc_sys_write(struct file *filp, const char __user *buf,
 	struct dentry *dentry = filp->f_dentry;
 	struct ctl_table_header *head;
 	struct ctl_table *table;
-	ssize_t error, res;
+	ssize_t error;
+	size_t res;
 
 	table = do_proc_sys_lookup(dentry->d_parent, &dentry->d_name, &head);
 	/* Has the sysctl entry disappeared on us? */
@@ -405,7 +407,7 @@ static int proc_sys_permission(struct inode *inode, int mask, struct nameidata *
 	if (!nd || !depth)
 		goto out;
 
-	dentry = nd->dentry;
+	dentry = nd->path.dentry;
 	table = do_proc_sys_lookup(dentry->d_parent, &dentry->d_name, &head);
 
 	/* If the entry does not exist deny permission */
@@ -444,7 +446,7 @@ static const struct file_operations proc_sys_file_operations = {
 	.readdir	= proc_sys_readdir,
 };
 
-static struct inode_operations proc_sys_inode_operations = {
+static const struct inode_operations proc_sys_inode_operations = {
 	.lookup		= proc_sys_lookup,
 	.permission	= proc_sys_permission,
 	.setattr	= proc_sys_setattr,

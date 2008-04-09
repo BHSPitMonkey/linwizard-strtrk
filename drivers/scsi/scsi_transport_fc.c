@@ -36,6 +36,7 @@
 #include <net/netlink.h>
 #include <scsi/scsi_netlink_fc.h>
 #include "scsi_priv.h"
+#include "scsi_transport_fc_internal.h"
 
 static int fc_queue_work(struct Scsi_Host *, struct work_struct *);
 static void fc_vport_sched_delete(struct work_struct *work);
@@ -473,16 +474,16 @@ static DECLARE_TRANSPORT_CLASS(fc_vport_class,
  */
 static unsigned int fc_dev_loss_tmo = 60;		/* seconds */
 
-module_param_named(dev_loss_tmo, fc_dev_loss_tmo, int, S_IRUGO|S_IWUSR);
+module_param_named(dev_loss_tmo, fc_dev_loss_tmo, uint, S_IRUGO|S_IWUSR);
 MODULE_PARM_DESC(dev_loss_tmo,
 		 "Maximum number of seconds that the FC transport should"
 		 " insulate the loss of a remote port. Once this value is"
 		 " exceeded, the scsi target is removed. Value should be"
 		 " between 1 and SCSI_DEVICE_BLOCK_MAX_TIMEOUT.");
 
-/**
+/*
  * Netlink Infrastructure
- **/
+ */
 
 static atomic_t fc_event_seq;
 
@@ -490,10 +491,10 @@ static atomic_t fc_event_seq;
  * fc_get_event_number - Obtain the next sequential FC event number
  *
  * Notes:
- *   We could have inline'd this, but it would have required fc_event_seq to
+ *   We could have inlined this, but it would have required fc_event_seq to
  *   be exposed. For now, live with the subroutine call.
  *   Atomic used to avoid lock/unlock...
- **/
+ */
 u32
 fc_get_event_number(void)
 {
@@ -504,7 +505,6 @@ EXPORT_SYMBOL(fc_get_event_number);
 
 /**
  * fc_host_post_event - called to post an even on an fc_host.
- *
  * @shost:		host the event occurred on
  * @event_number:	fc event number obtained from get_fc_event_number()
  * @event_code:		fc_host event being posted
@@ -512,7 +512,7 @@ EXPORT_SYMBOL(fc_get_event_number);
  *
  * Notes:
  *	This routine assumes no locks are held on entry.
- **/
+ */
 void
 fc_host_post_event(struct Scsi_Host *shost, u32 event_number,
 		enum fc_host_event_code event_code, u32 event_data)
@@ -578,17 +578,16 @@ EXPORT_SYMBOL(fc_host_post_event);
 
 
 /**
- * fc_host_post_vendor_event - called to post a vendor unique event on
- *                             a fc_host
- *
+ * fc_host_post_vendor_event - called to post a vendor unique event on an fc_host
  * @shost:		host the event occurred on
  * @event_number:	fc event number obtained from get_fc_event_number()
  * @data_len:		amount, in bytes, of vendor unique data
  * @data_buf:		pointer to vendor unique data
+ * @vendor_id:          Vendor id
  *
  * Notes:
  *	This routine assumes no locks are held on entry.
- **/
+ */
 void
 fc_host_post_vendor_event(struct Scsi_Host *shost, u32 event_number,
 		u32 data_len, char * data_buf, u64 vendor_id)
@@ -1899,7 +1898,6 @@ static int fc_vport_match(struct attribute_container *cont,
 
 /**
  * fc_timed_out - FC Transport I/O timeout intercept handler
- *
  * @scmd:	The SCSI command which timed out
  *
  * This routine protects against error handlers getting invoked while a
@@ -1919,7 +1917,7 @@ static int fc_vport_match(struct attribute_container *cont,
  *
  * Notes:
  *	This routine assumes no locks are held on entry.
- **/
+ */
 static enum scsi_eh_timer_return
 fc_timed_out(struct scsi_cmnd *scmd)
 {
@@ -1954,6 +1952,19 @@ static int fc_user_scan(struct Scsi_Host *shost, uint channel,
 	}
 
 	return 0;
+}
+
+static int fc_tsk_mgmt_response(struct Scsi_Host *shost, u64 nexus, u64 tm_id,
+				int result)
+{
+	struct fc_internal *i = to_fc_internal(shost->transportt);
+	return i->f->tsk_mgmt_response(shost, nexus, tm_id, result);
+}
+
+static int fc_it_nexus_response(struct Scsi_Host *shost, u64 nexus, int result)
+{
+	struct fc_internal *i = to_fc_internal(shost->transportt);
+	return i->f->it_nexus_response(shost, nexus, result);
 }
 
 struct scsi_transport_template *
@@ -1998,6 +2009,10 @@ fc_attach_transport(struct fc_function_template *ft)
 	i->t.eh_timed_out = fc_timed_out;
 
 	i->t.user_scan = fc_user_scan;
+
+	/* target-mode drivers' functions */
+	i->t.tsk_mgmt_response = fc_tsk_mgmt_response;
+	i->t.it_nexus_response = fc_it_nexus_response;
 
 	/*
 	 * Setup SCSI Target Attributes.
@@ -2115,7 +2130,7 @@ EXPORT_SYMBOL(fc_release_transport);
  * 	1 - work queued for execution
  *	0 - work is already queued
  *	-EINVAL - work queue doesn't exist
- **/
+ */
 static int
 fc_queue_work(struct Scsi_Host *shost, struct work_struct *work)
 {
@@ -2134,7 +2149,7 @@ fc_queue_work(struct Scsi_Host *shost, struct work_struct *work)
 /**
  * fc_flush_work - Flush a fc_host's workqueue.
  * @shost:	Pointer to Scsi_Host bound to fc_host.
- **/
+ */
 static void
 fc_flush_work(struct Scsi_Host *shost)
 {
@@ -2157,7 +2172,7 @@ fc_flush_work(struct Scsi_Host *shost)
  *
  * Return value:
  * 	1 on success / 0 already queued / < 0 for error
- **/
+ */
 static int
 fc_queue_devloss_work(struct Scsi_Host *shost, struct delayed_work *work,
 				unsigned long delay)
@@ -2177,7 +2192,7 @@ fc_queue_devloss_work(struct Scsi_Host *shost, struct delayed_work *work,
 /**
  * fc_flush_devloss - Flush a fc_host's devloss workqueue.
  * @shost:	Pointer to Scsi_Host bound to fc_host.
- **/
+ */
 static void
 fc_flush_devloss(struct Scsi_Host *shost)
 {
@@ -2194,21 +2209,20 @@ fc_flush_devloss(struct Scsi_Host *shost)
 
 
 /**
- * fc_remove_host - called to terminate any fc_transport-related elements
- *                  for a scsi host.
- * @rport:	remote port to be unblocked.
+ * fc_remove_host - called to terminate any fc_transport-related elements for a scsi host.
+ * @shost:	Which &Scsi_Host
  *
  * This routine is expected to be called immediately preceeding the
  * a driver's call to scsi_remove_host().
  *
  * WARNING: A driver utilizing the fc_transport, which fails to call
- *   this routine prior to scsi_remote_host(), will leave dangling
+ *   this routine prior to scsi_remove_host(), will leave dangling
  *   objects in /sys/class/fc_remote_ports. Access to any of these
  *   objects can result in a system crash !!!
  *
  * Notes:
  *	This routine assumes no locks are held on entry.
- **/
+ */
 void
 fc_remove_host(struct Scsi_Host *shost)
 {
@@ -2263,10 +2277,10 @@ EXPORT_SYMBOL(fc_remove_host);
 
 /**
  * fc_starget_delete - called to delete the scsi decendents of an rport
- *                  (target and all sdevs)
- *
  * @work:	remote port to be operated on.
- **/
+ *
+ * Deletes target and all sdevs.
+ */
 static void
 fc_starget_delete(struct work_struct *work)
 {
@@ -2285,9 +2299,8 @@ fc_starget_delete(struct work_struct *work)
 
 /**
  * fc_rport_final_delete - finish rport termination and delete it.
- *
  * @work:	remote port to be deleted.
- **/
+ */
 static void
 fc_rport_final_delete(struct work_struct *work)
 {
@@ -2357,7 +2370,7 @@ fc_rport_final_delete(struct work_struct *work)
  *
  * Notes:
  *	This routine assumes no locks are held on entry.
- **/
+ */
 static struct fc_rport *
 fc_rport_create(struct Scsi_Host *shost, int channel,
 	struct fc_rport_identifiers  *ids)
@@ -2444,8 +2457,7 @@ delete_rport:
 }
 
 /**
- * fc_remote_port_add - notifies the fc transport of the existence
- *		of a remote FC port.
+ * fc_remote_port_add - notify fc transport of the existence of a remote FC port.
  * @shost:	scsi host the remote port is connected to.
  * @channel:	Channel on shost port connected to.
  * @ids:	The world wide names, fc address, and FC4 port
@@ -2481,7 +2493,7 @@ delete_rport:
  *
  * Notes:
  *	This routine assumes no locks are held on entry.
- **/
+ */
 struct fc_rport *
 fc_remote_port_add(struct Scsi_Host *shost, int channel,
 	struct fc_rport_identifiers  *ids)
@@ -2665,19 +2677,18 @@ EXPORT_SYMBOL(fc_remote_port_add);
 
 
 /**
- * fc_remote_port_delete - notifies the fc transport that a remote
- *		port is no longer in existence.
+ * fc_remote_port_delete - notifies the fc transport that a remote port is no longer in existence.
  * @rport:	The remote port that no longer exists
  *
  * The LLDD calls this routine to notify the transport that a remote
  * port is no longer part of the topology. Note: Although a port
  * may no longer be part of the topology, it may persist in the remote
  * ports displayed by the fc_host. We do this under 2 conditions:
- * - If the port was a scsi target, we delay its deletion by "blocking" it.
+ * 1) If the port was a scsi target, we delay its deletion by "blocking" it.
  *   This allows the port to temporarily disappear, then reappear without
  *   disrupting the SCSI device tree attached to it. During the "blocked"
  *   period the port will still exist.
- * - If the port was a scsi target and disappears for longer than we
+ * 2) If the port was a scsi target and disappears for longer than we
  *   expect, we'll delete the port and the tear down the SCSI device tree
  *   attached to it. However, we want to semi-persist the target id assigned
  *   to that port if it eventually does exist. The port structure will
@@ -2691,7 +2702,8 @@ EXPORT_SYMBOL(fc_remote_port_add);
  * temporary blocked state. From the LLDD's perspective, the rport no
  * longer exists. From the SCSI midlayer's perspective, the SCSI target
  * exists, but all sdevs on it are blocked from further I/O. The following
- * is then expected:
+ * is then expected.
+ *
  *   If the remote port does not return (signaled by a LLDD call to
  *   fc_remote_port_add()) within the dev_loss_tmo timeout, then the
  *   scsi target is removed - killing all outstanding i/o and removing the
@@ -2713,7 +2725,7 @@ EXPORT_SYMBOL(fc_remote_port_add);
  *
  * Notes:
  *	This routine assumes no locks are held on entry.
- **/
+ */
 void
 fc_remote_port_delete(struct fc_rport  *rport)
 {
@@ -2756,6 +2768,10 @@ fc_remote_port_delete(struct fc_rport  *rport)
 
 	spin_unlock_irqrestore(shost->host_lock, flags);
 
+	if (rport->roles & FC_PORT_ROLE_FCP_INITIATOR &&
+	    shost->active_mode & MODE_TARGET)
+		fc_tgt_it_nexus_destroy(shost, (unsigned long)rport);
+
 	scsi_target_block(&rport->dev);
 
 	/* see if we need to kill io faster than waiting for device loss */
@@ -2770,12 +2786,12 @@ fc_remote_port_delete(struct fc_rport  *rport)
 EXPORT_SYMBOL(fc_remote_port_delete);
 
 /**
- * fc_remote_port_rolechg - notifies the fc transport that the roles
- *		on a remote may have changed.
+ * fc_remote_port_rolechg - notifies the fc transport that the roles on a remote may have changed.
  * @rport:	The remote port that changed.
+ * @roles:      New roles for this port.
  *
- * The LLDD calls this routine to notify the transport that the roles
- * on a remote port may have changed. The largest effect of this is
+ * Description: The LLDD calls this routine to notify the transport that the
+ * roles on a remote port may have changed. The largest effect of this is
  * if a port now becomes a FCP Target, it must be allocated a
  * scsi target id.  If the port is no longer a FCP target, any
  * scsi target id value assigned to it will persist in case the
@@ -2788,7 +2804,7 @@ EXPORT_SYMBOL(fc_remote_port_delete);
  *
  * Notes:
  *	This routine assumes no locks are held on entry.
- **/
+ */
 void
 fc_remote_port_rolechg(struct fc_rport  *rport, u32 roles)
 {
@@ -2796,6 +2812,7 @@ fc_remote_port_rolechg(struct fc_rport  *rport, u32 roles)
 	struct fc_host_attrs *fc_host = shost_to_fc_host(shost);
 	unsigned long flags;
 	int create = 0;
+	int ret;
 
 	spin_lock_irqsave(shost->host_lock, flags);
 	if (roles & FC_PORT_ROLE_FCP_TARGET) {
@@ -2804,6 +2821,12 @@ fc_remote_port_rolechg(struct fc_rport  *rport, u32 roles)
 			create = 1;
 		} else if (!(rport->roles & FC_PORT_ROLE_FCP_TARGET))
 			create = 1;
+	} else if (shost->active_mode & MODE_TARGET) {
+		ret = fc_tgt_it_nexus_create(shost, (unsigned long)rport,
+					     (char *)&rport->node_name);
+		if (ret)
+			printk(KERN_ERR "FC Remore Port tgt nexus failed %d\n",
+			       ret);
 	}
 
 	rport->roles = roles;
@@ -2846,12 +2869,12 @@ fc_remote_port_rolechg(struct fc_rport  *rport, u32 roles)
 EXPORT_SYMBOL(fc_remote_port_rolechg);
 
 /**
- * fc_timeout_deleted_rport - Timeout handler for a deleted remote port,
- * 			which we blocked, and has now failed to return
- * 			in the allotted time.
- *
+ * fc_timeout_deleted_rport - Timeout handler for a deleted remote port.
  * @work:	rport target that failed to reappear in the allotted time.
- **/
+ *
+ * Description: An attempt to delete a remote port blocks, and if it fails
+ *              to return in the allotted time this gets called.
+ */
 static void
 fc_timeout_deleted_rport(struct work_struct *work)
 {
@@ -2955,14 +2978,12 @@ fc_timeout_deleted_rport(struct work_struct *work)
 }
 
 /**
- * fc_timeout_fail_rport_io - Timeout handler for a fast io failing on a
- *                       disconnected SCSI target.
- *
+ * fc_timeout_fail_rport_io - Timeout handler for a fast io failing on a disconnected SCSI target.
  * @work:	rport to terminate io on.
  *
  * Notes: Only requests the failure of the io, not that all are flushed
  *    prior to returning.
- **/
+ */
 static void
 fc_timeout_fail_rport_io(struct work_struct *work)
 {
@@ -2979,19 +3000,20 @@ fc_timeout_fail_rport_io(struct work_struct *work)
 
 /**
  * fc_scsi_scan_rport - called to perform a scsi scan on a remote port.
- *
  * @work:	remote port to be scanned.
- **/
+ */
 static void
 fc_scsi_scan_rport(struct work_struct *work)
 {
 	struct fc_rport *rport =
 		container_of(work, struct fc_rport, scan_work);
 	struct Scsi_Host *shost = rport_to_shost(rport);
+	struct fc_internal *i = to_fc_internal(shost->transportt);
 	unsigned long flags;
 
 	if ((rport->port_state == FC_PORTSTATE_ONLINE) &&
-	    (rport->roles & FC_PORT_ROLE_FCP_TARGET)) {
+	    (rport->roles & FC_PORT_ROLE_FCP_TARGET) &&
+	    !(i->f->disable_target_scan)) {
 		scsi_scan_target(&rport->dev, rport->channel,
 			rport->scsi_target_id, SCAN_WILD_CARD, 1);
 	}
@@ -3016,7 +3038,7 @@ fc_scsi_scan_rport(struct work_struct *work)
  *
  * Notes:
  *	This routine assumes no locks are held on entry.
- **/
+ */
 static int
 fc_vport_create(struct Scsi_Host *shost, int channel, struct device *pdev,
 	struct fc_vport_identifiers  *ids, struct fc_vport **ret_vport)
@@ -3141,7 +3163,7 @@ delete_vport:
  *
  * Notes:
  *	This routine assumes no locks are held on entry.
- **/
+ */
 int
 fc_vport_terminate(struct fc_vport *vport)
 {
@@ -3201,9 +3223,8 @@ EXPORT_SYMBOL(fc_vport_terminate);
 
 /**
  * fc_vport_sched_delete - workq-based delete request for a vport
- *
  * @work:	vport to be deleted.
- **/
+ */
 static void
 fc_vport_sched_delete(struct work_struct *work)
 {

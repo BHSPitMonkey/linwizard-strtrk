@@ -1,6 +1,6 @@
 /*
  *  ISA Plug & Play support
- *  Copyright (c) by Jaroslav Kysela <perex@suse.cz>
+ *  Copyright (c) by Jaroslav Kysela <perex@perex.cz>
  *
  *
  *   This program is free software; you can redistribute it and/or modify
@@ -53,7 +53,7 @@ static int isapnp_rdp;		/* Read Data Port */
 static int isapnp_reset = 1;	/* reset all PnP cards (deactivate) */
 static int isapnp_verbose = 1;	/* verbose mode */
 
-MODULE_AUTHOR("Jaroslav Kysela <perex@suse.cz>");
+MODULE_AUTHOR("Jaroslav Kysela <perex@perex.cz>");
 MODULE_DESCRIPTION("Generic ISA Plug & Play support");
 module_param(isapnp_disable, int, 0);
 MODULE_PARM_DESC(isapnp_disable, "ISA Plug & Play disable");
@@ -87,6 +87,15 @@ MODULE_LICENSE("GPL");
 #define _LTAG_VENDOR		0x84
 #define _LTAG_MEM32RANGE	0x85
 #define _LTAG_FIXEDMEM32RANGE	0x86
+
+/*
+ * Sizes of ISAPNP logical device configuration register sets.
+ * See PNP-ISA-v1.0a.pdf, Appendix A.
+ */
+#define ISAPNP_MAX_MEM		4
+#define ISAPNP_MAX_PORT		8
+#define ISAPNP_MAX_IRQ		2
+#define ISAPNP_MAX_DMA		2
 
 static unsigned char isapnp_checksum_value;
 static DEFINE_MUTEX(isapnp_cfg_mutex);
@@ -945,14 +954,14 @@ static int isapnp_read_resources(struct pnp_dev *dev,
 
 	dev->active = isapnp_read_byte(ISAPNP_CFG_ACTIVATE);
 	if (dev->active) {
-		for (tmp = 0; tmp < PNP_MAX_PORT; tmp++) {
+		for (tmp = 0; tmp < ISAPNP_MAX_PORT; tmp++) {
 			ret = isapnp_read_word(ISAPNP_CFG_PORT + (tmp << 1));
 			if (!ret)
 				continue;
 			res->port_resource[tmp].start = ret;
 			res->port_resource[tmp].flags = IORESOURCE_IO;
 		}
-		for (tmp = 0; tmp < PNP_MAX_MEM; tmp++) {
+		for (tmp = 0; tmp < ISAPNP_MAX_MEM; tmp++) {
 			ret =
 			    isapnp_read_word(ISAPNP_CFG_MEM + (tmp << 3)) << 8;
 			if (!ret)
@@ -960,7 +969,7 @@ static int isapnp_read_resources(struct pnp_dev *dev,
 			res->mem_resource[tmp].start = ret;
 			res->mem_resource[tmp].flags = IORESOURCE_MEM;
 		}
-		for (tmp = 0; tmp < PNP_MAX_IRQ; tmp++) {
+		for (tmp = 0; tmp < ISAPNP_MAX_IRQ; tmp++) {
 			ret =
 			    (isapnp_read_word(ISAPNP_CFG_IRQ + (tmp << 1)) >>
 			     8);
@@ -970,7 +979,7 @@ static int isapnp_read_resources(struct pnp_dev *dev,
 			    res->irq_resource[tmp].end = ret;
 			res->irq_resource[tmp].flags = IORESOURCE_IRQ;
 		}
-		for (tmp = 0; tmp < PNP_MAX_DMA; tmp++) {
+		for (tmp = 0; tmp < ISAPNP_MAX_DMA; tmp++) {
 			ret = isapnp_read_byte(ISAPNP_CFG_DMA + tmp);
 			if (ret == 4)
 				continue;
@@ -1002,14 +1011,14 @@ static int isapnp_set_resources(struct pnp_dev *dev,
 	isapnp_cfg_begin(dev->card->number, dev->number);
 	dev->active = 1;
 	for (tmp = 0;
-	     tmp < PNP_MAX_PORT
+	     tmp < ISAPNP_MAX_PORT
 	     && (res->port_resource[tmp].
 		 flags & (IORESOURCE_IO | IORESOURCE_UNSET)) == IORESOURCE_IO;
 	     tmp++)
 		isapnp_write_word(ISAPNP_CFG_PORT + (tmp << 1),
 				  res->port_resource[tmp].start);
 	for (tmp = 0;
-	     tmp < PNP_MAX_IRQ
+	     tmp < ISAPNP_MAX_IRQ
 	     && (res->irq_resource[tmp].
 		 flags & (IORESOURCE_IRQ | IORESOURCE_UNSET)) == IORESOURCE_IRQ;
 	     tmp++) {
@@ -1019,14 +1028,14 @@ static int isapnp_set_resources(struct pnp_dev *dev,
 		isapnp_write_byte(ISAPNP_CFG_IRQ + (tmp << 1), irq);
 	}
 	for (tmp = 0;
-	     tmp < PNP_MAX_DMA
+	     tmp < ISAPNP_MAX_DMA
 	     && (res->dma_resource[tmp].
 		 flags & (IORESOURCE_DMA | IORESOURCE_UNSET)) == IORESOURCE_DMA;
 	     tmp++)
 		isapnp_write_byte(ISAPNP_CFG_DMA + tmp,
 				  res->dma_resource[tmp].start);
 	for (tmp = 0;
-	     tmp < PNP_MAX_MEM
+	     tmp < ISAPNP_MAX_MEM
 	     && (res->mem_resource[tmp].
 		 flags & (IORESOURCE_MEM | IORESOURCE_UNSET)) == IORESOURCE_MEM;
 	     tmp++)

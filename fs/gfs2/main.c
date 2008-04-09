@@ -24,17 +24,16 @@
 #include "util.h"
 #include "glock.h"
 
-static void gfs2_init_inode_once(void *foo, struct kmem_cache *cachep, unsigned long flags)
+static void gfs2_init_inode_once(struct kmem_cache *cachep, void *foo)
 {
 	struct gfs2_inode *ip = foo;
 
 	inode_init_once(&ip->i_inode);
-	spin_lock_init(&ip->i_spin);
 	init_rwsem(&ip->i_rw_mutex);
-	memset(ip->i_cache, 0, sizeof(ip->i_cache));
+	ip->i_alloc = NULL;
 }
 
-static void gfs2_init_glock_once(void *foo, struct kmem_cache *cachep, unsigned long flags)
+static void gfs2_init_glock_once(struct kmem_cache *cachep, void *foo)
 {
 	struct gfs2_glock *gl = foo;
 
@@ -107,6 +106,8 @@ static int __init init_gfs2_fs(void)
 fail_unregister:
 	unregister_filesystem(&gfs2_fs_type);
 fail:
+	gfs2_glock_exit();
+
 	if (gfs2_bufdata_cachep)
 		kmem_cache_destroy(gfs2_bufdata_cachep);
 
@@ -127,6 +128,7 @@ fail:
 
 static void __exit exit_gfs2_fs(void)
 {
+	gfs2_glock_exit();
 	gfs2_unregister_debugfs();
 	unregister_filesystem(&gfs2_fs_type);
 	unregister_filesystem(&gfs2meta_fs_type);

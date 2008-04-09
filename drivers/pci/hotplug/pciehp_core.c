@@ -304,8 +304,8 @@ static int set_attention_status(struct hotplug_slot *hotplug_slot, u8 status)
 	dbg("%s - physical_slot = %s\n", __FUNCTION__, hotplug_slot->name);
 
 	hotplug_slot->info->attention_status = status;
-	
-	if (ATTN_LED(slot->ctrl->ctrlcap)) 
+
+	if (ATTN_LED(slot->ctrl->ctrlcap))
 		slot->hpc_ops->set_attention_status(slot, status);
 
 	return 0;
@@ -405,7 +405,7 @@ static int get_max_bus_speed(struct hotplug_slot *hotplug_slot, enum pci_bus_spe
 	int retval;
 
 	dbg("%s - physical_slot = %s\n", __FUNCTION__, hotplug_slot->name);
-	
+
 	retval = slot->hpc_ops->get_max_bus_speed(slot, value);
 	if (retval < 0)
 		*value = PCI_SPEED_UNKNOWN;
@@ -419,7 +419,7 @@ static int get_cur_bus_speed(struct hotplug_slot *hotplug_slot, enum pci_bus_spe
 	int retval;
 
 	dbg("%s - physical_slot = %s\n", __FUNCTION__, hotplug_slot->name);
-	
+
 	retval = slot->hpc_ops->get_cur_bus_speed(slot, value);
 	if (retval < 0)
 		*value = PCI_SPEED_UNKNOWN;
@@ -434,7 +434,7 @@ static int pciehp_probe(struct pcie_device *dev, const struct pcie_port_service_
 	struct slot *t_slot;
 	u8 value;
 	struct pci_dev *pdev;
-	
+
 	ctrl = kzalloc(sizeof(*ctrl), GFP_KERNEL);
 	if (!ctrl) {
 		err("%s : out of memory\n", __FUNCTION__);
@@ -453,13 +453,9 @@ static int pciehp_probe(struct pcie_device *dev, const struct pcie_port_service_
 
 	pci_set_drvdata(pdev, ctrl);
 
-	ctrl->bus = pdev->bus->number;  /* ctrl bus */
-	ctrl->slot_bus = pdev->subordinate->number;  /* bus controlled by this HPC */
-
-	ctrl->device = PCI_SLOT(pdev->devfn);
-	ctrl->function = PCI_FUNC(pdev->devfn);
-	dbg("%s: ctrl bus=0x%x, device=%x, function=%x, irq=%x\n", __FUNCTION__,
-		ctrl->bus, ctrl->device, ctrl->function, pdev->irq);
+	dbg("%s: ctrl bus=0x%x, device=%x, function=%x, irq=%x\n",
+	    __FUNCTION__, pdev->bus->number, PCI_SLOT(pdev->devfn),
+	    PCI_FUNC(pdev->devfn), pdev->irq);
 
 	/* Setup the slot information structures */
 	rc = init_slots(ctrl);
@@ -471,6 +467,11 @@ static int pciehp_probe(struct pcie_device *dev, const struct pcie_port_service_
 	t_slot = pciehp_find_slot(ctrl, ctrl->slot_device_offset);
 
 	t_slot->hpc_ops->get_adapter_status(t_slot, &value); /* Check if slot is occupied */
+	if (value && pciehp_force) {
+		rc = pciehp_enable_slot(t_slot);
+		if (rc)	/* -ENODEV: shouldn't happen, but deal with it */
+			value = 0;
+	}
 	if ((POWER_CTRL(ctrl->ctrlcap)) && !value) {
 		rc = t_slot->hpc_ops->power_off_slot(t_slot); /* Power off slot if not occupied*/
 		if (rc)
@@ -502,23 +503,41 @@ static void pciehp_remove (struct pcie_device *dev)
 #ifdef CONFIG_PM
 static int pciehp_suspend (struct pcie_device *dev, pm_message_t state)
 {
-	printk("%s ENTRY\n", __FUNCTION__);	
+	printk("%s ENTRY\n", __FUNCTION__);
 	return 0;
 }
 
 static int pciehp_resume (struct pcie_device *dev)
 {
-	printk("%s ENTRY\n", __FUNCTION__);	
+	printk("%s ENTRY\n", __FUNCTION__);
+	if (pciehp_force) {
+		struct pci_dev *pdev = dev->port;
+		struct controller *ctrl = pci_get_drvdata(pdev);
+		struct slot *t_slot;
+		u8 status;
+
+		/* reinitialize the chipset's event detection logic */
+		pcie_init_hardware_part2(ctrl, dev);
+
+		t_slot = pciehp_find_slot(ctrl, ctrl->slot_device_offset);
+
+		/* Check if slot is occupied */
+		t_slot->hpc_ops->get_adapter_status(t_slot, &status);
+		if (status)
+			pciehp_enable_slot(t_slot);
+		else
+			pciehp_disable_slot(t_slot);
+	}
 	return 0;
 }
 #endif
 
-static struct pcie_port_service_id port_pci_ids[] = { { 
-	.vendor = PCI_ANY_ID, 
+static struct pcie_port_service_id port_pci_ids[] = { {
+	.vendor = PCI_ANY_ID,
 	.device = PCI_ANY_ID,
 	.port_type = PCIE_ANY_PORT,
 	.service_type = PCIE_PORT_SERVICE_HP,
-	.driver_data =	0, 
+	.driver_data =	0,
 	}, { /* end: all zeroes */ }
 };
 static const char device_name[] = "hpdriver";
@@ -539,10 +558,6 @@ static struct pcie_port_service_driver hpdriver_portdrv = {
 static int __init pcied_init(void)
 {
 	int retval = 0;
-
-#ifdef CONFIG_HOTPLUG_PCI_PCIE_POLL_EVENT_MODE
-	pciehp_poll_mode = 1;
-#endif
 
 	retval = pcie_port_service_register(&hpdriver_portdrv);
  	dbg("pcie_port_service_register = %d\n", retval);

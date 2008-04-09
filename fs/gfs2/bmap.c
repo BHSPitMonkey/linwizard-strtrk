@@ -59,7 +59,6 @@ struct strip_mine {
 static int gfs2_unstuffer_page(struct gfs2_inode *ip, struct buffer_head *dibh,
 			       u64 block, struct page *page)
 {
-	struct gfs2_sbd *sdp = GFS2_SB(&ip->i_inode);
 	struct inode *inode = &ip->i_inode;
 	struct buffer_head *bh;
 	int release = 0;
@@ -93,9 +92,10 @@ static int gfs2_unstuffer_page(struct gfs2_inode *ip, struct buffer_head *dibh,
 		map_bh(bh, inode->i_sb, block);
 
 	set_buffer_uptodate(bh);
-	if (sdp->sd_args.ar_data == GFS2_DATA_ORDERED || gfs2_is_jdata(ip))
+	if (!gfs2_is_jdata(ip))
+		mark_buffer_dirty(bh);
+	if (!gfs2_is_writeback(ip))
 		gfs2_trans_add_bh(ip->i_gl, bh, 0);
-	mark_buffer_dirty(bh);
 
 	if (release) {
 		unlock_page(page);
@@ -452,8 +452,8 @@ static inline void bmap_unlock(struct inode *inode, int create)
  * Returns: errno
  */
 
-int gfs2_block_map(struct inode *inode, u64 lblock, int create,
-		   struct buffer_head *bh_map)
+int gfs2_block_map(struct inode *inode, sector_t lblock,
+		   struct buffer_head *bh_map, int create)
 {
 	struct gfs2_inode *ip = GFS2_I(inode);
 	struct gfs2_sbd *sdp = GFS2_SB(inode);
@@ -469,6 +469,7 @@ int gfs2_block_map(struct inode *inode, u64 lblock, int create,
 	unsigned int maxlen = bh_map->b_size >> inode->i_blkbits;
 	struct metapath mp;
 	u64 size;
+	struct buffer_head *dibh = NULL;
 
 	BUG_ON(maxlen == 0);
 
@@ -499,6 +500,8 @@ int gfs2_block_map(struct inode *inode, u64 lblock, int create,
 	error = gfs2_meta_inode_buffer(ip, &bh);
 	if (error)
 		goto out_fail;
+	dibh = bh;
+	get_bh(dibh);
 
 	for (x = 0; x < end_of_metadata; x++) {
 		lookup_block(ip, bh, x, &mp, create, &new, &dblock);
@@ -517,13 +520,8 @@ int gfs2_block_map(struct inode *inode, u64 lblock, int create,
 		if (boundary)
 			set_buffer_boundary(bh_map);
 		if (new) {
-			struct buffer_head *dibh;
-			error = gfs2_meta_inode_buffer(ip, &dibh);
-			if (!error) {
-				gfs2_trans_add_bh(ip->i_gl, dibh, 1);
-				gfs2_dinode_out(ip, dibh->b_data);
-				brelse(dibh);
-			}
+			gfs2_trans_add_bh(ip->i_gl, dibh, 1);
+			gfs2_dinode_out(ip, dibh->b_data);
 			set_buffer_new(bh_map);
 			goto out_brelse;
 		}
@@ -544,6 +542,8 @@ out_brelse:
 out_ok:
 	error = 0;
 out_fail:
+	if (dibh)
+		brelse(dibh);
 	bmap_unlock(inode, create);
 	return error;
 }
@@ -559,7 +559,7 @@ int gfs2_extent_map(struct inode *inode, u64 lblock, int *new, u64 *dblock, unsi
 	BUG_ON(!new);
 
 	bh.b_size = 1 << (inode->i_blkbits + 5);
-	ret = gfs2_block_map(inode, lblock, create, &bh);
+	ret = gfs2_block_map(inode, lblock, &bh, create);
 	*extlen = bh.b_size >> inode->i_blkbits;
 	*dblock = bh.b_blocknr;
 	if (buffer_new(&bh))
@@ -683,7 +683,7 @@ static int do_strip(struct gfs2_inode *ip, struct buffer_head *dibh,
 	if (metadata)
 		revokes = (height) ? sdp->sd_inptrs : sdp->sd_diptrs;
 
-	error = gfs2_rindex_hold(sdp, &ip->i_alloc.al_ri_gh);
+	error = gfs2_rindex_hold(sdp, &ip->i_alloc->al_ri_gh);
 	if (error)
 		return error;
 
@@ -785,7 +785,7 @@ out_rg_gunlock:
 out_rlist:
 	gfs2_rlist_free(&rlist);
 out:
-	gfs2_glock_dq_uninit(&ip->i_alloc.al_ri_gh);
+	gfs2_glock_dq_uninit(&ip->i_alloc->al_ri_gh);
 	return error;
 }
 
@@ -878,7 +878,6 @@ static int gfs2_block_truncate_page(struct address_space *mapping)
 {
 	struct inode *inode = mapping->host;
 	struct gfs2_inode *ip = GFS2_I(inode);
-	struct gfs2_sbd *sdp = GFS2_SB(inode);
 	loff_t from = inode->i_size;
 	unsigned long index = from >> PAGE_CACHE_SHIFT;
 	unsigned offset = from & (PAGE_CACHE_SIZE-1);
@@ -910,7 +909,7 @@ static int gfs2_block_truncate_page(struct address_space *mapping)
 	err = 0;
 
 	if (!buffer_mapped(bh)) {
-		gfs2_get_block(inode, iblock, bh, 0);
+		gfs2_block_map(inode, iblock, bh, 0);
 		/* unmapped? It's a hole - nothing to do */
 		if (!buffer_mapped(bh))
 			goto unlock;
@@ -930,10 +929,10 @@ static int gfs2_block_truncate_page(struct address_space *mapping)
 		err = 0;
 	}
 
-	if (sdp->sd_args.ar_data == GFS2_DATA_ORDERED || gfs2_is_jdata(ip))
+	if (!gfs2_is_writeback(ip))
 		gfs2_trans_add_bh(ip->i_gl, bh, 0);
 
-	zero_user_page(page, offset, length, KM_USER0);
+	zero_user(page, offset, length);
 
 unlock:
 	unlock_page(page);
@@ -1085,6 +1084,33 @@ static int do_shrink(struct gfs2_inode *ip, u64 size)
 	return error;
 }
 
+static int do_touch(struct gfs2_inode *ip, u64 size)
+{
+	struct gfs2_sbd *sdp = GFS2_SB(&ip->i_inode);
+	struct buffer_head *dibh;
+	int error;
+
+	error = gfs2_trans_begin(sdp, RES_DINODE, 0);
+	if (error)
+		return error;
+
+	down_write(&ip->i_rw_mutex);
+
+	error = gfs2_meta_inode_buffer(ip, &dibh);
+	if (error)
+		goto do_touch_out;
+
+	ip->i_inode.i_mtime = ip->i_inode.i_ctime = CURRENT_TIME;
+	gfs2_trans_add_bh(ip->i_gl, dibh, 1);
+	gfs2_dinode_out(ip, dibh->b_data);
+	brelse(dibh);
+
+do_touch_out:
+	up_write(&ip->i_rw_mutex);
+	gfs2_trans_end(sdp);
+	return error;
+}
+
 /**
  * gfs2_truncatei - make a file a given size
  * @ip: the inode
@@ -1105,8 +1131,11 @@ int gfs2_truncatei(struct gfs2_inode *ip, u64 size)
 
 	if (size > ip->i_di.di_size)
 		error = do_grow(ip, size);
-	else
+	else if (size < ip->i_di.di_size)
 		error = do_shrink(ip, size);
+	else
+		/* update time stamps */
+		error = do_touch(ip, size);
 
 	return error;
 }
@@ -1193,8 +1222,13 @@ int gfs2_write_alloc_required(struct gfs2_inode *ip, u64 offset,
 		do_div(lblock_stop, bsize);
 	} else {
 		unsigned int shift = sdp->sd_sb.sb_bsize_shift;
+		u64 end_of_file = (ip->i_di.di_size + sdp->sd_sb.sb_bsize - 1) >> shift;
 		lblock = offset >> shift;
 		lblock_stop = (offset + len + sdp->sd_sb.sb_bsize - 1) >> shift;
+		if (lblock_stop > end_of_file) {
+			*alloc_required = 1;
+			return 0;
+		}
 	}
 
 	for (; lblock < lblock_stop; lblock += extlen) {

@@ -81,6 +81,7 @@ void show_mem(void)
 static void __init setup_ro_region(void)
 {
 	pgd_t *pgd;
+	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte;
 	pte_t new_pte;
@@ -91,7 +92,8 @@ static void __init setup_ro_region(void)
 
 	for (; address < end; address += PAGE_SIZE) {
 		pgd = pgd_offset_k(address);
-		pmd = pmd_offset(pgd, address);
+		pud = pud_offset(pgd, address);
+		pmd = pmd_offset(pud, address);
 		pte = pte_offset_kernel(pmd, address);
 		new_pte = mk_pte_phys(address, __pgprot(_PAGE_RO));
 		*pte = new_pte;
@@ -103,32 +105,29 @@ static void __init setup_ro_region(void)
  */
 void __init paging_init(void)
 {
-	pgd_t *pg_dir;
-	int i;
-	unsigned long pgdir_k;
 	static const int ssm_mask = 0x04000000L;
 	unsigned long max_zone_pfns[MAX_NR_ZONES];
+	unsigned long pgd_type;
 
-	pg_dir = swapper_pg_dir;
-	
+	init_mm.pgd = swapper_pg_dir;
+	S390_lowcore.kernel_asce = __pa(init_mm.pgd) & PAGE_MASK;
 #ifdef CONFIG_64BIT
-	pgdir_k = (__pa(swapper_pg_dir) & PAGE_MASK) | _KERN_REGION_TABLE;
-	for (i = 0; i < PTRS_PER_PGD; i++)
-		pgd_clear_kernel(pg_dir + i);
+	/* A three level page table (4TB) is enough for the kernel space. */
+	S390_lowcore.kernel_asce |= _ASCE_TYPE_REGION3 | _ASCE_TABLE_LENGTH;
+	pgd_type = _REGION3_ENTRY_EMPTY;
 #else
-	pgdir_k = (__pa(swapper_pg_dir) & PAGE_MASK) | _KERNSEG_TABLE;
-	for (i = 0; i < PTRS_PER_PGD; i++)
-		pmd_clear_kernel((pmd_t *)(pg_dir + i));
+	S390_lowcore.kernel_asce |= _ASCE_TABLE_LENGTH;
+	pgd_type = _SEGMENT_ENTRY_EMPTY;
 #endif
+	clear_table((unsigned long *) init_mm.pgd, pgd_type,
+		    sizeof(unsigned long)*2048);
 	vmem_map_init();
 	setup_ro_region();
 
-	S390_lowcore.kernel_asce = pgdir_k;
-
         /* enable virtual mapping in kernel mode */
-	__ctl_load(pgdir_k, 1, 1);
-	__ctl_load(pgdir_k, 7, 7);
-	__ctl_load(pgdir_k, 13, 13);
+	__ctl_load(S390_lowcore.kernel_asce, 1, 1);
+	__ctl_load(S390_lowcore.kernel_asce, 7, 7);
+	__ctl_load(S390_lowcore.kernel_asce, 13, 13);
 	__raw_local_irq_ssm(ssm_mask);
 
 	memset(max_zone_pfns, 0, sizeof(max_zone_pfns));
@@ -168,6 +167,33 @@ void __init mem_init(void)
 	       (unsigned long)&_stext,
 	       PFN_ALIGN((unsigned long)&_eshared) - 1);
 }
+
+#ifdef CONFIG_DEBUG_PAGEALLOC
+void kernel_map_pages(struct page *page, int numpages, int enable)
+{
+	pgd_t *pgd;
+	pud_t *pud;
+	pmd_t *pmd;
+	pte_t *pte;
+	unsigned long address;
+	int i;
+
+	for (i = 0; i < numpages; i++) {
+		address = page_to_phys(page + i);
+		pgd = pgd_offset_k(address);
+		pud = pud_offset(pgd, address);
+		pmd = pmd_offset(pud, address);
+		pte = pte_offset_kernel(pmd, address);
+		if (!enable) {
+			ptep_invalidate(&init_mm, address, pte);
+			continue;
+		}
+		*pte = mk_pte_phys(address, __pgprot(_PAGE_TYPE_RW));
+		/* Flush cpu write queue. */
+		mb();
+	}
+}
+#endif
 
 void free_initmem(void)
 {

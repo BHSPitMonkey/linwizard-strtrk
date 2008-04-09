@@ -53,17 +53,11 @@ struct vio_dev {
 };
 
 struct vio_driver {
-	struct list_head node;
 	const struct vio_device_id *id_table;
 	int (*probe)(struct vio_dev *dev, const struct vio_device_id *id);
 	int (*remove)(struct vio_dev *dev);
-	void (*shutdown)(struct vio_dev *dev);
-	unsigned long driver_data;
 	struct device_driver driver;
 };
-
-extern struct dma_mapping_ops vio_dma_ops;
-extern struct bus_type vio_bus_type;
 
 extern int vio_register_driver(struct vio_driver *drv);
 extern void vio_unregister_driver(struct vio_driver *drv);
@@ -72,7 +66,7 @@ extern void __devinit vio_unregister_device(struct vio_dev *dev);
 
 struct device_node;
 
-extern struct vio_dev * __devinit vio_register_device_node(
+extern struct vio_dev *vio_register_device_node(
 		struct device_node *node_vdev);
 extern const void *vio_get_attribute(struct vio_dev *vdev, char *which,
 		int *length);

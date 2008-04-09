@@ -29,6 +29,7 @@
 #include <asm/irq.h>
 #include <asm/system.h>
 #include <asm/arch/pxa-regs.h>
+#include <asm/arch/pxa2xx-regs.h>
 
 #include <pcmcia/cs_types.h>
 #include <pcmcia/ss.h>
@@ -58,7 +59,7 @@ static inline u_int pxa2xx_mcxx_asst(u_int pcmcia_cycle_ns,
 				     u_int mem_clk_10khz)
 {
 	u_int code = pcmcia_cycle_ns * mem_clk_10khz;
-	return (code / 300000) + ((code % 300000) ? 1 : 0) - 1;
+	return (code / 300000) + ((code % 300000) ? 1 : 0) + 1;
 }
 
 static inline u_int pxa2xx_mcxx_setup(u_int pcmcia_cycle_ns,

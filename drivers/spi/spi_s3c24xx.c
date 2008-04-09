@@ -233,14 +233,12 @@ static irqreturn_t s3c24xx_spi_irq(int irq, void *dev)
 	return IRQ_HANDLED;
 }
 
-static int s3c24xx_spi_probe(struct platform_device *pdev)
+static int __init s3c24xx_spi_probe(struct platform_device *pdev)
 {
 	struct s3c24xx_spi *hw;
 	struct spi_master *master;
-	struct spi_board_info *bi;
 	struct resource *res;
 	int err = 0;
-	int i;
 
 	master = spi_alloc_master(&pdev->dev, sizeof(struct s3c24xx_spi));
 	if (master == NULL) {
@@ -348,16 +346,6 @@ static int s3c24xx_spi_probe(struct platform_device *pdev)
 		goto err_register;
 	}
 
-	/* register all the devices associated */
-
-	bi = &hw->pdata->board_info[0];
-	for (i = 0; i < hw->pdata->board_size; i++, bi++) {
-		dev_info(hw->dev, "registering %s\n", bi->modalias);
-
-		bi->controller_data = hw;
-		spi_new_device(master, bi);
-	}
-
 	return 0;
 
  err_register:
@@ -382,7 +370,7 @@ static int s3c24xx_spi_probe(struct platform_device *pdev)
 	return err;
 }
 
-static int s3c24xx_spi_remove(struct platform_device *dev)
+static int __exit s3c24xx_spi_remove(struct platform_device *dev)
 {
 	struct s3c24xx_spi *hw = platform_get_drvdata(dev);
 
@@ -429,8 +417,7 @@ static int s3c24xx_spi_resume(struct platform_device *pdev)
 
 MODULE_ALIAS("s3c2410_spi");			/* for platform bus hotplug */
 static struct platform_driver s3c24xx_spidrv = {
-	.probe		= s3c24xx_spi_probe,
-	.remove		= s3c24xx_spi_remove,
+	.remove		= __exit_p(s3c24xx_spi_remove),
 	.suspend	= s3c24xx_spi_suspend,
 	.resume		= s3c24xx_spi_resume,
 	.driver		= {
@@ -441,7 +428,7 @@ static struct platform_driver s3c24xx_spidrv = {
 
 static int __init s3c24xx_spi_init(void)
 {
-        return platform_driver_register(&s3c24xx_spidrv);
+        return platform_driver_probe(&s3c24xx_spidrv, s3c24xx_spi_probe);
 }
 
 static void __exit s3c24xx_spi_exit(void)

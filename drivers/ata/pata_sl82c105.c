@@ -26,7 +26,7 @@
 #include <linux/libata.h>
 
 #define DRV_NAME "pata_sl82c105"
-#define DRV_VERSION "0.3.2"
+#define DRV_VERSION "0.3.3"
 
 enum {
 	/*
@@ -43,23 +43,24 @@ enum {
 
 /**
  *	sl82c105_pre_reset		-	probe begin
- *	@ap: ATA port
+ *	@link: ATA link
  *	@deadline: deadline jiffies for the operation
  *
  *	Set up cable type and use generic probe init
  */
 
-static int sl82c105_pre_reset(struct ata_port *ap, unsigned long deadline)
+static int sl82c105_pre_reset(struct ata_link *link, unsigned long deadline)
 {
 	static const struct pci_bits sl82c105_enable_bits[] = {
 		{ 0x40, 1, 0x01, 0x01 },
 		{ 0x40, 1, 0x10, 0x10 }
 	};
+	struct ata_port *ap = link->ap;
 	struct pci_dev *pdev = to_pci_dev(ap->host->dev);
 
 	if (ap->port_no && !pci_test_config_bits(pdev, &sl82c105_enable_bits[ap->port_no]))
 		return -ENOENT;
-	return ata_std_prereset(ap, deadline);
+	return ata_std_prereset(link, deadline);
 }
 
 
@@ -205,6 +206,34 @@ static void sl82c105_bmdma_stop(struct ata_queued_cmd *qc)
 	sl82c105_set_piomode(ap, qc->dev);
 }
 
+/**
+ *	sl82c105_qc_defer	-	implement serialization
+ *	@qc: command
+ *
+ *	We must issue one command per host not per channel because
+ *	of the reset bug.
+ *
+ *	Q: is the scsi host lock sufficient ?
+ */
+
+static int sl82c105_qc_defer(struct ata_queued_cmd *qc)
+{
+	struct ata_host *host = qc->ap->host;
+	struct ata_port *alt = host->ports[1 ^ qc->ap->port_no];
+	int rc;
+
+	/* First apply the usual rules */	
+	rc = ata_std_qc_defer(qc);
+	if (rc != 0)
+		return rc;
+
+	/* Now apply serialization rules. Only allow a command if the
+	   other channel state machine is idle */
+	if (alt && alt->qc_active)
+		return	ATA_DEFER_PORT;
+	return 0;
+}
+
 static struct scsi_host_template sl82c105_sht = {
 	.module			= THIS_MODULE,
 	.name			= DRV_NAME,
@@ -224,7 +253,6 @@ static struct scsi_host_template sl82c105_sht = {
 };
 
 static struct ata_port_operations sl82c105_port_ops = {
-	.port_disable	= ata_port_disable,
 	.set_piomode	= sl82c105_set_piomode,
 	.mode_filter	= ata_pci_default_filter,
 
@@ -245,6 +273,7 @@ static struct ata_port_operations sl82c105_port_ops = {
 	.bmdma_stop	= sl82c105_bmdma_stop,
 	.bmdma_status 	= ata_bmdma_status,
 
+	.qc_defer	= sl82c105_qc_defer,
 	.qc_prep 	= ata_qc_prep,
 	.qc_issue	= ata_qc_issue_prot,
 
@@ -253,9 +282,8 @@ static struct ata_port_operations sl82c105_port_ops = {
 	.irq_handler	= ata_interrupt,
 	.irq_clear	= ata_bmdma_irq_clear,
 	.irq_on		= ata_irq_on,
-	.irq_ack	= ata_irq_ack,
 
-	.port_start	= ata_port_start,
+	.port_start	= ata_sff_port_start,
 };
 
 /**
@@ -313,7 +341,7 @@ static int sl82c105_init_one(struct pci_dev *dev, const struct pci_device_id *id
 	};
 	/* for now use only the first port */
 	const struct ata_port_info *ppi[] = { &info_early,
-					       &ata_dummy_port_info };
+					       NULL };
 	u32 val;
 	int rev;
 

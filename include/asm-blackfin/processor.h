@@ -30,6 +30,10 @@ static inline void wrusp(unsigned long usp)
 extern unsigned long memory_end;
 #define TASK_SIZE	(memory_end)
 
+#ifdef __KERNEL__
+#define STACK_TOP	TASK_SIZE
+#endif
+
 #define TASK_UNMAPPED_BASE	0
 
 struct thread_struct {
@@ -104,13 +108,13 @@ unsigned long get_wchan(struct task_struct *p);
 #define cpu_relax()    	barrier()
 
 /* Get the Silicon Revision of the chip */
-static inline __attribute_pure__ uint32_t bfin_revid(void)
+static inline uint32_t __pure bfin_revid(void)
 {
 	/* stored in the upper 4 bits */
 	return bfin_read_CHIPID() >> 28;
 }
 
-static inline __attribute_pure__ uint32_t bfin_compiled_revid(void)
+static inline uint32_t __pure bfin_compiled_revid(void)
 {
 #if defined(CONFIG_BF_REV_0_0)
 	return 0;

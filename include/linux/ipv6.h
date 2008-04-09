@@ -96,27 +96,6 @@ struct ipv6_destopt_hao {
 	struct in6_addr		addr;
 } __attribute__ ((__packed__));
 
-struct ipv6_auth_hdr {
-	__u8  nexthdr;
-	__u8  hdrlen;           /* This one is measured in 32 bit units! */
-	__be16 reserved;
-	__be32 spi;
-	__be32 seq_no;           /* Sequence number */
-	__u8  auth_data[0];     /* Length variable but >=4. Mind the 64 bit alignment! */
-};
-
-struct ipv6_esp_hdr {
-	__be32 spi;
-	__be32 seq_no;           /* Sequence number */
-	__u8  enc_data[0];      /* Length variable but >=8. Mind the 64 bit alignment! */
-};
-
-struct ipv6_comp_hdr {
-	__u8 nexthdr;
-	__u8 flags;
-	__be16 cpi;
-};
-
 /*
  *	IPv6 fixed header
  *
@@ -478,12 +457,20 @@ static inline struct raw6_sock *raw6_sk(const struct sock *sk)
 #define inet_v6_ipv6only(__sk)		0
 #endif /* defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE) */
 
-#define INET6_MATCH(__sk, __hash, __saddr, __daddr, __ports, __dif)\
-	(((__sk)->sk_hash == (__hash))				&& \
+#define INET6_MATCH(__sk, __net, __hash, __saddr, __daddr, __ports, __dif)\
+	(((__sk)->sk_hash == (__hash)) && ((__sk)->sk_net == (__net))	&& \
 	 ((*((__portpair *)&(inet_sk(__sk)->dport))) == (__ports))  	&& \
 	 ((__sk)->sk_family		== AF_INET6)		&& \
 	 ipv6_addr_equal(&inet6_sk(__sk)->daddr, (__saddr))	&& \
 	 ipv6_addr_equal(&inet6_sk(__sk)->rcv_saddr, (__daddr))	&& \
+	 (!((__sk)->sk_bound_dev_if) || ((__sk)->sk_bound_dev_if == (__dif))))
+
+#define INET6_TW_MATCH(__sk, __net, __hash, __saddr, __daddr, __ports, __dif) \
+	(((__sk)->sk_hash == (__hash)) && ((__sk)->sk_net == (__net))	&& \
+	 (*((__portpair *)&(inet_twsk(__sk)->tw_dport)) == (__ports))	&& \
+	 ((__sk)->sk_family	       == PF_INET6)			&& \
+	 (ipv6_addr_equal(&inet6_twsk(__sk)->tw_v6_daddr, (__saddr)))	&& \
+	 (ipv6_addr_equal(&inet6_twsk(__sk)->tw_v6_rcv_saddr, (__daddr))) && \
 	 (!((__sk)->sk_bound_dev_if) || ((__sk)->sk_bound_dev_if == (__dif))))
 
 #endif /* __KERNEL__ */

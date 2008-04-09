@@ -27,17 +27,14 @@
 static int
 nfs3_rpc_wrapper(struct rpc_clnt *clnt, struct rpc_message *msg, int flags)
 {
-	sigset_t oldset;
 	int res;
-	rpc_clnt_sigmask(clnt, &oldset);
 	do {
 		res = rpc_call_sync(clnt, msg, flags);
 		if (res != -EJUKEBOX)
 			break;
-		schedule_timeout_interruptible(NFS_JUKEBOX_RETRY_TIME);
+		schedule_timeout_killable(NFS_JUKEBOX_RETRY_TIME);
 		res = -ERESTARTSYS;
-	} while (!signalled());
-	rpc_clnt_sigunmask(clnt, &oldset);
+	} while (!fatal_signal_pending(current));
 	return res;
 }
 
@@ -166,6 +163,7 @@ nfs3_proc_lookup(struct inode *dir, struct qstr *name,
 	nfs_fattr_init(&dir_attr);
 	nfs_fattr_init(fattr);
 	status = rpc_call_sync(NFS_CLIENT(dir), &msg, 0);
+	nfs_refresh_inode(dir, &dir_attr);
 	if (status >= 0 && !(fattr->valid & NFS_ATTR_FATTR)) {
 		msg.rpc_proc = &nfs3_procedures[NFS3PROC_GETATTR];
 		msg.rpc_argp = fhandle;
@@ -173,8 +171,6 @@ nfs3_proc_lookup(struct inode *dir, struct qstr *name,
 		status = rpc_call_sync(NFS_CLIENT(dir), &msg, 0);
 	}
 	dprintk("NFS reply lookup: %d\n", status);
-	if (status >= 0)
-		status = nfs_refresh_inode(dir, &dir_attr);
 	return status;
 }
 
@@ -607,6 +603,9 @@ nfs3_proc_readdir(struct dentry *dentry, struct rpc_cred *cred,
 
 	nfs_fattr_init(&dir_attr);
 	status = rpc_call_sync(NFS_CLIENT(dir), &msg, 0);
+
+	nfs_invalidate_atime(dir);
+
 	nfs_refresh_inode(dir, &dir_attr);
 	dprintk("NFS reply readdir: %d\n", status);
 	return status;
@@ -724,22 +723,15 @@ static int nfs3_read_done(struct rpc_task *task, struct nfs_read_data *data)
 {
 	if (nfs3_async_handle_jukebox(task, data->inode))
 		return -EAGAIN;
-	/* Call back common NFS readpage processing */
-	if (task->tk_status >= 0)
-		nfs_refresh_inode(data->inode, &data->fattr);
+
+	nfs_invalidate_atime(data->inode);
+	nfs_refresh_inode(data->inode, &data->fattr);
 	return 0;
 }
 
-static void nfs3_proc_read_setup(struct nfs_read_data *data)
+static void nfs3_proc_read_setup(struct nfs_read_data *data, struct rpc_message *msg)
 {
-	struct rpc_message	msg = {
-		.rpc_proc	= &nfs3_procedures[NFS3PROC_READ],
-		.rpc_argp	= &data->args,
-		.rpc_resp	= &data->res,
-		.rpc_cred	= data->cred,
-	};
-
-	rpc_call_setup(&data->task, &msg, 0);
+	msg->rpc_proc = &nfs3_procedures[NFS3PROC_READ];
 }
 
 static int nfs3_write_done(struct rpc_task *task, struct nfs_write_data *data)
@@ -747,55 +739,34 @@ static int nfs3_write_done(struct rpc_task *task, struct nfs_write_data *data)
 	if (nfs3_async_handle_jukebox(task, data->inode))
 		return -EAGAIN;
 	if (task->tk_status >= 0)
-		nfs_post_op_update_inode(data->inode, data->res.fattr);
+		nfs_post_op_update_inode_force_wcc(data->inode, data->res.fattr);
 	return 0;
 }
 
-static void nfs3_proc_write_setup(struct nfs_write_data *data, int how)
+static void nfs3_proc_write_setup(struct nfs_write_data *data, struct rpc_message *msg)
 {
-	struct rpc_message	msg = {
-		.rpc_proc	= &nfs3_procedures[NFS3PROC_WRITE],
-		.rpc_argp	= &data->args,
-		.rpc_resp	= &data->res,
-		.rpc_cred	= data->cred,
-	};
-
-	data->args.stable = NFS_UNSTABLE;
-	if (how & FLUSH_STABLE) {
-		data->args.stable = NFS_FILE_SYNC;
-		if (NFS_I(data->inode)->ncommit)
-			data->args.stable = NFS_DATA_SYNC;
-	}
-
-	/* Finalize the task. */
-	rpc_call_setup(&data->task, &msg, 0);
+	msg->rpc_proc = &nfs3_procedures[NFS3PROC_WRITE];
 }
 
 static int nfs3_commit_done(struct rpc_task *task, struct nfs_write_data *data)
 {
 	if (nfs3_async_handle_jukebox(task, data->inode))
 		return -EAGAIN;
-	if (task->tk_status >= 0)
-		nfs_post_op_update_inode(data->inode, data->res.fattr);
+	nfs_refresh_inode(data->inode, data->res.fattr);
 	return 0;
 }
 
-static void nfs3_proc_commit_setup(struct nfs_write_data *data, int how)
+static void nfs3_proc_commit_setup(struct nfs_write_data *data, struct rpc_message *msg)
 {
-	struct rpc_message	msg = {
-		.rpc_proc	= &nfs3_procedures[NFS3PROC_COMMIT],
-		.rpc_argp	= &data->args,
-		.rpc_resp	= &data->res,
-		.rpc_cred	= data->cred,
-	};
-
-	rpc_call_setup(&data->task, &msg, 0);
+	msg->rpc_proc = &nfs3_procedures[NFS3PROC_COMMIT];
 }
 
 static int
 nfs3_proc_lock(struct file *filp, int cmd, struct file_lock *fl)
 {
-	return nlmclnt_proc(filp->f_path.dentry->d_inode, cmd, fl);
+	struct inode *inode = filp->f_path.dentry->d_inode;
+
+	return nlmclnt_proc(NFS_SERVER(inode)->nlm_host, cmd, fl);
 }
 
 const struct nfs_rpc_ops nfs_v3_clientops = {

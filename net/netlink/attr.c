@@ -27,12 +27,12 @@ static int validate_nla(struct nlattr *nla, int maxtype,
 			const struct nla_policy *policy)
 {
 	const struct nla_policy *pt;
-	int minlen = 0, attrlen = nla_len(nla);
+	int minlen = 0, attrlen = nla_len(nla), type = nla_type(nla);
 
-	if (nla->nla_type <= 0 || nla->nla_type > maxtype)
+	if (type <= 0 || type > maxtype)
 		return 0;
 
-	pt = &policy[nla->nla_type];
+	pt = &policy[type];
 
 	BUG_ON(pt->type > NLA_TYPE_MAX);
 
@@ -149,7 +149,7 @@ int nla_parse(struct nlattr *tb[], int maxtype, struct nlattr *head, int len,
 	memset(tb, 0, sizeof(struct nlattr *) * (maxtype + 1));
 
 	nla_for_each_attr(nla, head, len, rem) {
-		u16 type = nla->nla_type;
+		u16 type = nla_type(nla);
 
 		if (type > 0 && type <= maxtype) {
 			if (policy) {
@@ -185,7 +185,7 @@ struct nlattr *nla_find(struct nlattr *head, int len, int attrtype)
 	int rem;
 
 	nla_for_each_attr(nla, head, len, rem)
-		if (nla->nla_type == attrtype)
+		if (nla_type(nla) == attrtype)
 			return nla;
 
 	return NULL;
@@ -430,6 +430,24 @@ int nla_put_nohdr(struct sk_buff *skb, int attrlen, const void *data)
 	return 0;
 }
 
+/**
+ * nla_append - Add a netlink attribute without header or padding
+ * @skb: socket buffer to add attribute to
+ * @attrlen: length of attribute payload
+ * @data: head of attribute payload
+ *
+ * Returns -1 if the tailroom of the skb is insufficient to store
+ * the attribute payload.
+ */
+int nla_append(struct sk_buff *skb, int attrlen, const void *data)
+{
+	if (unlikely(skb_tailroom(skb) < NLA_ALIGN(attrlen)))
+		return -1;
+
+	memcpy(skb_put(skb, attrlen), data, attrlen);
+	return 0;
+}
+
 EXPORT_SYMBOL(nla_validate);
 EXPORT_SYMBOL(nla_parse);
 EXPORT_SYMBOL(nla_find);
@@ -445,3 +463,4 @@ EXPORT_SYMBOL(nla_put_nohdr);
 EXPORT_SYMBOL(nla_memcpy);
 EXPORT_SYMBOL(nla_memcmp);
 EXPORT_SYMBOL(nla_strcmp);
+EXPORT_SYMBOL(nla_append);

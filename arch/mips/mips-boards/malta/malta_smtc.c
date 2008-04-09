@@ -15,28 +15,26 @@
  * Cause the specified action to be performed on a targeted "CPU"
  */
 
-void core_send_ipi(int cpu, unsigned int action)
+static void msmtc_send_ipi_single(int cpu, unsigned int action)
 {
 	/* "CPU" may be TC of same VPE, VPE of same CPU, or different CPU */
 	smtc_send_ipi(cpu, LINUX_SMP_IPI, action);
 }
 
-/*
- * Platform "CPU" startup hook
- */
-
-void __cpuinit prom_boot_secondary(int cpu, struct task_struct *idle)
+static void msmtc_send_ipi_mask(cpumask_t mask, unsigned int action)
 {
-	smtc_boot_secondary(cpu, idle);
+	unsigned int i;
+
+	for_each_cpu_mask(i, mask)
+		msmtc_send_ipi_single(i, action);
 }
 
 /*
  * Post-config but pre-boot cleanup entry point
  */
-
-void __cpuinit prom_init_secondary(void)
+static void __cpuinit msmtc_init_secondary(void)
 {
-        void smtc_init_secondary(void);
+	void smtc_init_secondary(void);
 	int myvpe;
 
 	/* Don't enable Malta I/O interrupts (IP2) for secondary VPEs */
@@ -50,7 +48,31 @@ void __cpuinit prom_init_secondary(void)
 			set_c0_status(0x100 << cp0_perfcount_irq);
 	}
 
-        smtc_init_secondary();
+	smtc_init_secondary();
+}
+
+/*
+ * Platform "CPU" startup hook
+ */
+static void __cpuinit msmtc_boot_secondary(int cpu, struct task_struct *idle)
+{
+	smtc_boot_secondary(cpu, idle);
+}
+
+/*
+ * SMP initialization finalization entry point
+ */
+static void __cpuinit msmtc_smp_finish(void)
+{
+	smtc_smp_finish();
+}
+
+/*
+ * Hook for after all CPUs are online
+ */
+
+static void msmtc_cpus_done(void)
+{
 }
 
 /*
@@ -60,31 +82,73 @@ void __cpuinit prom_init_secondary(void)
  * but it may be multithreaded.
  */
 
-void __cpuinit plat_smp_setup(void)
+static void __init msmtc_smp_setup(void)
 {
-	if (read_c0_config3() & (1<<2))
-		mipsmt_build_cpu_map(0);
+	mipsmt_build_cpu_map(0);
 }
 
-void __init plat_prepare_cpus(unsigned int max_cpus)
+static void __init msmtc_prepare_cpus(unsigned int max_cpus)
 {
-	if (read_c0_config3() & (1<<2))
-		mipsmt_prepare_cpus();
+	mipsmt_prepare_cpus();
 }
 
+struct plat_smp_ops msmtc_smp_ops = {
+	.send_ipi_single	= msmtc_send_ipi_single,
+	.send_ipi_mask		= msmtc_send_ipi_mask,
+	.init_secondary		= msmtc_init_secondary,
+	.smp_finish		= msmtc_smp_finish,
+	.cpus_done		= msmtc_cpus_done,
+	.boot_secondary		= msmtc_boot_secondary,
+	.smp_setup		= msmtc_smp_setup,
+	.prepare_cpus		= msmtc_prepare_cpus,
+};
+
+#ifdef CONFIG_MIPS_MT_SMTC_IRQAFF
 /*
- * SMP initialization finalization entry point
+ * IRQ affinity hook
  */
 
-void __cpuinit prom_smp_finish(void)
-{
-	smtc_smp_finish();
-}
 
-/*
- * Hook for after all CPUs are online
- */
-
-void prom_cpus_done(void)
+void plat_set_irq_affinity(unsigned int irq, cpumask_t affinity)
 {
+	cpumask_t tmask = affinity;
+	int cpu = 0;
+	void smtc_set_irq_affinity(unsigned int irq, cpumask_t aff);
+
+	/*
+	 * On the legacy Malta development board, all I/O interrupts
+	 * are routed through the 8259 and combined in a single signal
+	 * to the CPU daughterboard, and on the CoreFPGA2/3 34K models,
+	 * that signal is brought to IP2 of both VPEs. To avoid racing
+	 * concurrent interrupt service events, IP2 is enabled only on
+	 * one VPE, by convention VPE0.  So long as no bits are ever
+	 * cleared in the affinity mask, there will never be any
+	 * interrupt forwarding.  But as soon as a program or operator
+	 * sets affinity for one of the related IRQs, we need to make
+	 * sure that we don't ever try to forward across the VPE boundry,
+	 * at least not until we engineer a system where the interrupt
+	 * _ack() or _end() function can somehow know that it corresponds
+	 * to an interrupt taken on another VPE, and perform the appropriate
+	 * restoration of Status.IM state using MFTR/MTTR instead of the
+	 * normal local behavior. We also ensure that no attempt will
+	 * be made to forward to an offline "CPU".
+	 */
+
+	for_each_cpu_mask(cpu, affinity) {
+		if ((cpu_data[cpu].vpe_id != 0) || !cpu_online(cpu))
+			cpu_clear(cpu, tmask);
+	}
+	irq_desc[irq].affinity = tmask;
+
+	if (cpus_empty(tmask))
+		/*
+		 * We could restore a default mask here, but the
+		 * runtime code can anyway deal with the null set
+		 */
+		printk(KERN_WARNING
+			"IRQ affinity leaves no legal CPU for IRQ %d\n", irq);
+
+	/* Do any generic SMTC IRQ affinity setup */
+	smtc_set_irq_affinity(irq, tmask);
 }
+#endif /* CONFIG_MIPS_MT_SMTC_IRQAFF */

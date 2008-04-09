@@ -64,15 +64,7 @@ static const struct netxen_nic_stats netxen_nic_gstrings_stats[] = {
 	{"bad_skb_len", NETXEN_NIC_STAT(stats.badskblen)},
 	{"no_cmd_desc", NETXEN_NIC_STAT(stats.nocmddescriptor)},
 	{"polled", NETXEN_NIC_STAT(stats.polled)},
-	{"uphappy", NETXEN_NIC_STAT(stats.uphappy)},
-	{"updropped", NETXEN_NIC_STAT(stats.updropped)},
-	{"uplcong", NETXEN_NIC_STAT(stats.uplcong)},
-	{"uphcong", NETXEN_NIC_STAT(stats.uphcong)},
-	{"upmcong", NETXEN_NIC_STAT(stats.upmcong)},
-	{"updunno", NETXEN_NIC_STAT(stats.updunno)},
-	{"skb_freed", NETXEN_NIC_STAT(stats.skbfreed)},
 	{"tx_dropped", NETXEN_NIC_STAT(stats.txdropped)},
-	{"tx_null_skb", NETXEN_NIC_STAT(stats.txnullskb)},
 	{"csummed", NETXEN_NIC_STAT(stats.csummed)},
 	{"no_rcv", NETXEN_NIC_STAT(stats.no_rcv)},
 	{"rx_bytes", NETXEN_NIC_STAT(stats.rxbytes)},
@@ -86,7 +78,7 @@ static const char netxen_nic_gstrings_test[][ETH_GSTRING_LEN] = {
 	"Link_Test_on_offline"
 };
 
-#define NETXEN_NIC_TEST_LEN sizeof(netxen_nic_gstrings_test) / ETH_GSTRING_LEN
+#define NETXEN_NIC_TEST_LEN	ARRAY_SIZE(netxen_nic_gstrings_test)
 
 #define NETXEN_NIC_REGS_COUNT 42
 #define NETXEN_NIC_REGS_LEN (NETXEN_NIC_REGS_COUNT * sizeof(__le32))
@@ -115,8 +107,6 @@ netxen_nic_get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *drvinfo)
 	sprintf(drvinfo->fw_version, "%d.%d.%d", fw_major, fw_minor, fw_build);
 
 	strncpy(drvinfo->bus_info, pci_name(adapter->pdev), 32);
-	drvinfo->n_stats = NETXEN_NIC_STATS_LEN;
-	drvinfo->testinfo_len = NETXEN_NIC_TEST_LEN;
 	drvinfo->regdump_len = NETXEN_NIC_REGS_LEN;
 	drvinfo->eedump_len = netxen_nic_get_eeprom_len(dev);
 }
@@ -425,11 +415,11 @@ netxen_nic_get_eeprom(struct net_device *dev, struct ethtool_eeprom *eeprom,
 	if (eeprom->len == 0)
 		return -EINVAL;
 
-	eeprom->magic = (adapter->pdev)->vendor | 
+	eeprom->magic = (adapter->pdev)->vendor |
 			((adapter->pdev)->device << 16);
 	offset = eeprom->offset;
 
-	ret = netxen_rom_fast_read_words(adapter, offset, bytes, 
+	ret = netxen_rom_fast_read_words(adapter, offset, bytes,
 						eeprom->len);
 	if (ret < 0)
 		return ret;
@@ -455,16 +445,16 @@ netxen_nic_set_eeprom(struct net_device *dev, struct ethtool_eeprom *eeprom,
 				netxen_nic_driver_name);
 			return ret;
 		}
-		printk(KERN_INFO "%s: flash unlocked. \n", 
+		printk(KERN_INFO "%s: flash unlocked. \n",
 			netxen_nic_driver_name);
 		last_schedule_time = jiffies;
 		ret = netxen_flash_erase_secondary(adapter);
 		if (ret != FLASH_SUCCESS) {
-			printk(KERN_ERR "%s: Flash erase failed.\n", 
+			printk(KERN_ERR "%s: Flash erase failed.\n",
 				netxen_nic_driver_name);
 			return ret;
 		}
-		printk(KERN_INFO "%s: secondary flash erased successfully.\n", 
+		printk(KERN_INFO "%s: secondary flash erased successfully.\n",
 			netxen_nic_driver_name);
 		flash_start = 1;
 		return 0;
@@ -473,7 +463,7 @@ netxen_nic_set_eeprom(struct net_device *dev, struct ethtool_eeprom *eeprom,
 	if (offset == NETXEN_BOOTLD_START) {
 		ret = netxen_flash_erase_primary(adapter);
 		if (ret != FLASH_SUCCESS) {
-			printk(KERN_ERR "%s: Flash erase failed.\n", 
+			printk(KERN_ERR "%s: Flash erase failed.\n",
 				netxen_nic_driver_name);
 			return ret;
 		}
@@ -485,16 +475,16 @@ netxen_nic_set_eeprom(struct net_device *dev, struct ethtool_eeprom *eeprom,
 		if (ret != FLASH_SUCCESS)
 			return ret;
 
-		printk(KERN_INFO "%s: primary flash erased successfully\n", 
+		printk(KERN_INFO "%s: primary flash erased successfully\n",
 			netxen_nic_driver_name);
 
 		ret = netxen_backup_crbinit(adapter);
 		if (ret != FLASH_SUCCESS) {
-			printk(KERN_ERR "%s: CRBinit backup failed.\n", 
+			printk(KERN_ERR "%s: CRBinit backup failed.\n",
 				netxen_nic_driver_name);
 			return ret;
 		}
-		printk(KERN_INFO "%s: CRBinit backup done.\n", 
+		printk(KERN_INFO "%s: CRBinit backup done.\n",
 			netxen_nic_driver_name);
 		ready_to_flash = 1;
 	}
@@ -518,17 +508,17 @@ netxen_nic_get_ringparam(struct net_device *dev, struct ethtool_ringparam *ring)
 	ring->rx_jumbo_pending = 0;
 	for (i = 0; i < MAX_RCV_CTX; ++i) {
 		ring->rx_pending += adapter->recv_ctx[i].
-		    rcv_desc[RCV_DESC_NORMAL_CTXID].rcv_pending;
+		    rcv_desc[RCV_DESC_NORMAL_CTXID].max_rx_desc_count;
 		ring->rx_jumbo_pending += adapter->recv_ctx[i].
-		    rcv_desc[RCV_DESC_JUMBO_CTXID].rcv_pending;
+		    rcv_desc[RCV_DESC_JUMBO_CTXID].max_rx_desc_count;
 	}
+	ring->tx_pending = adapter->max_tx_desc_count;
 
-	ring->rx_max_pending = adapter->max_rx_desc_count;
-	ring->tx_max_pending = adapter->max_tx_desc_count;
-	ring->rx_jumbo_max_pending = adapter->max_jumbo_rx_desc_count;
+	ring->rx_max_pending = MAX_RCV_DESCRIPTORS;
+	ring->tx_max_pending = MAX_CMD_DESCRIPTORS_HOST;
+	ring->rx_jumbo_max_pending = MAX_JUMBO_RCV_DESCRIPTORS;
 	ring->rx_mini_max_pending = 0;
 	ring->rx_mini_pending = 0;
-	ring->rx_jumbo_pending = 0;
 }
 
 static void
@@ -572,7 +562,7 @@ netxen_nic_get_pauseparam(struct net_device *dev,
 		else
 			pause->tx_pause = !(netxen_xg_get_xg1_mask(val));
 	} else {
-		printk(KERN_ERR"%s: Unknown board type: %x\n", 
+		printk(KERN_ERR"%s: Unknown board type: %x\n",
 				netxen_nic_driver_name, adapter->ahw.board_type);
 	}
 }
@@ -591,7 +581,7 @@ netxen_nic_set_pauseparam(struct net_device *dev,
 		/* set flow control */
 		netxen_nic_read_w0(adapter,
 					NETXEN_NIU_GB_MAC_CONFIG_0(port), &val);
-		
+
 		if (pause->rx_pause)
 			netxen_gb_rx_flowctl(val);
 		else
@@ -644,10 +634,10 @@ netxen_nic_set_pauseparam(struct net_device *dev,
 			else
 				netxen_xg_set_xg1_mask(val);
 		}
-		netxen_nic_write_w0(adapter, NETXEN_NIU_XG_PAUSE_CTL, val);			
+		netxen_nic_write_w0(adapter, NETXEN_NIU_XG_PAUSE_CTL, val);
 	} else {
 		printk(KERN_ERR "%s: Unknown board type: %x\n",
-				netxen_nic_driver_name, 
+				netxen_nic_driver_name,
 				adapter->ahw.board_type);
 	}
 	return 0;
@@ -672,9 +662,16 @@ static int netxen_nic_reg_test(struct net_device *dev)
 	return 0;
 }
 
-static int netxen_nic_diag_test_count(struct net_device *dev)
+static int netxen_get_sset_count(struct net_device *dev, int sset)
 {
-	return NETXEN_NIC_TEST_LEN;
+	switch (sset) {
+	case ETH_SS_TEST:
+		return NETXEN_NIC_TEST_LEN;
+	case ETH_SS_STATS:
+		return NETXEN_NIC_STATS_LEN;
+	default:
+		return -EOPNOTSUPP;
+	}
 }
 
 static void
@@ -709,11 +706,6 @@ netxen_nic_get_strings(struct net_device *dev, u32 stringset, u8 * data)
 	}
 }
 
-static int netxen_nic_get_stats_count(struct net_device *dev)
-{
-	return NETXEN_NIC_STATS_LEN;
-}
-
 static void
 netxen_nic_get_ethtool_stats(struct net_device *dev,
 			     struct ethtool_stats *stats, u64 * data)
@@ -731,6 +723,19 @@ netxen_nic_get_ethtool_stats(struct net_device *dev,
 	}
 }
 
+static u32 netxen_nic_get_rx_csum(struct net_device *dev)
+{
+	struct netxen_adapter *adapter = netdev_priv(dev);
+	return adapter->rx_csum;
+}
+
+static int netxen_nic_set_rx_csum(struct net_device *dev, u32 data)
+{
+	struct netxen_adapter *adapter = netdev_priv(dev);
+	adapter->rx_csum = !!data;
+	return 0;
+}
+
 struct ethtool_ops netxen_nic_ethtool_ops = {
 	.get_settings = netxen_nic_get_settings,
 	.set_settings = netxen_nic_set_settings,
@@ -744,15 +749,13 @@ struct ethtool_ops netxen_nic_ethtool_ops = {
 	.get_ringparam = netxen_nic_get_ringparam,
 	.get_pauseparam = netxen_nic_get_pauseparam,
 	.set_pauseparam = netxen_nic_set_pauseparam,
-	.get_tx_csum = ethtool_op_get_tx_csum,
 	.set_tx_csum = ethtool_op_set_tx_csum,
-	.get_sg = ethtool_op_get_sg,
 	.set_sg = ethtool_op_set_sg,
-	.get_tso = ethtool_op_get_tso,
 	.set_tso = ethtool_op_set_tso,
-	.self_test_count = netxen_nic_diag_test_count,
 	.self_test = netxen_nic_diag_test,
 	.get_strings = netxen_nic_get_strings,
-	.get_stats_count = netxen_nic_get_stats_count,
 	.get_ethtool_stats = netxen_nic_get_ethtool_stats,
+	.get_sset_count = netxen_get_sset_count,
+	.get_rx_csum = netxen_nic_get_rx_csum,
+	.set_rx_csum = netxen_nic_set_rx_csum,
 };

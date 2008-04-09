@@ -46,25 +46,28 @@
 extern spinlock_t sal_lock;
 
 /* SAL spec _requires_ eight args for each call. */
-#define __SAL_CALL(result,a0,a1,a2,a3,a4,a5,a6,a7)	\
-	result = (*ia64_sal)(a0,a1,a2,a3,a4,a5,a6,a7)
+#define __IA64_FW_CALL(entry,result,a0,a1,a2,a3,a4,a5,a6,a7)	\
+	result = (*entry)(a0,a1,a2,a3,a4,a5,a6,a7)
 
-# define SAL_CALL(result,args...) do {				\
+# define IA64_FW_CALL(entry,result,args...) do {		\
 	unsigned long __ia64_sc_flags;				\
 	struct ia64_fpreg __ia64_sc_fr[6];			\
 	ia64_save_scratch_fpregs(__ia64_sc_fr);			\
 	spin_lock_irqsave(&sal_lock, __ia64_sc_flags);		\
-	__SAL_CALL(result, args);				\
+	__IA64_FW_CALL(entry, result, args);			\
 	spin_unlock_irqrestore(&sal_lock, __ia64_sc_flags);	\
 	ia64_load_scratch_fpregs(__ia64_sc_fr);			\
 } while (0)
+
+# define SAL_CALL(result,args...)			\
+	IA64_FW_CALL(ia64_sal, result, args);
 
 # define SAL_CALL_NOLOCK(result,args...) do {		\
 	unsigned long __ia64_scn_flags;			\
 	struct ia64_fpreg __ia64_scn_fr[6];		\
 	ia64_save_scratch_fpregs(__ia64_scn_fr);	\
 	local_irq_save(__ia64_scn_flags);		\
-	__SAL_CALL(result, args);			\
+	__IA64_FW_CALL(ia64_sal, result, args);		\
 	local_irq_restore(__ia64_scn_flags);		\
 	ia64_load_scratch_fpregs(__ia64_scn_fr);	\
 } while (0)
@@ -73,7 +76,7 @@ extern spinlock_t sal_lock;
 	struct ia64_fpreg __ia64_scs_fr[6];		\
 	ia64_save_scratch_fpregs(__ia64_scs_fr);	\
 	preempt_disable();				\
-	__SAL_CALL(result, args);			\
+	__IA64_FW_CALL(ia64_sal, result, args);		\
 	preempt_enable();				\
 	ia64_load_scratch_fpregs(__ia64_scs_fr);	\
 } while (0)
@@ -646,17 +649,6 @@ typedef struct err_rec {
  * Now define a couple of inline functions for improved type checking
  * and convenience.
  */
-static inline long
-ia64_sal_freq_base (unsigned long which, unsigned long *ticks_per_second,
-		    unsigned long *drift_info)
-{
-	struct ia64_sal_retval isrv;
-
-	SAL_CALL(isrv, SAL_FREQ_BASE, which, 0, 0, 0, 0, 0, 0);
-	*ticks_per_second = isrv.v0;
-	*drift_info = isrv.v1;
-	return isrv.status;
-}
 
 extern s64 ia64_sal_cache_flush (u64 cache_type);
 extern void __init check_sal_cache_flush (void);
@@ -815,6 +807,10 @@ static inline s64
 ia64_sal_physical_id_info(u16 *splid)
 {
 	struct ia64_sal_retval isrv;
+
+	if (sal_revision < SAL_VERSION_CODE(3,2))
+		return -1;
+
 	SAL_CALL(isrv, SAL_PHYSICAL_ID_INFO, 0, 0, 0, 0, 0, 0, 0);
 	if (splid)
 		*splid = isrv.v0;
@@ -838,6 +834,9 @@ extern int ia64_sal_oemcall_nolock(struct ia64_sal_retval *, u64, u64, u64,
 				   u64, u64, u64, u64, u64);
 extern int ia64_sal_oemcall_reentrant(struct ia64_sal_retval *, u64, u64, u64,
 				      u64, u64, u64, u64, u64);
+extern long
+ia64_sal_freq_base (unsigned long which, unsigned long *ticks_per_second,
+		    unsigned long *drift_info);
 #ifdef CONFIG_HOTPLUG_CPU
 /*
  * System Abstraction Layer Specification

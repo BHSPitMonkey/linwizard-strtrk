@@ -44,14 +44,6 @@ ifeq ($(CONFIG_PXA_SHARPSL),y)
 OBJS		+= head-sharpsl.o
 endif
 
-ifeq ($(CONFIG_ARCH_AT91RM9200),y)
-OBJS		+= head-at91rm9200.o
-endif
-
-ifeq ($(CONFIG_MACH_OMAP_PERSEUS2),y)
-OBJS		+= head-omap.o
-endif
-
 ifeq ($(CONFIG_CPU_BIG_ENDIAN),y)
 ifeq ($(CONFIG_CPU_CP15),y)
 OBJS		+= big-endian.o
@@ -91,7 +83,7 @@ ifneq ($(PARAMS_PHYS),)
 LDFLAGS_vmlinux += --defsym params_phys=$(PARAMS_PHYS)
 endif
 LDFLAGS_vmlinux += -p --no-undefined -X \
-	$(shell $(CC) $(CFLAGS) --print-libgcc-file-name) -T
+	$(shell $(CC) $(KBUILD_CFLAGS) --print-libgcc-file-name) -T
 
 # Don't allow any static data in misc.o, which
 # would otherwise mess up our GOT table

@@ -48,6 +48,7 @@ board-$(CONFIG_SNEHA) 	        := SNEHA
 board-$(CONFIG_M5208EVB)	:= M5208EVB
 board-$(CONFIG_MOD5272)		:= MOD5272
 board-$(CONFIG_AVNET)           := AVNET
+board-$(CONFIG_SAVANT)		:= SAVANT
 BOARD := $(board-y)
 
 model-$(CONFIG_RAMKERNEL)	:= ram
@@ -60,17 +61,17 @@ MODEL := $(model-y)
 # for the selected cpu. ONLY need to define this for the non-base member
 # of the family.
 #
-cpuclass-$(CONFIG_M5206)	:= 5307
-cpuclass-$(CONFIG_M5206e)	:= 5307
-cpuclass-$(CONFIG_M520x)	:= 5307
-cpuclass-$(CONFIG_M523x)	:= 5307
-cpuclass-$(CONFIG_M5249)	:= 5307
-cpuclass-$(CONFIG_M527x)	:= 5307
-cpuclass-$(CONFIG_M5272)	:= 5307
-cpuclass-$(CONFIG_M528x)	:= 5307
-cpuclass-$(CONFIG_M5307)	:= 5307
-cpuclass-$(CONFIG_M532x)	:= 5307
-cpuclass-$(CONFIG_M5407)	:= 5307
+cpuclass-$(CONFIG_M5206)	:= coldfire
+cpuclass-$(CONFIG_M5206e)	:= coldfire
+cpuclass-$(CONFIG_M520x)	:= coldfire
+cpuclass-$(CONFIG_M523x)	:= coldfire
+cpuclass-$(CONFIG_M5249)	:= coldfire
+cpuclass-$(CONFIG_M527x)	:= coldfire
+cpuclass-$(CONFIG_M5272)	:= coldfire
+cpuclass-$(CONFIG_M528x)	:= coldfire
+cpuclass-$(CONFIG_M5307)	:= coldfire
+cpuclass-$(CONFIG_M532x)	:= coldfire
+cpuclass-$(CONFIG_M5407)	:= coldfire
 cpuclass-$(CONFIG_M68328)	:= 68328
 cpuclass-$(CONFIG_M68EZ328)	:= 68328
 cpuclass-$(CONFIG_M68VZ328)	:= 68328
@@ -102,11 +103,11 @@ cflags-$(CONFIG_M68EZ328)	:= -m68000
 cflags-$(CONFIG_M68VZ328)	:= -m68000
 cflags-$(CONFIG_M68360)		:= -m68332
 
-AFLAGS += $(cflags-y)
+KBUILD_AFLAGS += $(cflags-y)
 
-CFLAGS += $(cflags-y)
-CFLAGS += -D__linux__
-CFLAGS += -DUTS_SYSNAME=\"uClinux\"
+KBUILD_CFLAGS += $(cflags-y)
+KBUILD_CFLAGS += -D__linux__
+KBUILD_CFLAGS += -DUTS_SYSNAME=\"uClinux\"
 
 head-y := arch/m68knommu/platform/$(cpuclass-y)/head.o
 
@@ -117,4 +118,4 @@ core-y	+= arch/m68knommu/kernel/ \
 libs-y	+= arch/m68knommu/lib/
 
 archclean:
-	$(Q)$(MAKE) $(clean)=arch/m68knommu/boot
+

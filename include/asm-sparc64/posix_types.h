@@ -43,17 +43,13 @@ typedef long long              __kernel_loff_t;
 #endif
 
 typedef struct {
-#if defined(__KERNEL__) || defined(__USE_ALL)
 	int	val[2];
-#else /* !defined(__KERNEL__) && !defined(__USE_ALL) */
-	int     __val[2];
-#endif /* !defined(__KERNEL__) && !defined(__USE_ALL) */
 } __kernel_fsid_t;
 
-#if defined(__KERNEL__) || !defined(__GLIBC__) || (__GLIBC__ < 2)
+#if defined(__KERNEL__)
 
 #undef __FD_SET
-static __inline__ void __FD_SET(unsigned long fd, __kernel_fd_set *fdsetp)
+static inline void __FD_SET(unsigned long fd, __kernel_fd_set *fdsetp)
 {
 	unsigned long _tmp = fd / __NFDBITS;
 	unsigned long _rem = fd % __NFDBITS;
@@ -61,7 +57,7 @@ static __inline__ void __FD_SET(unsigned long fd, __kernel_fd_set *fdsetp)
 }
 
 #undef __FD_CLR
-static __inline__ void __FD_CLR(unsigned long fd, __kernel_fd_set *fdsetp)
+static inline void __FD_CLR(unsigned long fd, __kernel_fd_set *fdsetp)
 {
 	unsigned long _tmp = fd / __NFDBITS;
 	unsigned long _rem = fd % __NFDBITS;
@@ -69,7 +65,7 @@ static __inline__ void __FD_CLR(unsigned long fd, __kernel_fd_set *fdsetp)
 }
 
 #undef __FD_ISSET
-static __inline__ int __FD_ISSET(unsigned long fd, __const__ __kernel_fd_set *p)
+static inline int __FD_ISSET(unsigned long fd, __const__ __kernel_fd_set *p)
 { 
 	unsigned long _tmp = fd / __NFDBITS;
 	unsigned long _rem = fd % __NFDBITS;
@@ -81,7 +77,7 @@ static __inline__ int __FD_ISSET(unsigned long fd, __const__ __kernel_fd_set *p)
  * for 256 and 1024-bit fd_sets respectively)
  */
 #undef __FD_ZERO
-static __inline__ void __FD_ZERO(__kernel_fd_set *p)
+static inline void __FD_ZERO(__kernel_fd_set *p)
 {
 	unsigned long *tmp = p->fds_bits;
 	int i;
@@ -121,6 +117,6 @@ static __inline__ void __FD_ZERO(__kernel_fd_set *p)
 	}
 }
 
-#endif /* defined(__KERNEL__) || !defined(__GLIBC__) || (__GLIBC__ < 2) */
+#endif /* defined(__KERNEL__) */
 
 #endif /* !(__ARCH_SPARC64_POSIX_TYPES_H) */

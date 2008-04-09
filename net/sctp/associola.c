@@ -1,21 +1,21 @@
-/* SCTP kernel reference Implementation
+/* SCTP kernel implementation
  * (C) Copyright IBM Corp. 2001, 2004
  * Copyright (c) 1999-2000 Cisco, Inc.
  * Copyright (c) 1999-2001 Motorola, Inc.
  * Copyright (c) 2001 Intel Corp.
  * Copyright (c) 2001 La Monte H.P. Yarroll
  *
- * This file is part of the SCTP kernel reference Implementation
+ * This file is part of the SCTP kernel implementation
  *
  * This module provides the abstraction for an SCTP association.
  *
- * The SCTP reference implementation is free software;
+ * This SCTP implementation is free software;
  * you can redistribute it and/or modify it under the terms of
  * the GNU General Public License as published by
  * the Free Software Foundation; either version 2, or (at your option)
  * any later version.
  *
- * The SCTP reference implementation is distributed in the hope that it
+ * This SCTP implementation is distributed in the hope that it
  * will be useful, but WITHOUT ANY WARRANTY; without even the implied
  *                 ************************
  * warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
@@ -61,6 +61,7 @@
 
 /* Forward declarations for internal functions. */
 static void sctp_assoc_bh_rcv(struct work_struct *work);
+static void sctp_assoc_free_asconf_acks(struct sctp_association *asoc);
 
 
 /* 1st Level Abstractions. */
@@ -74,6 +75,8 @@ static struct sctp_association *sctp_association_init(struct sctp_association *a
 {
 	struct sctp_sock *sp;
 	int i;
+	sctp_paramhdr_t *p;
+	int err;
 
 	/* Retrieve the SCTP per socket area.  */
 	sp = sctp_sk((struct sock *)sk);
@@ -165,11 +168,9 @@ static struct sctp_association *sctp_association_init(struct sctp_association *a
 		sp->autoclose * HZ;
 
 	/* Initilizes the timers */
-	for (i = SCTP_EVENT_TIMEOUT_NONE; i < SCTP_NUM_TIMEOUT_TYPES; ++i) {
-		init_timer(&asoc->timers[i]);
-		asoc->timers[i].function = sctp_timer_events[i];
-		asoc->timers[i].data = (unsigned long) asoc;
-	}
+	for (i = SCTP_EVENT_TIMEOUT_NONE; i < SCTP_NUM_TIMEOUT_TYPES; ++i)
+		setup_timer(&asoc->timers[i], sctp_timer_events[i],
+				(unsigned long)asoc);
 
 	/* Pull default initialization values from the sock options.
 	 * Note: This assumes that the values have already been
@@ -242,6 +243,7 @@ static struct sctp_association *sctp_association_init(struct sctp_association *a
 	asoc->addip_serial = asoc->c.initial_tsn;
 
 	INIT_LIST_HEAD(&asoc->addip_chunk_list);
+	INIT_LIST_HEAD(&asoc->asconf_ack_list);
 
 	/* Make an empty list of remote transport addresses.  */
 	INIT_LIST_HEAD(&asoc->peer.transport_addr_list);
@@ -260,10 +262,14 @@ static struct sctp_association *sctp_association_init(struct sctp_association *a
 	 */
 	asoc->peer.sack_needed = 1;
 
-	/* Assume that the peer recongizes ASCONF until reported otherwise
-	 * via an ERROR chunk.
+	/* Assume that the peer will tell us if he recognizes ASCONF
+	 * as part of INIT exchange.
+	 * The sctp_addip_noauth option is there for backward compatibilty
+	 * and will revert old behavior.
 	 */
-	asoc->peer.asconf_capable = 1;
+	asoc->peer.asconf_capable = 0;
+	if (sctp_addip_noauth)
+		asoc->peer.asconf_capable = 1;
 
 	/* Create an input queue.  */
 	sctp_inq_init(&asoc->base.inqueue);
@@ -297,6 +303,30 @@ static struct sctp_association *sctp_association_init(struct sctp_association *a
 	asoc->default_context = sp->default_context;
 	asoc->default_timetolive = sp->default_timetolive;
 	asoc->default_rcv_context = sp->default_rcv_context;
+
+	/* AUTH related initializations */
+	INIT_LIST_HEAD(&asoc->endpoint_shared_keys);
+	err = sctp_auth_asoc_copy_shkeys(ep, asoc, gfp);
+	if (err)
+		goto fail_init;
+
+	asoc->active_key_id = ep->active_key_id;
+	asoc->asoc_shared_key = NULL;
+
+	asoc->default_hmac_id = 0;
+	/* Save the hmacs and chunks list into this association */
+	if (ep->auth_hmacs_list)
+		memcpy(asoc->c.auth_hmacs, ep->auth_hmacs_list,
+			ntohs(ep->auth_hmacs_list->param_hdr.length));
+	if (ep->auth_chunk_list)
+		memcpy(asoc->c.auth_chunks, ep->auth_chunk_list,
+			ntohs(ep->auth_chunk_list->param_hdr.length));
+
+	/* Get the AUTH random number for this association */
+	p = (sctp_paramhdr_t *)asoc->c.auth_random;
+	p->type = SCTP_PARAM_RANDOM;
+	p->length = htons(sizeof(sctp_paramhdr_t) + SCTP_AUTH_RANDOM_LENGTH);
+	get_random_bytes(p+1, SCTP_AUTH_RANDOM_LENGTH);
 
 	return asoc;
 
@@ -389,6 +419,9 @@ void sctp_association_free(struct sctp_association *asoc)
 
 	/* Free peer's cached cookie. */
 	kfree(asoc->peer.cookie);
+	kfree(asoc->peer.peer_random);
+	kfree(asoc->peer.peer_chunks);
+	kfree(asoc->peer.peer_hmacs);
 
 	/* Release the transport structures. */
 	list_for_each_safe(pos, temp, &asoc->peer.transport_addr_list) {
@@ -400,12 +433,17 @@ void sctp_association_free(struct sctp_association *asoc)
 	asoc->peer.transport_count = 0;
 
 	/* Free any cached ASCONF_ACK chunk. */
-	if (asoc->addip_last_asconf_ack)
-		sctp_chunk_free(asoc->addip_last_asconf_ack);
+	sctp_assoc_free_asconf_acks(asoc);
 
 	/* Free any cached ASCONF chunk. */
 	if (asoc->addip_last_asconf)
 		sctp_chunk_free(asoc->addip_last_asconf);
+
+	/* AUTH - Free the endpoint shared keys */
+	sctp_auth_destroy_keys(&asoc->endpoint_shared_keys);
+
+	/* AUTH - Free the association shared key */
+	sctp_auth_key_put(asoc->asoc_shared_key);
 
 	sctp_association_put(asoc);
 }
@@ -693,6 +731,23 @@ struct sctp_transport *sctp_assoc_lookup_paddr(
 	return NULL;
 }
 
+/* Remove all transports except a give one */
+void sctp_assoc_del_nonprimary_peers(struct sctp_association *asoc,
+				     struct sctp_transport *primary)
+{
+	struct sctp_transport	*temp;
+	struct sctp_transport	*t;
+
+	list_for_each_entry_safe(t, temp, &asoc->peer.transport_addr_list,
+				 transports) {
+		/* if the current transport is not the primary one, delete it */
+		if (t != primary)
+			sctp_assoc_rm_peer(asoc, t);
+	}
+
+	return;
+}
+
 /* Engage in transport control operations.
  * Mark the transport up or down and send a notification to the user.
  * Select and update the new active and retran paths.
@@ -976,6 +1031,16 @@ static void sctp_assoc_bh_rcv(struct work_struct *work)
 		state = asoc->state;
 		subtype = SCTP_ST_CHUNK(chunk->chunk_hdr->type);
 
+		/* SCTP-AUTH, Section 6.3:
+		 *    The receiver has a list of chunk types which it expects
+		 *    to be received only after an AUTH-chunk.  This list has
+		 *    been sent to the peer during the association setup.  It
+		 *    MUST silently discard these chunks if they are not placed
+		 *    after an AUTH chunk in the packet.
+		 */
+		if (sctp_auth_recv_cid(subtype.chunk, asoc) && !chunk->auth)
+			continue;
+
 		/* Remember where the last DATA chunk came from so we
 		 * know where to send the SACK.
 		 */
@@ -1112,6 +1177,24 @@ void sctp_assoc_update(struct sctp_association *asoc,
 			sctp_assoc_set_id(asoc, GFP_ATOMIC);
 		}
 	}
+
+	/* SCTP-AUTH: Save the peer parameters from the new assocaitions
+	 * and also move the association shared keys over
+	 */
+	kfree(asoc->peer.peer_random);
+	asoc->peer.peer_random = new->peer.peer_random;
+	new->peer.peer_random = NULL;
+
+	kfree(asoc->peer.peer_chunks);
+	asoc->peer.peer_chunks = new->peer.peer_chunks;
+	new->peer.peer_chunks = NULL;
+
+	kfree(asoc->peer.peer_hmacs);
+	asoc->peer.peer_hmacs = new->peer.peer_hmacs;
+	new->peer.peer_hmacs = NULL;
+
+	sctp_auth_key_put(asoc->asoc_shared_key);
+	sctp_auth_asoc_init_active_key(asoc, GFP_ATOMIC);
 }
 
 /* Update the retran path for sending a retransmitted packet.
@@ -1402,4 +1485,57 @@ retry:
 
 	asoc->assoc_id = (sctp_assoc_t) assoc_id;
 	return error;
+}
+
+/* Free asconf_ack cache */
+static void sctp_assoc_free_asconf_acks(struct sctp_association *asoc)
+{
+	struct sctp_chunk *ack;
+	struct sctp_chunk *tmp;
+
+	list_for_each_entry_safe(ack, tmp, &asoc->asconf_ack_list,
+				transmitted_list) {
+		list_del_init(&ack->transmitted_list);
+		sctp_chunk_free(ack);
+	}
+}
+
+/* Clean up the ASCONF_ACK queue */
+void sctp_assoc_clean_asconf_ack_cache(const struct sctp_association *asoc)
+{
+	struct sctp_chunk *ack;
+	struct sctp_chunk *tmp;
+
+	/* We can remove all the entries from the queue upto
+	 * the "Peer-Sequence-Number".
+	 */
+	list_for_each_entry_safe(ack, tmp, &asoc->asconf_ack_list,
+				transmitted_list) {
+		if (ack->subh.addip_hdr->serial ==
+				htonl(asoc->peer.addip_serial))
+			break;
+
+		list_del_init(&ack->transmitted_list);
+		sctp_chunk_free(ack);
+	}
+}
+
+/* Find the ASCONF_ACK whose serial number matches ASCONF */
+struct sctp_chunk *sctp_assoc_lookup_asconf_ack(
+					const struct sctp_association *asoc,
+					__be32 serial)
+{
+	struct sctp_chunk *ack;
+
+	/* Walk through the list of cached ASCONF-ACKs and find the
+	 * ack chunk whose serial number matches that of the request.
+	 */
+	list_for_each_entry(ack, &asoc->asconf_ack_list, transmitted_list) {
+		if (ack->subh.addip_hdr->serial == serial) {
+			sctp_chunk_hold(ack);
+			return ack;
+		}
+	}
+
+	return NULL;
 }

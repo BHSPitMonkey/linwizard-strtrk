@@ -21,14 +21,12 @@
 
 #include <linux/module.h>
 #include <linux/platform_device.h>
+#include <linux/i2c/tps65010.h>
 
 #include <asm/arch/gpio.h>
-#include <asm/arch/tps65010.h>
 #include <asm/arch/omapfb.h>
 
 #define MODULE_NAME	"omapfb-lcd_h3"
-
-#define pr_err(fmt, args...) printk(KERN_ERR MODULE_NAME ": " fmt, ## args)
 
 static int h3_panel_init(struct lcd_panel *panel, struct omapfb_device *fbdev)
 {
@@ -48,7 +46,7 @@ static int h3_panel_enable(struct lcd_panel *panel)
 	if (!r)
 		r = tps65010_set_gpio_out_value(GPIO2, HIGH);
 	if (r)
-		pr_err("Unable to turn on LCD panel\n");
+		pr_err(MODULE_NAME ": Unable to turn on LCD panel\n");
 
 	return r;
 }
@@ -62,7 +60,7 @@ static void h3_panel_disable(struct lcd_panel *panel)
 	if (!r)
 		tps65010_set_gpio_out_value(GPIO2, LOW);
 	if (r)
-		pr_err("Unable to turn off LCD panel\n");
+		pr_err(MODULE_NAME ": Unable to turn off LCD panel\n");
 }
 
 static unsigned long h3_panel_get_caps(struct lcd_panel *panel)

@@ -461,17 +461,21 @@ static void klsi_105_close (struct usb_serial_port *port, struct file *filp)
 
 	dbg("%s port %d", __FUNCTION__, port->number);
 
-	/* send READ_OFF */
-	rc = usb_control_msg (port->serial->dev,
-			      usb_sndctrlpipe(port->serial->dev, 0),
-			      KL5KUSB105A_SIO_CONFIGURE,
-			      USB_TYPE_VENDOR | USB_DIR_OUT,
-			      KL5KUSB105A_SIO_CONFIGURE_READ_OFF,
-			      0, /* index */
-			      NULL, 0,
-			      KLSI_TIMEOUT);
-	if (rc < 0)
-		    err("Disabling read failed (error = %d)", rc);
+	mutex_lock(&port->serial->disc_mutex);
+	if (!port->serial->disconnected) {
+		/* send READ_OFF */
+		rc = usb_control_msg (port->serial->dev,
+				      usb_sndctrlpipe(port->serial->dev, 0),
+				      KL5KUSB105A_SIO_CONFIGURE,
+				      USB_TYPE_VENDOR | USB_DIR_OUT,
+				      KL5KUSB105A_SIO_CONFIGURE_READ_OFF,
+				      0, /* index */
+				      NULL, 0,
+				      KLSI_TIMEOUT);
+		if (rc < 0)
+			err("Disabling read failed (error = %d)", rc);
+	}
+	mutex_unlock(&port->serial->disc_mutex);
 
 	/* shutdown our bulk reads and writes */
 	usb_kill_urb(port->write_urb);
@@ -728,24 +732,32 @@ static void klsi_105_set_termios (struct usb_serial_port *port,
 #endif
 		}
 		
-		switch(cflag & CBAUD) {
-		case B0: /* handled below */
+		switch(tty_get_baud_rate(port->tty)) {
+		case 0: /* handled below */
 			break;
-		case B1200: priv->cfg.baudrate = kl5kusb105a_sio_b1200;
+		case 1200:
+			priv->cfg.baudrate = kl5kusb105a_sio_b1200;
 			break;
-		case B2400: priv->cfg.baudrate = kl5kusb105a_sio_b2400;
+		case 2400:
+			priv->cfg.baudrate = kl5kusb105a_sio_b2400;
 			break;
-		case B4800: priv->cfg.baudrate = kl5kusb105a_sio_b4800;
+		case 4800:
+			priv->cfg.baudrate = kl5kusb105a_sio_b4800;
 			break;
-		case B9600: priv->cfg.baudrate = kl5kusb105a_sio_b9600;
+		case 9600:
+			priv->cfg.baudrate = kl5kusb105a_sio_b9600;
 			break;
-		case B19200: priv->cfg.baudrate = kl5kusb105a_sio_b19200;
+		case 19200:
+			priv->cfg.baudrate = kl5kusb105a_sio_b19200;
 			break;
-		case B38400: priv->cfg.baudrate = kl5kusb105a_sio_b38400;
+		case 38400:
+			priv->cfg.baudrate = kl5kusb105a_sio_b38400;
 			break;
-		case B57600: priv->cfg.baudrate = kl5kusb105a_sio_b57600;
+		case 57600:
+			priv->cfg.baudrate = kl5kusb105a_sio_b57600;
 			break;
-		case B115200: priv->cfg.baudrate = kl5kusb105a_sio_b115200;
+		case 115200:
+			priv->cfg.baudrate = kl5kusb105a_sio_b115200;
 			break;
 		default:
 			err("KLSI USB->Serial converter:"

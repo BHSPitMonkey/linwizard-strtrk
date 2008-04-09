@@ -10,7 +10,7 @@
 #include <linux/platform_device.h>
 #include <linux/init.h>
 #include <linux/serial.h>
-#include <asm/sci.h>
+#include <linux/serial_sci.h>
 
 static struct plat_sci_port sci_platform_data[] = {
 	{
@@ -51,3 +51,7 @@ static int __init sh7770_devices_setup(void)
 				    ARRAY_SIZE(sh7770_devices));
 }
 __initcall(sh7770_devices_setup);
+
+void __init plat_irq_setup(void)
+{
+}

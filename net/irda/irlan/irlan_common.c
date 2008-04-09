@@ -17,7 +17,7 @@
  *     published by the Free Software Foundation; either version 2 of
  *     the License, or (at your option) any later version.
  *
- *     Neither Dag Brattli nor University of Tromsø admit liability nor
+ *     Neither Dag Brattli nor University of TromsÃ¸ admit liability nor
  *     provide warranty for any of this software. This material is
  *     provided "AS-IS" and at no charge.
  *
@@ -128,13 +128,11 @@ static int __init irlan_init(void)
 
 #ifdef CONFIG_PROC_FS
 	{ struct proc_dir_entry *proc;
-	proc = create_proc_entry("irlan", 0, proc_irda);
+	proc = proc_create("irlan", 0, proc_irda, &irlan_fops);
 	if (!proc) {
 		printk(KERN_ERR "irlan_init: can't create /proc entry!\n");
 		return -ENODEV;
 	}
-
-	proc->proc_fops = &irlan_fops;
 	}
 #endif /* CONFIG_PROC_FS */
 

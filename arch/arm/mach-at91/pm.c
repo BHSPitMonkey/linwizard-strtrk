@@ -10,10 +10,9 @@
  * (at your option) any later version.
  */
 
-#include <linux/pm.h>
+#include <linux/suspend.h>
 #include <linux/sched.h>
 #include <linux/proc_fs.h>
-#include <linux/pm.h>
 #include <linux/interrupt.h>
 #include <linux/sysfs.h>
 #include <linux/module.h>
@@ -53,7 +52,7 @@ static suspend_state_t target_state;
 /*
  * Called after processes are frozen, but before we shutdown devices.
  */
-static int at91_pm_set_target(suspend_state_t state)
+static int at91_pm_begin(suspend_state_t state)
 {
 	target_state = state;
 	return 0;
@@ -78,6 +77,11 @@ static int at91_pm_verify_clocks(void)
 		}
 	} else if (cpu_is_at91sam9260() || cpu_is_at91sam9261() || cpu_is_at91sam9263()) {
 		if ((scsr & (AT91SAM926x_PMC_UHP | AT91SAM926x_PMC_UDP)) != 0) {
+			pr_debug("AT91: PM - Suspend-to-RAM with USB still active\n");
+			return 0;
+		}
+	} else if (cpu_is_at91cap9()) {
+		if ((scsr & AT91CAP9_PMC_UHP) != 0) {
 			pr_debug("AT91: PM - Suspend-to-RAM with USB still active\n");
 			return 0;
 		}
@@ -198,11 +202,20 @@ error:
 	return 0;
 }
 
+/*
+ * Called right prior to thawing processes.
+ */
+static void at91_pm_end(void)
+{
+	target_state = PM_SUSPEND_ON;
+}
 
-static struct pm_ops at91_pm_ops ={
-	.valid		= at91_pm_valid_state,
-	.set_target	= at91_pm_set_target,
-	.enter		= at91_pm_enter,
+
+static struct platform_suspend_ops at91_pm_ops ={
+	.valid	= at91_pm_valid_state,
+	.begin	= at91_pm_begin,
+	.enter	= at91_pm_enter,
+	.end	= at91_pm_end,
 };
 
 static int __init at91_pm_init(void)
@@ -220,7 +233,7 @@ static int __init at91_pm_init(void)
 	/* Disable SDRAM low-power mode.  Cannot be used with self-refresh. */
 	at91_sys_write(AT91_SDRAMC_LPR, 0);
 
-	pm_set_ops(&at91_pm_ops);
+	suspend_set_ops(&at91_pm_ops);
 
 	return 0;
 }

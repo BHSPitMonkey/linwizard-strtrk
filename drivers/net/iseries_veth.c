@@ -196,7 +196,6 @@ struct veth_lpar_connection {
 
 struct veth_port {
 	struct device *dev;
-	struct net_device_stats stats;
 	u64 mac_addr;
 	HvLpIndexMap lpar_map;
 
@@ -816,7 +815,7 @@ static int veth_init_connection(u8 rlp)
 {
 	struct veth_lpar_connection *cnx;
 	struct veth_msg *msgs;
-	int i, rc;
+	int i;
 
 	if ( (rlp == this_lp)
 	     || ! HvLpConfig_doLpsCommunicateOnVirtualLan(this_lp, rlp) )
@@ -845,11 +844,7 @@ static int veth_init_connection(u8 rlp)
 
 	/* This gets us 1 reference, which is held on behalf of the driver
 	 * infrastructure. It's released at module unload. */
-	kobject_init(&cnx->kobject);
-	cnx->kobject.ktype = &veth_lpar_connection_ktype;
-	rc = kobject_set_name(&cnx->kobject, "cnx%.2d", rlp);
-	if (rc != 0)
-		return rc;
+	kobject_init(&cnx->kobject, &veth_lpar_connection_ktype);
 
 	msgs = kcalloc(VETH_NUMBUFFERS, sizeof(struct veth_msg), GFP_KERNEL);
 	if (! msgs) {
@@ -936,9 +931,6 @@ static void veth_release_connection(struct kobject *kobj)
 
 static int veth_open(struct net_device *dev)
 {
-	struct veth_port *port = (struct veth_port *) dev->priv;
-
-	memset(&port->stats, 0, sizeof (port->stats));
 	netif_start_queue(dev);
 	return 0;
 }
@@ -947,13 +939,6 @@ static int veth_close(struct net_device *dev)
 {
 	netif_stop_queue(dev);
 	return 0;
-}
-
-static struct net_device_stats *veth_get_stats(struct net_device *dev)
-{
-	struct veth_port *port = (struct veth_port *) dev->priv;
-
-	return &port->stats;
 }
 
 static int veth_change_mtu(struct net_device *dev, int new_mtu)
@@ -1035,7 +1020,7 @@ static const struct ethtool_ops ops = {
 	.get_link = veth_get_link,
 };
 
-static struct net_device * __init veth_probe_one(int vlan,
+static struct net_device *veth_probe_one(int vlan,
 		struct vio_dev *vio_dev)
 {
 	struct net_device *dev;
@@ -1084,7 +1069,6 @@ static struct net_device * __init veth_probe_one(int vlan,
 	dev->open = veth_open;
 	dev->hard_start_xmit = veth_start_xmit;
 	dev->stop = veth_close;
-	dev->get_stats = veth_get_stats;
 	dev->change_mtu = veth_change_mtu;
 	dev->set_mac_address = NULL;
 	dev->set_multicast_list = veth_set_multicast_list;
@@ -1099,11 +1083,8 @@ static struct net_device * __init veth_probe_one(int vlan,
 		return NULL;
 	}
 
-	kobject_init(&port->kobject);
-	port->kobject.parent = &dev->dev.kobj;
-	port->kobject.ktype  = &veth_port_ktype;
-	kobject_set_name(&port->kobject, "veth_port");
-	if (0 != kobject_add(&port->kobject))
+	kobject_init(&port->kobject, &veth_port_ktype);
+	if (0 != kobject_add(&port->kobject, &dev->dev.kobj, "veth_port"))
 		veth_error("Failed adding port for %s to sysfs.\n", dev->name);
 
 	veth_info("%s attached to iSeries vlan %d (LPAR map = 0x%.4X)\n",
@@ -1183,7 +1164,6 @@ static void veth_transmit_to_many(struct sk_buff *skb,
 					  HvLpIndexMap lpmask,
 					  struct net_device *dev)
 {
-	struct veth_port *port = (struct veth_port *) dev->priv;
 	int i, success, error;
 
 	success = error = 0;
@@ -1199,11 +1179,11 @@ static void veth_transmit_to_many(struct sk_buff *skb,
 	}
 
 	if (error)
-		port->stats.tx_errors++;
+		dev->stats.tx_errors++;
 
 	if (success) {
-		port->stats.tx_packets++;
-		port->stats.tx_bytes += skb->len;
+		dev->stats.tx_packets++;
+		dev->stats.tx_bytes += skb->len;
 	}
 }
 
@@ -1541,8 +1521,8 @@ static void veth_receive(struct veth_lpar_connection *cnx,
 		skb->protocol = eth_type_trans(skb, dev);
 		skb->ip_summed = CHECKSUM_NONE;
 		netif_rx(skb);	/* send it up */
-		port->stats.rx_packets++;
-		port->stats.rx_bytes += length;
+		dev->stats.rx_packets++;
+		dev->stats.rx_bytes += length;
 	} while (startchunk += nchunks, startchunk < VETH_MAX_FRAMES_PER_MSG);
 
 	/* Ack it */
@@ -1724,9 +1704,9 @@ static int __init veth_module_init(void)
 			continue;
 
 		kobj = &veth_cnx[i]->kobject;
-		kobj->parent = &veth_driver.driver.kobj;
 		/* If the add failes, complain but otherwise continue */
-		if (0 != kobject_add(kobj))
+		if (0 != driver_add_kobj(&veth_driver.driver, kobj,
+					"cnx%.2d", veth_cnx[i]->remote_lp))
 			veth_error("cnx %d: Failed adding to sysfs.\n", i);
 	}
 

@@ -12,6 +12,7 @@
  *
  */
 
+#include <crypto/scatterwalk.h>
 #include <linux/mm.h>
 #include <linux/errno.h>
 #include <linux/hardirq.h>
@@ -21,7 +22,6 @@
 #include <linux/scatterlist.h>
 
 #include "internal.h"
-#include "scatterwalk.h"
 
 static int init(struct hash_desc *desc)
 {
@@ -41,7 +41,7 @@ static int update2(struct hash_desc *desc,
 		return 0;
 
 	for (;;) {
-		struct page *pg = sg->page;
+		struct page *pg = sg_page(sg);
 		unsigned int offset = sg->offset;
 		unsigned int l = sg->length;
 
@@ -77,7 +77,7 @@ static int update2(struct hash_desc *desc,
 
 		if (!nbytes)
 			break;
-		sg = sg_next(sg);
+		sg = scatterwalk_sg_next(sg);
 	}
 
 	return 0;

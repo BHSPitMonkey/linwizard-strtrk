@@ -64,7 +64,6 @@
 
 static struct hlist_head kprobe_table[KPROBE_TABLE_SIZE];
 static struct hlist_head kretprobe_inst_table[KPROBE_TABLE_SIZE];
-static atomic_t kprobe_count;
 
 /* NOTE: change this value only with kprobe_mutex held */
 static bool kprobe_enabled;
@@ -72,11 +71,6 @@ static bool kprobe_enabled;
 DEFINE_MUTEX(kprobe_mutex);		/* Protects kprobe_table */
 DEFINE_SPINLOCK(kretprobe_lock);	/* Protects kretprobe_inst_table */
 static DEFINE_PER_CPU(struct kprobe *, kprobe_instance) = NULL;
-
-static struct notifier_block kprobe_page_fault_nb = {
-	.notifier_call = kprobe_exceptions_notify,
-	.priority = 0x7fffffff /* we need to notified first */
-};
 
 #ifdef __ARCH_WANT_KPROBES_INSN_SLOT
 /*
@@ -504,27 +498,36 @@ static int __kprobes in_kprobes_functions(unsigned long addr)
 	return 0;
 }
 
+/*
+ * If we have a symbol_name argument, look it up and add the offset field
+ * to it. This way, we can specify a relative address to a symbol.
+ */
+static kprobe_opcode_t __kprobes *kprobe_addr(struct kprobe *p)
+{
+	kprobe_opcode_t *addr = p->addr;
+	if (p->symbol_name) {
+		if (addr)
+			return NULL;
+		kprobe_lookup_name(p->symbol_name, addr);
+	}
+
+	if (!addr)
+		return NULL;
+	return (kprobe_opcode_t *)(((char *)addr) + p->offset);
+}
+
 static int __kprobes __register_kprobe(struct kprobe *p,
 	unsigned long called_from)
 {
 	int ret = 0;
 	struct kprobe *old_p;
 	struct module *probed_mod;
+	kprobe_opcode_t *addr;
 
-	/*
-	 * If we have a symbol_name argument look it up,
-	 * and add it to the address.  That way the addr
-	 * field can either be global or relative to a symbol.
-	 */
-	if (p->symbol_name) {
-		if (p->addr)
-			return -EINVAL;
-		kprobe_lookup_name(p->symbol_name, p->addr);
-	}
-
-	if (!p->addr)
+	addr = kprobe_addr(p);
+	if (!addr)
 		return -EINVAL;
-	p->addr = (kprobe_opcode_t *)(((char *)p->addr)+ p->offset);
+	p->addr = addr;
 
 	if (!kernel_text_address((unsigned long) p->addr) ||
 	    in_kprobes_functions((unsigned long) p->addr))
@@ -556,8 +559,6 @@ static int __kprobes __register_kprobe(struct kprobe *p,
 	old_p = get_kprobe(p->addr);
 	if (old_p) {
 		ret = register_aggr_kprobe(old_p, p);
-		if (!ret)
-			atomic_inc(&kprobe_count);
 		goto out;
 	}
 
@@ -569,13 +570,9 @@ static int __kprobes __register_kprobe(struct kprobe *p,
 	hlist_add_head_rcu(&p->hlist,
 		       &kprobe_table[hash_ptr(p->addr, KPROBE_HASH_BITS)]);
 
-	if (kprobe_enabled) {
-		if (atomic_add_return(1, &kprobe_count) == \
-				(ARCH_INACTIVE_KPROBE_COUNT + 1))
-			register_page_fault_notifier(&kprobe_page_fault_nb);
-
+	if (kprobe_enabled)
 		arch_arm_kprobe(p);
-	}
+
 out:
 	mutex_unlock(&kprobe_mutex);
 
@@ -658,16 +655,6 @@ valid_p:
 		}
 		mutex_unlock(&kprobe_mutex);
 	}
-
-	/* Call unregister_page_fault_notifier()
-	 * if no probes are active
-	 */
-	mutex_lock(&kprobe_mutex);
-	if (atomic_add_return(-1, &kprobe_count) == \
-				ARCH_INACTIVE_KPROBE_COUNT)
-		unregister_page_fault_notifier(&kprobe_page_fault_nb);
-	mutex_unlock(&kprobe_mutex);
-	return;
 }
 
 static struct notifier_block kprobe_exceptions_nb = {
@@ -700,8 +687,7 @@ void __kprobes unregister_jprobe(struct jprobe *jp)
 	unregister_kprobe(&jp->kp);
 }
 
-#ifdef ARCH_SUPPORTS_KRETPROBES
-
+#ifdef CONFIG_KRETPROBES
 /*
  * This kprobe pre_handler is registered with every kretprobe. When probe
  * hits it will set up the return probe.
@@ -721,6 +707,12 @@ static int __kprobes pre_handler_kretprobe(struct kprobe *p,
 				 struct kretprobe_instance, uflist);
 		ri->rp = rp;
 		ri->task = current;
+
+		if (rp->entry_handler && rp->entry_handler(ri, regs)) {
+			spin_unlock_irqrestore(&kretprobe_lock, flags);
+			return 0;
+		}
+
 		arch_prepare_kretprobe(ri, regs);
 
 		/* XXX(hch): why is there no hlist_move_head? */
@@ -738,6 +730,18 @@ int __kprobes register_kretprobe(struct kretprobe *rp)
 	int ret = 0;
 	struct kretprobe_instance *inst;
 	int i;
+	void *addr;
+
+	if (kretprobe_blacklist_size) {
+		addr = kprobe_addr(&rp->kp);
+		if (!addr)
+			return -EINVAL;
+
+		for (i = 0; kretprobe_blacklist[i].name != NULL; i++) {
+			if (kretprobe_blacklist[i].addr == addr)
+				return -EINVAL;
+		}
+	}
 
 	rp->kp.pre_handler = pre_handler_kretprobe;
 	rp->kp.post_handler = NULL;
@@ -755,7 +759,8 @@ int __kprobes register_kretprobe(struct kretprobe *rp)
 	INIT_HLIST_HEAD(&rp->used_instances);
 	INIT_HLIST_HEAD(&rp->free_instances);
 	for (i = 0; i < rp->maxactive; i++) {
-		inst = kmalloc(sizeof(struct kretprobe_instance), GFP_KERNEL);
+		inst = kmalloc(sizeof(struct kretprobe_instance) +
+			       rp->data_size, GFP_KERNEL);
 		if (inst == NULL) {
 			free_rp_inst(rp);
 			return -ENOMEM;
@@ -772,8 +777,7 @@ int __kprobes register_kretprobe(struct kretprobe *rp)
 	return ret;
 }
 
-#else /* ARCH_SUPPORTS_KRETPROBES */
-
+#else /* CONFIG_KRETPROBES */
 int __kprobes register_kretprobe(struct kretprobe *rp)
 {
 	return -ENOSYS;
@@ -784,8 +788,7 @@ static int __kprobes pre_handler_kretprobe(struct kprobe *p,
 {
 	return 0;
 }
-
-#endif /* ARCH_SUPPORTS_KRETPROBES */
+#endif /* CONFIG_KRETPROBES */
 
 void __kprobes unregister_kretprobe(struct kretprobe *rp)
 {
@@ -815,7 +818,17 @@ static int __init init_kprobes(void)
 		INIT_HLIST_HEAD(&kprobe_table[i]);
 		INIT_HLIST_HEAD(&kretprobe_inst_table[i]);
 	}
-	atomic_set(&kprobe_count, 0);
+
+	if (kretprobe_blacklist_size) {
+		/* lookup the function address from its name */
+		for (i = 0; kretprobe_blacklist[i].name != NULL; i++) {
+			kprobe_lookup_name(kretprobe_blacklist[i].name,
+					   kretprobe_blacklist[i].addr);
+			if (!kretprobe_blacklist[i].addr)
+				printk("kretprobe: lookup failed: %s\n",
+				       kretprobe_blacklist[i].name);
+		}
+	}
 
 	/* By default, kprobes are enabled */
 	kprobe_enabled = true;
@@ -824,6 +837,8 @@ static int __init init_kprobes(void)
 	if (!err)
 		err = register_die_notifier(&kprobe_exceptions_nb);
 
+	if (!err)
+		init_test_probes();
 	return err;
 }
 
@@ -921,13 +936,6 @@ static void __kprobes enable_all_kprobes(void)
 	if (kprobe_enabled)
 		goto already_enabled;
 
-	/*
-	 * Re-register the page fault notifier only if there are any
-	 * active probes at the time of enabling kprobes globally
-	 */
-	if (atomic_read(&kprobe_count) > ARCH_INACTIVE_KPROBE_COUNT)
-		register_page_fault_notifier(&kprobe_page_fault_nb);
-
 	for (i = 0; i < KPROBE_TABLE_SIZE; i++) {
 		head = &kprobe_table[i];
 		hlist_for_each_entry_rcu(p, node, head, hlist)
@@ -968,10 +976,7 @@ static void __kprobes disable_all_kprobes(void)
 	mutex_unlock(&kprobe_mutex);
 	/* Allow all currently running kprobes to complete */
 	synchronize_sched();
-
-	mutex_lock(&kprobe_mutex);
-	/* Unconditionally unregister the page_fault notifier */
-	unregister_page_fault_notifier(&kprobe_page_fault_nb);
+	return;
 
 already_disabled:
 	mutex_unlock(&kprobe_mutex);

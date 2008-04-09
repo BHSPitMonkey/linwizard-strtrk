@@ -18,7 +18,7 @@
  *     published by the Free Software Foundation; either version 2 of
  *     the License, or (at your option) any later version.
  *
- *     Neither Dag Brattli nor University of Tromsø admit liability nor
+ *     Neither Dag Brattli nor University of TromsÃ¸ admit liability nor
  *     provide warranty for any of this software. This material is
  *     provided "AS-IS" and at no charge.
  *
@@ -174,9 +174,7 @@ void irlmp_discovery_timer_expired(void *data)
 	/* We always cleanup the log (active & passive discovery) */
 	irlmp_do_expiry();
 
-	/* Active discovery is conditional */
-	if (sysctl_discovery)
-		irlmp_do_discovery(sysctl_discovery_slots);
+	irlmp_do_discovery(sysctl_discovery_slots);
 
 	/* Restart timer */
 	irlmp_start_discovery_timer(irlmp, sysctl_discovery_timeout * HZ);

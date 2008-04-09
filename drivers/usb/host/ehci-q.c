@@ -139,64 +139,67 @@ qh_refresh (struct ehci_hcd *ehci, struct ehci_qh *qh)
 
 /*-------------------------------------------------------------------------*/
 
-static void qtd_copy_status (
+static int qtd_copy_status (
 	struct ehci_hcd *ehci,
 	struct urb *urb,
 	size_t length,
 	u32 token
 )
 {
+	int	status = -EINPROGRESS;
+
 	/* count IN/OUT bytes, not SETUP (even short packets) */
 	if (likely (QTD_PID (token) != 2))
 		urb->actual_length += length - QTD_LENGTH (token);
 
 	/* don't modify error codes */
-	if (unlikely (urb->status != -EINPROGRESS))
-		return;
+	if (unlikely(urb->unlinked))
+		return status;
 
 	/* force cleanup after short read; not always an error */
 	if (unlikely (IS_SHORT_READ (token)))
-		urb->status = -EREMOTEIO;
+		status = -EREMOTEIO;
 
 	/* serious "can't proceed" faults reported by the hardware */
 	if (token & QTD_STS_HALT) {
 		if (token & QTD_STS_BABBLE) {
 			/* FIXME "must" disable babbling device's port too */
-			urb->status = -EOVERFLOW;
+			status = -EOVERFLOW;
 		} else if (token & QTD_STS_MMF) {
 			/* fs/ls interrupt xfer missed the complete-split */
-			urb->status = -EPROTO;
+			status = -EPROTO;
 		} else if (token & QTD_STS_DBE) {
-			urb->status = (QTD_PID (token) == 1) /* IN ? */
+			status = (QTD_PID (token) == 1) /* IN ? */
 				? -ENOSR  /* hc couldn't read data */
 				: -ECOMM; /* hc couldn't write data */
 		} else if (token & QTD_STS_XACT) {
 			/* timeout, bad crc, wrong PID, etc; retried */
 			if (QTD_CERR (token))
-				urb->status = -EPIPE;
+				status = -EPIPE;
 			else {
 				ehci_dbg (ehci, "devpath %s ep%d%s 3strikes\n",
 					urb->dev->devpath,
 					usb_pipeendpoint (urb->pipe),
 					usb_pipein (urb->pipe) ? "in" : "out");
-				urb->status = -EPROTO;
+				status = -EPROTO;
 			}
 		/* CERR nonzero + no errors + halt --> stall */
 		} else if (QTD_CERR (token))
-			urb->status = -EPIPE;
+			status = -EPIPE;
 		else	/* unknown */
-			urb->status = -EPROTO;
+			status = -EPROTO;
 
 		ehci_vdbg (ehci,
 			"dev%d ep%d%s qtd token %08x --> status %d\n",
 			usb_pipedevice (urb->pipe),
 			usb_pipeendpoint (urb->pipe),
 			usb_pipein (urb->pipe) ? "in" : "out",
-			token, urb->status);
+			token, status);
 
 		/* if async CSPLIT failed, try cleaning out the TT buffer */
-		if (urb->status != -EPIPE
-				&& urb->dev->tt && !usb_pipeint (urb->pipe)
+		if (status != -EPIPE
+				&& urb->dev->tt
+				&& !usb_pipeint(urb->pipe)
 				&& ((token & QTD_STS_MMF) != 0
 					|| QTD_CERR(token) == 0)
 				&& (!ehci_is_TDI(ehci)
@@ -209,13 +212,18 @@ static void qtd_copy_status (
 				urb->dev->ttport, urb->dev->devnum,
 				usb_pipeendpoint (urb->pipe), token);
 #endif /* DEBUG */
+			/* REVISIT ARC-derived cores don't clear the root
+			 * hub TT buffer in this way...
+			 */
 			usb_hub_tt_clear_buffer (urb->dev, urb->pipe);
 		}
 	}
+
+	return status;
 }
 
 static void
-ehci_urb_done (struct ehci_hcd *ehci, struct urb *urb)
+ehci_urb_done(struct ehci_hcd *ehci, struct urb *urb, int status)
 __releases(ehci->lock)
 __acquires(ehci->lock)
 {
@@ -231,25 +239,13 @@ __acquires(ehci->lock)
 		qh_put (qh);
 	}
 
-	spin_lock (&urb->lock);
-	urb->hcpriv = NULL;
-	switch (urb->status) {
-	case -EINPROGRESS:		/* success */
-		urb->status = 0;
-	default:			/* fault */
-		COUNT (ehci->stats.complete);
-		break;
-	case -EREMOTEIO:		/* fault or normal */
-		if (!(urb->transfer_flags & URB_SHORT_NOT_OK))
-			urb->status = 0;
-		COUNT (ehci->stats.complete);
-		break;
-	case -ECONNRESET:		/* canceled */
-	case -ENOENT:
-		COUNT (ehci->stats.unlink);
-		break;
+	if (unlikely(urb->unlinked)) {
+		COUNT(ehci->stats.unlink);
+	} else {
+		if (likely(status == -EINPROGRESS))
+			status = 0;
+		COUNT(ehci->stats.complete);
 	}
-	spin_unlock (&urb->lock);
 
 #ifdef EHCI_URB_TRACE
 	ehci_dbg (ehci,
@@ -257,13 +253,14 @@ __acquires(ehci->lock)
 		__FUNCTION__, urb->dev->devpath, urb,
 		usb_pipeendpoint (urb->pipe),
 		usb_pipein (urb->pipe) ? "in" : "out",
-		urb->status,
+		status,
 		urb->actual_length, urb->transfer_buffer_length);
 #endif
 
 	/* complete() can reenter this HCD */
+	usb_hcd_unlink_urb_from_ep(ehci_to_hcd(ehci), urb);
 	spin_unlock (&ehci->lock);
-	usb_hcd_giveback_urb (ehci_to_hcd(ehci), urb);
+	usb_hcd_giveback_urb(ehci_to_hcd(ehci), urb, status);
 	spin_lock (&ehci->lock);
 }
 
@@ -283,6 +280,7 @@ qh_completions (struct ehci_hcd *ehci, struct ehci_qh *qh)
 {
 	struct ehci_qtd		*last = NULL, *end = qh->dummy;
 	struct list_head	*entry, *tmp;
+	int			last_status = -EINPROGRESS;
 	int			stopped;
 	unsigned		count = 0;
 	int			do_status = 0;
@@ -311,6 +309,7 @@ qh_completions (struct ehci_hcd *ehci, struct ehci_qh *qh)
 		struct ehci_qtd	*qtd;
 		struct urb	*urb;
 		u32		token = 0;
+		int		qtd_status;
 
 		qtd = list_entry (entry, struct ehci_qtd, qtd_list);
 		urb = qtd->urb;
@@ -318,8 +317,9 @@ qh_completions (struct ehci_hcd *ehci, struct ehci_qh *qh)
 		/* clean up any state from previous QTD ...*/
 		if (last) {
 			if (likely (last->urb != urb)) {
-				ehci_urb_done (ehci, last->urb);
+				ehci_urb_done(ehci, last->urb, last_status);
 				count++;
+				last_status = -EINPROGRESS;
 			}
 			ehci_qtd_free (ehci, last);
 			last = NULL;
@@ -358,13 +358,14 @@ qh_completions (struct ehci_hcd *ehci, struct ehci_qh *qh)
 			stopped = 1;
 
 			if (unlikely (!HC_IS_RUNNING (ehci_to_hcd(ehci)->state)))
-				urb->status = -ESHUTDOWN;
+				last_status = -ESHUTDOWN;
 
 			/* ignore active urbs unless some previous qtd
 			 * for the urb faulted (including short read) or
 			 * its urb was canceled.  we may patch qh or qtds.
 			 */
-			if (likely (urb->status == -EINPROGRESS))
+			if (likely(last_status == -EINPROGRESS &&
+					!urb->unlinked))
 				continue;
 
 			/* issue status after short control reads */
@@ -392,11 +393,14 @@ halt:
 		}
 
 		/* remove it from the queue */
-		spin_lock (&urb->lock);
-		qtd_copy_status (ehci, urb, qtd->length, token);
-		do_status = (urb->status == -EREMOTEIO)
-				&& usb_pipecontrol (urb->pipe);
-		spin_unlock (&urb->lock);
+		qtd_status = qtd_copy_status(ehci, urb, qtd->length, token);
+		if (unlikely(qtd_status == -EREMOTEIO)) {
+			do_status = (!urb->unlinked &&
+					usb_pipecontrol(urb->pipe));
+			qtd_status = 0;
+		}
+		if (likely(last_status == -EINPROGRESS))
+			last_status = qtd_status;
 
 		if (stopped && qtd->qtd_list.prev != &qh->qtd_list) {
 			last = list_entry (qtd->qtd_list.prev,
@@ -409,7 +413,7 @@ halt:
 
 	/* last urb's completion might still need calling */
 	if (likely (last != NULL)) {
-		ehci_urb_done (ehci, last->urb);
+		ehci_urb_done(ehci, last->urb, last_status);
 		count++;
 		ehci_qtd_free (ehci, last);
 	}
@@ -638,6 +642,7 @@ qh_make (
 	u32			info1 = 0, info2 = 0;
 	int			is_input, type;
 	int			maxp = 0;
+	struct usb_tt		*tt = urb->dev->tt;
 
 	if (!qh)
 		return qh;
@@ -661,8 +666,9 @@ qh_make (
 	 * For control/bulk requests, the HC or TT handles these.
 	 */
 	if (type == PIPE_INTERRUPT) {
-		qh->usecs = NS_TO_US (usb_calc_bus_time (USB_SPEED_HIGH, is_input, 0,
-				hb_mult (maxp) * max_packet (maxp)));
+		qh->usecs = NS_TO_US(usb_calc_bus_time(USB_SPEED_HIGH,
+				is_input, 0,
+				hb_mult(maxp) * max_packet(maxp)));
 		qh->start = NO_FRAME;
 
 		if (urb->dev->speed == USB_SPEED_HIGH) {
@@ -680,7 +686,6 @@ qh_make (
 				goto done;
 			}
 		} else {
-			struct usb_tt	*tt = urb->dev->tt;
 			int		think_time;
 
 			/* gap is f(FS/LS transfer times) */
@@ -736,10 +741,8 @@ qh_make (
 		/* set the address of the TT; for TDI's integrated
 		 * root hub tt, leave it zeroed.
 		 */
-		if (!ehci_is_TDI(ehci)
-				|| urb->dev->tt->hub !=
-					ehci_to_hcd(ehci)->self.root_hub)
-			info2 |= urb->dev->tt->hub->devnum << 16;
+		if (tt && tt->hub != ehci_to_hcd(ehci)->self.root_hub)
+			info2 |= tt->hub->devnum << 16;
 
 		/* NOTE:  if (PIPE_INTERRUPT) { scheduler sets c-mask } */
 
@@ -913,7 +916,6 @@ static struct ehci_qh *qh_append_tds (
 static int
 submit_async (
 	struct ehci_hcd		*ehci,
-	struct usb_host_endpoint *ep,
 	struct urb		*urb,
 	struct list_head	*qtd_list,
 	gfp_t			mem_flags
@@ -922,10 +924,10 @@ submit_async (
 	int			epnum;
 	unsigned long		flags;
 	struct ehci_qh		*qh = NULL;
-	int			rc = 0;
+	int			rc;
 
 	qtd = list_entry (qtd_list->next, struct ehci_qtd, qtd_list);
-	epnum = ep->desc.bEndpointAddress;
+	epnum = urb->ep->desc.bEndpointAddress;
 
 #ifdef EHCI_URB_TRACE
 	ehci_dbg (ehci,
@@ -933,7 +935,7 @@ submit_async (
 		__FUNCTION__, urb->dev->devpath, urb,
 		epnum & 0x0f, (epnum & USB_DIR_IN) ? "in" : "out",
 		urb->transfer_buffer_length,
-		qtd, ep->hcpriv);
+		qtd, urb->ep->hcpriv);
 #endif
 
 	spin_lock_irqsave (&ehci->lock, flags);
@@ -942,9 +944,13 @@ submit_async (
 		rc = -ESHUTDOWN;
 		goto done;
 	}
+	rc = usb_hcd_link_urb_to_ep(ehci_to_hcd(ehci), urb);
+	if (unlikely(rc))
+		goto done;
 
-	qh = qh_append_tds (ehci, urb, qtd_list, epnum, &ep->hcpriv);
+	qh = qh_append_tds(ehci, urb, qtd_list, epnum, &urb->ep->hcpriv);
 	if (unlikely(qh == NULL)) {
+		usb_hcd_unlink_urb_from_ep(ehci_to_hcd(ehci), urb);
 		rc = -ENOMEM;
 		goto done;
 	}
@@ -970,7 +976,7 @@ static void end_unlink_async (struct ehci_hcd *ehci)
 	struct ehci_qh		*qh = ehci->reclaim;
 	struct ehci_qh		*next;
 
-	timer_action_done (ehci, TIMER_IAA_WATCHDOG);
+	iaa_watchdog_done(ehci);
 
 	// qh->hw_next = cpu_to_hc32(qh->qh_dma);
 	qh->qh_state = QH_STATE_IDLE;
@@ -980,7 +986,6 @@ static void end_unlink_async (struct ehci_hcd *ehci)
 	/* other unlink(s) may be pending (in QH_STATE_UNLINK_WAIT) */
 	next = qh->reclaim;
 	ehci->reclaim = next;
-	ehci->reclaim_ready = 0;
 	qh->reclaim = NULL;
 
 	qh_completions (ehci, qh);
@@ -1056,11 +1061,10 @@ static void start_unlink_async (struct ehci_hcd *ehci, struct ehci_qh *qh)
 		return;
 	}
 
-	ehci->reclaim_ready = 0;
 	cmd |= CMD_IAAD;
 	ehci_writel(ehci, cmd, &ehci->regs->command);
 	(void)ehci_readl(ehci, &ehci->regs->command);
-	timer_action (ehci, TIMER_IAA_WATCHDOG);
+	iaa_watchdog_start(ehci);
 }
 
 /*-------------------------------------------------------------------------*/

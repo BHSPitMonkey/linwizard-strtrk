@@ -66,7 +66,8 @@ int usb_stor_ucr61s2b_init(struct us_data *us)
 {
 	struct bulk_cb_wrap *bcb = (struct bulk_cb_wrap*) us->iobuf;
 	struct bulk_cs_wrap *bcs = (struct bulk_cs_wrap*) us->iobuf;
-	int res, partial;
+	int res;
+	unsigned int partial;
 	static char init_string[] = "\xec\x0a\x06\x00$PCCHIPS";
 
 	US_DEBUGP("Sending UCR-61S2B initialization packet...\n");
@@ -89,4 +90,18 @@ int usb_stor_ucr61s2b_init(struct us_data *us)
 			US_BULK_CS_WRAP_LEN, &partial);
 
 	return (res ? -1 : 0);
+}
+
+/* This places the HUAWEI E220 devices in multi-port mode */
+int usb_stor_huawei_e220_init(struct us_data *us)
+{
+	int result;
+
+	us->iobuf[0] = 0x1;
+	result = usb_stor_control_msg(us, us->send_ctrl_pipe,
+				      USB_REQ_SET_FEATURE,
+				      USB_TYPE_STANDARD | USB_RECIP_DEVICE,
+				      0x01, 0x0, us->iobuf, 0x1, 1000);
+	US_DEBUGP("usb_control_msg performing result is %d\n", result);
+	return (result ? 0 : -1);
 }

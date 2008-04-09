@@ -1,23 +1,23 @@
-/* 
+/*
  * This file is part of the zfcp device driver for
  * FCP adapters for IBM System z9 and zSeries.
  *
  * (C) Copyright IBM Corp. 2002, 2006
- * 
- * This program is free software; you can redistribute it and/or modify 
- * it under the terms of the GNU General Public License as published by 
- * the Free Software Foundation; either version 2, or (at your option) 
- * any later version. 
- * 
- * This program is distributed in the hope that it will be useful, 
- * but WITHOUT ANY WARRANTY; without even the implied warranty of 
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the 
- * GNU General Public License for more details. 
- * 
- * You should have received a copy of the GNU General Public License 
- * along with this program; if not, write to the Free Software 
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA. 
- */ 
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2, or (at your option)
+ * any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ */
 
 #ifndef ZFCP_DEF_H
 #define ZFCP_DEF_H
@@ -34,6 +34,7 @@
 #include <linux/slab.h>
 #include <linux/mempool.h>
 #include <linux/syscalls.h>
+#include <linux/scatterlist.h>
 #include <linux/ioctl.h>
 #include <scsi/scsi.h>
 #include <scsi/scsi_tcq.h>
@@ -62,19 +63,19 @@
 static inline void *
 zfcp_sg_to_address(struct scatterlist *list)
 {
-	return (void *) (page_address(list->page) + list->offset);
+	return sg_virt(list);
 }
 
 /**
  * zfcp_address_to_sg - set up struct scatterlist from kernel address
  * @address: kernel address
  * @list: struct scatterlist
+ * @size: buffer size
  */
 static inline void
-zfcp_address_to_sg(void *address, struct scatterlist *list)
+zfcp_address_to_sg(void *address, struct scatterlist *list, unsigned int size)
 {
-	list->page = virt_to_page(address);
-	list->offset = ((unsigned long) address) & (PAGE_SIZE - 1);
+	sg_set_buf(list, address, size);
 }
 
 #define REQUEST_LIST_SIZE 128
@@ -90,7 +91,7 @@ zfcp_address_to_sg(void *address, struct scatterlist *list)
 #define ZFCP_DEVICE_TYPE        0x1732
 #define ZFCP_DEVICE_MODEL       0x03
 #define ZFCP_DEVICE_MODEL_PRIV	0x04
- 
+
 /* allow as many chained SBALs as are supported by hardware */
 #define ZFCP_MAX_SBALS_PER_REQ		FSF_MAX_SBALS_PER_REQ
 #define ZFCP_MAX_SBALS_PER_CT_REQ	FSF_MAX_SBALS_PER_REQ
@@ -117,7 +118,7 @@ zfcp_address_to_sg(void *address, struct scatterlist *list)
 
 #define ZFCP_SBAL_TIMEOUT               (5*HZ)
 
-#define ZFCP_TYPE2_RECOVERY_TIME        (8*HZ)
+#define ZFCP_TYPE2_RECOVERY_TIME        8	/* seconds */
 
 /* queue polling (values in microseconds) */
 #define ZFCP_MAX_INPUT_THRESHOLD 	5000	/* FIXME: tune */
@@ -138,7 +139,7 @@ zfcp_address_to_sg(void *address, struct scatterlist *list)
 #define ZFCP_STATUS_READS_RECOM		        FSF_STATUS_READS_RECOM
 
 /* Do 1st retry in 1 second, then double the timeout for each following retry */
-#define ZFCP_EXCHANGE_CONFIG_DATA_FIRST_SLEEP	100
+#define ZFCP_EXCHANGE_CONFIG_DATA_FIRST_SLEEP	1
 #define ZFCP_EXCHANGE_CONFIG_DATA_RETRIES	7
 
 /* timeout value for "default timer" for fsf requests */
@@ -508,7 +509,7 @@ struct zfcp_rc_entry {
 
 /*
  * this allows removal of logging code by the preprocessor
- * (the most detailed log level still to be compiled in is specified, 
+ * (the most detailed log level still to be compiled in is specified,
  * higher log levels are removed)
  */
 #define ZFCP_LOG_LEVEL_LIMIT	ZFCP_LOG_LEVEL_TRACE
@@ -546,7 +547,7 @@ do { \
 	if (ZFCP_LOG_CHECK(level)) \
 		_ZFCP_LOG(fmt, ##args); \
 } while (0)
-	
+
 #if ZFCP_LOG_LEVEL_LIMIT < ZFCP_LOG_LEVEL_NORMAL
 # define ZFCP_LOG_NORMAL(fmt, args...)	do { } while (0)
 #else
@@ -583,8 +584,8 @@ do { \
 
 /*************** ADAPTER/PORT/UNIT AND FSF_REQ STATUS FLAGS ******************/
 
-/* 
- * Note, the leftmost status byte is common among adapter, port 
+/*
+ * Note, the leftmost status byte is common among adapter, port
  * and unit
  */
 #define ZFCP_COMMON_FLAGS			0xfff00000
@@ -982,10 +983,6 @@ struct zfcp_unit {
         struct scsi_device     *device;        /* scsi device struct pointer */
 	struct zfcp_erp_action erp_action;     /* pending error recovery */
         atomic_t               erp_counter;
-	wait_queue_head_t      scsi_scan_wq;   /* can be used to wait until
-						  all scsi_scan_target
-						  requests have been
-						  completed. */
 };
 
 /* FSF request */
@@ -1007,8 +1004,8 @@ struct zfcp_fsf_req {
 	u32		       fsf_command;    /* FSF Command copy */
 	struct fsf_qtcb	       *qtcb;	       /* address of associated QTCB */
 	u32		       seq_no;         /* Sequence number of request */
-        unsigned long          data;           /* private data of request */ 
-	struct timer_list      timer;	       /* used for erp or scsi er */
+	unsigned long	       data;           /* private data of request */
+	struct timer_list     timer;	       /* used for erp or scsi er */
 	struct zfcp_erp_action *erp_action;    /* used if this request is
 						  issued on behalf of erp */
 	mempool_t	       *pool;	       /* used if request was alloacted
@@ -1123,6 +1120,20 @@ zfcp_reqlist_find(struct zfcp_adapter *adapter, unsigned long req_id)
 	list_for_each_entry(request, &adapter->req_list[idx], list)
 		if (request->req_id == req_id)
 			return request;
+	return NULL;
+}
+
+static inline struct zfcp_fsf_req *
+zfcp_reqlist_find_safe(struct zfcp_adapter *adapter, struct zfcp_fsf_req *req)
+{
+	struct zfcp_fsf_req *request;
+	unsigned int idx;
+
+	for (idx = 0; idx < REQUEST_LIST_SIZE; idx++) {
+		list_for_each_entry(request, &adapter->req_list[idx], list)
+			if (request == req)
+				return request;
+	}
 	return NULL;
 }
 

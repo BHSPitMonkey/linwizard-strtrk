@@ -2,7 +2,7 @@
  *   ALSA driver for VT1724 ICEnsemble ICE1724 / VIA VT1724 (Envy24HT)
  *                   VIA VT1720 (Envy24PT)
  *
- *	Copyright (c) 2000 Jaroslav Kysela <perex@suse.cz>
+ *	Copyright (c) 2000 Jaroslav Kysela <perex@perex.cz>
  *                    2002 James Stafford <jstafford@ampltd.com>
  *                    2003 Takashi Iwai <tiwai@suse.de>
  *
@@ -22,7 +22,6 @@
  *
  */      
 
-#include <sound/driver.h>
 #include <asm/io.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
@@ -48,11 +47,13 @@
 #include "vt1720_mobo.h"
 #include "pontis.h"
 #include "prodigy192.h"
+#include "prodigy_hifi.h"
 #include "juli.h"
 #include "phase.h"
 #include "wtm.h"
+#include "se.h"
 
-MODULE_AUTHOR("Jaroslav Kysela <perex@suse.cz>");
+MODULE_AUTHOR("Jaroslav Kysela <perex@perex.cz>");
 MODULE_DESCRIPTION("VIA ICEnsemble ICE1724/1720 (Envy24HT/PT)");
 MODULE_LICENSE("GPL");
 MODULE_SUPPORTED_DEVICE("{"
@@ -62,9 +63,11 @@ MODULE_SUPPORTED_DEVICE("{"
 	       VT1720_MOBO_DEVICE_DESC
 	       PONTIS_DEVICE_DESC
 	       PRODIGY192_DEVICE_DESC
+	       PRODIGY_HIFI_DEVICE_DESC
 	       JULI_DEVICE_DESC
 	       PHASE_DEVICE_DESC
 	       WTM_DEVICE_DESC
+	       SE_DEVICE_DESC
 		"{VIA,VT1720},"
 		"{VIA,VT1724},"
 		"{ICEnsemble,Generic ICE1724},"
@@ -341,10 +344,12 @@ static int snd_vt1724_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 
 	what = 0;
 	snd_pcm_group_for_each_entry(s, substream) {
-		const struct vt1724_pcm_reg *reg;
-		reg = s->runtime->private_data;
-		what |= reg->start;
-		snd_pcm_trigger_done(s, substream);
+		if (snd_pcm_substream_chip(s) == ice) {
+			const struct vt1724_pcm_reg *reg;
+			reg = s->runtime->private_data;
+			what |= reg->start;
+			snd_pcm_trigger_done(s, substream);
+		}
 	}
 
 	switch (cmd) {
@@ -1479,15 +1484,7 @@ static struct snd_kcontrol_new snd_vt1724_spdif_maskp __devinitdata =
 	.get =		snd_vt1724_spdif_maskp_get,
 };
 
-static int snd_vt1724_spdif_sw_info(struct snd_kcontrol *kcontrol,
-				    struct snd_ctl_elem_info *uinfo)
-{
-	uinfo->type = SNDRV_CTL_ELEM_TYPE_BOOLEAN;
-	uinfo->count = 1;
-	uinfo->value.integer.min = 0;
-	uinfo->value.integer.max = 1;
-	return 0;
-}
+#define snd_vt1724_spdif_sw_info		snd_ctl_boolean_mono_info
 
 static int snd_vt1724_spdif_sw_get(struct snd_kcontrol *kcontrol,
 				   struct snd_ctl_elem_value *ucontrol)
@@ -1532,15 +1529,7 @@ static struct snd_kcontrol_new snd_vt1724_spdif_switch __devinitdata =
  * GPIO access from extern
  */
 
-int snd_vt1724_gpio_info(struct snd_kcontrol *kcontrol,
-			 struct snd_ctl_elem_info *uinfo)
-{
-	uinfo->type = SNDRV_CTL_ELEM_TYPE_BOOLEAN;
-	uinfo->count = 1;
-	uinfo->value.integer.min = 0;
-	uinfo->value.integer.max = 1;
-	return 0;
-}
+#define snd_vt1724_gpio_info		snd_ctl_boolean_mono_info
 
 int snd_vt1724_gpio_get(struct snd_kcontrol *kcontrol,
 			struct snd_ctl_elem_value *ucontrol)
@@ -1706,15 +1695,7 @@ static struct snd_kcontrol_new snd_vt1724_pro_internal_clock __devinitdata = {
 	.put = snd_vt1724_pro_internal_clock_put
 };
 
-static int snd_vt1724_pro_rate_locking_info(struct snd_kcontrol *kcontrol,
-					    struct snd_ctl_elem_info *uinfo)
-{
-	uinfo->type = SNDRV_CTL_ELEM_TYPE_BOOLEAN;
-	uinfo->count = 1;
-	uinfo->value.integer.min = 0;
-	uinfo->value.integer.max = 1;
-	return 0;
-}
+#define snd_vt1724_pro_rate_locking_info	snd_ctl_boolean_mono_info
 
 static int snd_vt1724_pro_rate_locking_get(struct snd_kcontrol *kcontrol,
 					   struct snd_ctl_elem_value *ucontrol)
@@ -1745,15 +1726,7 @@ static struct snd_kcontrol_new snd_vt1724_pro_rate_locking __devinitdata = {
 	.put = snd_vt1724_pro_rate_locking_put
 };
 
-static int snd_vt1724_pro_rate_reset_info(struct snd_kcontrol *kcontrol,
-					  struct snd_ctl_elem_info *uinfo)
-{
-	uinfo->type = SNDRV_CTL_ELEM_TYPE_BOOLEAN;
-	uinfo->count = 1;
-	uinfo->value.integer.min = 0;
-	uinfo->value.integer.max = 1;
-	return 0;
-}
+#define snd_vt1724_pro_rate_reset_info		snd_ctl_boolean_mono_info
 
 static int snd_vt1724_pro_rate_reset_get(struct snd_kcontrol *kcontrol,
 					 struct snd_ctl_elem_value *ucontrol)
@@ -1959,10 +1932,12 @@ static struct snd_ice1712_card_info *card_tables[] __devinitdata = {
 	snd_vt1724_aureon_cards,
 	snd_vt1720_mobo_cards,
 	snd_vt1720_pontis_cards,
+	snd_vt1724_prodigy_hifi_cards,
 	snd_vt1724_prodigy192_cards,
 	snd_vt1724_juli_cards,
 	snd_vt1724_phase_cards,
 	snd_vt1724_wtm_cards,
+	snd_vt1724_se_cards,
 	NULL,
 };
 
@@ -1985,6 +1960,7 @@ unsigned char snd_vt1724_read_i2c(struct snd_ice1712 *ice,
 	unsigned char val;
 
 	mutex_lock(&ice->i2c_mutex);
+	wait_i2c_busy(ice);
 	outb(addr, ICEREG1724(ice, I2C_BYTE_ADDR));
 	outb(dev & ~VT1724_I2C_WRITE, ICEREG1724(ice, I2C_DEV_ADDR));
 	wait_i2c_busy(ice);
@@ -2200,6 +2176,7 @@ static int snd_vt1724_free(struct snd_ice1712 *ice)
 	pci_release_regions(ice->pci);
 	snd_ice1712_akm4xxx_free(ice);
 	pci_disable_device(ice->pci);
+	kfree(ice->spec);
 	kfree(ice);
 	return 0;
 }

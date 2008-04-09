@@ -23,7 +23,6 @@
 */
 
 
-#include <sound/driver.h>
 #include <linux/init.h>
 #include <linux/err.h>
 #include <linux/isa.h>
@@ -501,6 +500,16 @@ static int __devinit snd_opti9xx_configure(struct snd_opti9xx *chip)
 			(chip->hardware == OPTi9XX_HW_82C930 ? 0x00 : 0x04),
 			0x34);
 		snd_opti9xx_write_mask(chip, OPTi9XX_MC_REG(5), 0x20, 0xbf);
+		/* 
+		 * The BTC 1817DW has QS1000 wavetable which is connected
+		 * to the serial digital input of the OPTI931.
+		 */
+		snd_opti9xx_write_mask(chip, OPTi9XX_MC_REG(21), 0x82, 0xff);
+		/* 
+		 * This bit sets OPTI931 to automaticaly select FM
+		 * or digital input signal.
+		 */
+		snd_opti9xx_write_mask(chip, OPTi9XX_MC_REG(26), 0x01, 0x01);
 		break;
 #endif	/* OPTi93X */
 
@@ -1585,7 +1594,7 @@ OPTi93X_DOUBLE("Capture Volume", 0, OPTi93X_MIXOUT_LEFT, OPTi93X_MIXOUT_RIGHT, 0
 }
 };
                                         
-static int snd_opti93x_mixer(struct snd_opti93x *chip)
+static int __devinit snd_opti93x_mixer(struct snd_opti93x *chip)
 {
 	struct snd_card *card;
 	struct snd_kcontrol_new knew;
@@ -1680,63 +1689,29 @@ static int __devinit snd_card_opti9xx_pnp(struct snd_opti9xx *chip,
 					  const struct pnp_card_device_id *pid)
 {
 	struct pnp_dev *pdev;
-	struct pnp_resource_table *cfg = kmalloc(sizeof(*cfg), GFP_KERNEL);
 	int err;
 
-	if (!cfg)
-		return -ENOMEM;
 	chip->dev = pnp_request_card_device(card, pid->devs[0].id, NULL);
-	if (chip->dev == NULL) {
-		kfree(cfg);
+	if (chip->dev == NULL)
 		return -EBUSY;
-	}
+
 	chip->devmpu = pnp_request_card_device(card, pid->devs[1].id, NULL);
 
 	pdev = chip->dev;
-	pnp_init_resource_table(cfg);
 
-#ifdef OPTi93X
-	if (port != SNDRV_AUTO_PORT)
-		pnp_resource_change(&cfg->port_resource[0], port + 4, 4);
-#else
-	if (pid->driver_data != 0x0924 && port != SNDRV_AUTO_PORT)
-		pnp_resource_change(&cfg->port_resource[1], port, 4);
-#endif	/* OPTi93X */
-	if (irq != SNDRV_AUTO_IRQ)
-		pnp_resource_change(&cfg->irq_resource[0], irq, 1);
-	if (dma1 != SNDRV_AUTO_DMA)
-		pnp_resource_change(&cfg->dma_resource[0], dma1, 1);
-#if defined(CS4231) || defined(OPTi93X)
-	if (dma2 != SNDRV_AUTO_DMA)
-		pnp_resource_change(&cfg->dma_resource[1], dma2, 1);
-#else
-#ifdef snd_opti9xx_fixup_dma2
-	snd_opti9xx_fixup_dma2(pdev);
-#endif
-#endif	/* CS4231 || OPTi93X */
-#ifdef OPTi93X
-	if (fm_port > 0 && fm_port != SNDRV_AUTO_PORT)
-		pnp_resource_change(&cfg->port_resource[1], fm_port, 4);
-#else
-	if (fm_port > 0 && fm_port != SNDRV_AUTO_PORT)
-		pnp_resource_change(&cfg->port_resource[2], fm_port, 4);
-#endif
-	if (pnp_manual_config_dev(pdev, cfg, 0) < 0)
-		snd_printk(KERN_ERR "AUDIO the requested resources are invalid, using auto config\n");
 	err = pnp_activate_dev(pdev);
 	if (err < 0) {
 		snd_printk(KERN_ERR "AUDIO pnp configure failure: %d\n", err);
-		kfree(cfg);
 		return err;
 	}
 
 #ifdef OPTi93X
 	port = pnp_port_start(pdev, 0) - 4;
-	fm_port = pnp_port_start(pdev, 1);
+	fm_port = pnp_port_start(pdev, 1) + 8;
 #else
 	if (pid->driver_data != 0x0924)
 		port = pnp_port_start(pdev, 1);
-	fm_port = pnp_port_start(pdev, 2);
+	fm_port = pnp_port_start(pdev, 2) + 8;
 #endif	/* OPTi93X */
 	irq = pnp_irq(pdev, 0);
 	dma1 = pnp_dma(pdev, 0);
@@ -1746,15 +1721,6 @@ static int __devinit snd_card_opti9xx_pnp(struct snd_opti9xx *chip,
 
 	pdev = chip->devmpu;
 	if (pdev && mpu_port > 0) {
-		pnp_init_resource_table(cfg);
-
-		if (mpu_port != SNDRV_AUTO_PORT)
-			pnp_resource_change(&cfg->port_resource[0], mpu_port, 2);
-		if (mpu_irq != SNDRV_AUTO_IRQ)
-			pnp_resource_change(&cfg->irq_resource[0], mpu_irq, 1);
-
-		if (pnp_manual_config_dev(pdev, cfg, 0) < 0)
-			snd_printk(KERN_ERR "AUDIO the requested resources are invalid, using auto config\n");
 		err = pnp_activate_dev(pdev);
 		if (err < 0) {
 			snd_printk(KERN_ERR "AUDIO pnp configure failure\n");
@@ -1765,7 +1731,6 @@ static int __devinit snd_card_opti9xx_pnp(struct snd_opti9xx *chip,
 			mpu_irq = pnp_irq(pdev, 0);
 		}
 	}
-	kfree(cfg);
 	return pid->driver_data;
 }
 #endif	/* CONFIG_PNP */

@@ -60,13 +60,12 @@
 enum {
 	MTHCA_FLAG_DDR_HIDDEN = 1 << 1,
 	MTHCA_FLAG_SRQ        = 1 << 2,
-	MTHCA_FLAG_MSI        = 1 << 3,
-	MTHCA_FLAG_MSI_X      = 1 << 4,
-	MTHCA_FLAG_NO_LAM     = 1 << 5,
-	MTHCA_FLAG_FMR        = 1 << 6,
-	MTHCA_FLAG_MEMFREE    = 1 << 7,
-	MTHCA_FLAG_PCIE       = 1 << 8,
-	MTHCA_FLAG_SINAI_OPT  = 1 << 9
+	MTHCA_FLAG_MSI_X      = 1 << 3,
+	MTHCA_FLAG_NO_LAM     = 1 << 4,
+	MTHCA_FLAG_FMR        = 1 << 5,
+	MTHCA_FLAG_MEMFREE    = 1 << 6,
+	MTHCA_FLAG_PCIE       = 1 << 7,
+	MTHCA_FLAG_SINAI_OPT  = 1 << 8
 };
 
 enum {
@@ -83,7 +82,7 @@ enum {
 	MTHCA_QP_CONTEXT_SIZE = 0x200,
 	MTHCA_RDB_ENTRY_SIZE  =  0x20,
 	MTHCA_AV_SIZE         =  0x20,
-	MTHCA_MGM_ENTRY_SIZE  =  0x40,
+	MTHCA_MGM_ENTRY_SIZE  = 0x100,
 
 	/* Arbel FW gives us these, but we need them for Tavor */
 	MTHCA_MPT_ENTRY_SIZE  =  0x40,

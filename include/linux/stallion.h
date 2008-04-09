@@ -75,7 +75,7 @@ struct stlport {
 	int			ioaddr;
 	int			uartaddr;
 	unsigned int		pagenr;
-	long			istate;
+	unsigned long		istate;
 	int			flags;
 	int			baud_base;
 	int			custom_divisor;
@@ -95,7 +95,6 @@ struct stlport {
 	struct tty_struct	*tty;
 	wait_queue_head_t	open_wait;
 	wait_queue_head_t	close_wait;
-	struct work_struct	tqueue;
 	comstats_t		stats;
 	struct stlrq		tx;
 };

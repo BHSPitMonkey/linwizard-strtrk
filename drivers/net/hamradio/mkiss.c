@@ -289,7 +289,6 @@ static void ax_bump(struct mkiss *ax)
 			*ax->rbuff &= ~0x20;
 		}
  	}
-	spin_unlock_bh(&ax->buflock);
 
 	count = ax->rcount;
 
@@ -297,17 +296,17 @@ static void ax_bump(struct mkiss *ax)
 		printk(KERN_ERR "mkiss: %s: memory squeeze, dropping packet.\n",
 		       ax->dev->name);
 		ax->stats.rx_dropped++;
+		spin_unlock_bh(&ax->buflock);
 		return;
 	}
 
-	spin_lock_bh(&ax->buflock);
 	memcpy(skb_put(skb,count), ax->rbuff, count);
-	spin_unlock_bh(&ax->buflock);
 	skb->protocol = ax25_type_trans(skb, ax->dev);
 	netif_rx(skb);
 	ax->dev->last_rx = jiffies;
 	ax->stats.rx_packets++;
 	ax->stats.rx_bytes += count;
+	spin_unlock_bh(&ax->buflock);
 }
 
 static void kiss_unesc(struct mkiss *ax, unsigned char s)
@@ -578,11 +577,12 @@ static int ax_open_dev(struct net_device *dev)
 #if defined(CONFIG_AX25) || defined(CONFIG_AX25_MODULE)
 
 /* Return the frame type ID */
-static int ax_header(struct sk_buff *skb, struct net_device *dev, unsigned short type,
-	  void *daddr, void *saddr, unsigned len)
+static int ax_header(struct sk_buff *skb, struct net_device *dev,
+		     unsigned short type, const void *daddr,
+		     const void *saddr, unsigned len)
 {
 #ifdef CONFIG_INET
-	if (type != htons(ETH_P_AX25))
+	if (type != ETH_P_AX25)
 		return ax25_hard_header(skb, dev, type, daddr, saddr, len);
 #endif
 	return 0;
@@ -670,6 +670,11 @@ static struct net_device_stats *ax_get_stats(struct net_device *dev)
 	return &ax->stats;
 }
 
+static const struct header_ops ax_header_ops = {
+	.create    = ax_header,
+	.rebuild   = ax_rebuild_header,
+};
+
 static void ax_setup(struct net_device *dev)
 {
 	/* Finish setting up the DEVICE info. */
@@ -683,8 +688,8 @@ static void ax_setup(struct net_device *dev)
 	dev->addr_len        = 0;
 	dev->type            = ARPHRD_AX25;
 	dev->tx_queue_len    = 10;
-	dev->hard_header     = ax_header;
-	dev->rebuild_header  = ax_rebuild_header;
+	dev->header_ops      = &ax_header_ops;
+
 
 	memcpy(dev->broadcast, &ax25_bcast, AX25_ADDR_LEN);
 	memcpy(dev->dev_addr,  &ax25_defaddr,  AX25_ADDR_LEN);
@@ -815,7 +820,7 @@ static void mkiss_close(struct tty_struct *tty)
 	tty->disc_data = NULL;
 	write_unlock(&disc_data_lock);
 
-	if (ax == 0)
+	if (!ax)
 		return;
 
 	/*

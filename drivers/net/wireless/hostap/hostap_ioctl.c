@@ -84,7 +84,7 @@ static int prism2_get_datarates(struct net_device *dev, u8 *rates)
 	if (len < 2)
 		return 0;
 
-	val = le16_to_cpu(*(u16 *) buf); /* string length */
+	val = le16_to_cpu(*(__le16 *) buf); /* string length */
 
 	if (len - 2 < val || val > 10)
 		return 0;
@@ -496,7 +496,7 @@ static int prism2_ioctl_giwsens(struct net_device *dev,
 {
 	struct hostap_interface *iface;
 	local_info_t *local;
-	u16 val;
+	__le16 val;
 
 	iface = netdev_priv(dev);
 	local = iface->local;
@@ -506,7 +506,7 @@ static int prism2_ioctl_giwsens(struct net_device *dev,
 	    0)
 		return -EINVAL;
 
-	sens->value = __le16_to_cpu(val);
+	sens->value = le16_to_cpu(val);
 	sens->fixed = 1;
 
 	return 0;
@@ -561,17 +561,17 @@ static int prism2_ioctl_siwrts(struct net_device *dev,
 {
 	struct hostap_interface *iface;
 	local_info_t *local;
-	u16 val;
+	__le16 val;
 
 	iface = netdev_priv(dev);
 	local = iface->local;
 
 	if (rts->disabled)
-		val = __constant_cpu_to_le16(2347);
+		val = cpu_to_le16(2347);
 	else if (rts->value < 0 || rts->value > 2347)
 		return -EINVAL;
 	else
-		val = __cpu_to_le16(rts->value);
+		val = cpu_to_le16(rts->value);
 
 	if (local->func->set_rid(dev, HFA384X_RID_RTSTHRESHOLD, &val, 2) ||
 	    local->func->reset_port(dev))
@@ -588,7 +588,7 @@ static int prism2_ioctl_giwrts(struct net_device *dev,
 {
 	struct hostap_interface *iface;
 	local_info_t *local;
-	u16 val;
+	__le16 val;
 
 	iface = netdev_priv(dev);
 	local = iface->local;
@@ -597,7 +597,7 @@ static int prism2_ioctl_giwrts(struct net_device *dev,
 	    0)
 		return -EINVAL;
 
-	rts->value = __le16_to_cpu(val);
+	rts->value = le16_to_cpu(val);
 	rts->disabled = (rts->value == 2347);
 	rts->fixed = 1;
 
@@ -611,17 +611,17 @@ static int prism2_ioctl_siwfrag(struct net_device *dev,
 {
 	struct hostap_interface *iface;
 	local_info_t *local;
-	u16 val;
+	__le16 val;
 
 	iface = netdev_priv(dev);
 	local = iface->local;
 
 	if (rts->disabled)
-		val = __constant_cpu_to_le16(2346);
+		val = cpu_to_le16(2346);
 	else if (rts->value < 256 || rts->value > 2346)
 		return -EINVAL;
 	else
-		val = __cpu_to_le16(rts->value & ~0x1); /* even numbers only */
+		val = cpu_to_le16(rts->value & ~0x1); /* even numbers only */
 
 	local->fragm_threshold = rts->value & ~0x1;
 	if (local->func->set_rid(dev, HFA384X_RID_FRAGMENTATIONTHRESHOLD, &val,
@@ -638,7 +638,7 @@ static int prism2_ioctl_giwfrag(struct net_device *dev,
 {
 	struct hostap_interface *iface;
 	local_info_t *local;
-	u16 val;
+	__le16 val;
 
 	iface = netdev_priv(dev);
 	local = iface->local;
@@ -647,7 +647,7 @@ static int prism2_ioctl_giwfrag(struct net_device *dev,
 				 &val, 2, 1) < 0)
 		return -EINVAL;
 
-	rts->value = __le16_to_cpu(val);
+	rts->value = le16_to_cpu(val);
 	rts->disabled = (rts->value == 2346);
 	rts->fixed = 1;
 
@@ -664,6 +664,7 @@ static int hostap_join_ap(struct net_device *dev)
 	unsigned long flags;
 	int i;
 	struct hfa384x_hostscan_result *entry;
+	DECLARE_MAC_BUF(mac);
 
 	iface = netdev_priv(dev);
 	local = iface->local;
@@ -685,14 +686,14 @@ static int hostap_join_ap(struct net_device *dev)
 
 	if (local->func->set_rid(dev, HFA384X_RID_JOINREQUEST, &req,
 				 sizeof(req))) {
-		printk(KERN_DEBUG "%s: JoinRequest " MACSTR
+		printk(KERN_DEBUG "%s: JoinRequest %s"
 		       " failed\n",
-		       dev->name, MAC2STR(local->preferred_ap));
+		       dev->name, print_mac(mac, local->preferred_ap));
 		return -1;
 	}
 
-	printk(KERN_DEBUG "%s: Trying to join BSSID " MACSTR "\n",
-	       dev->name, MAC2STR(local->preferred_ap));
+	printk(KERN_DEBUG "%s: Trying to join BSSID %s\n",
+	       dev->name, print_mac(mac, local->preferred_ap));
 
 	return 0;
 }
@@ -717,8 +718,8 @@ static int prism2_ioctl_siwap(struct net_device *dev,
 	if (local->host_roaming == 1 && local->iw_mode == IW_MODE_INFRA) {
 		struct hfa384x_scan_request scan_req;
 		memset(&scan_req, 0, sizeof(scan_req));
-		scan_req.channel_list = __constant_cpu_to_le16(0x3fff);
-		scan_req.txrate = __constant_cpu_to_le16(HFA384X_RATES_1MBPS);
+		scan_req.channel_list = cpu_to_le16(0x3fff);
+		scan_req.txrate = cpu_to_le16(HFA384X_RATES_1MBPS);
 		if (local->func->set_rid(dev, HFA384X_RID_SCANREQUEST,
 					 &scan_req, sizeof(scan_req))) {
 			printk(KERN_DEBUG "%s: ScanResults request failed - "
@@ -811,7 +812,7 @@ static int prism2_ioctl_giwnickn(struct net_device *dev,
 
 	len = local->func->get_rid(dev, HFA384X_RID_CNFOWNNAME,
 				   &name, MAX_NAME_LEN + 2, 0);
-	val = __le16_to_cpu(*(u16 *) name);
+	val = le16_to_cpu(*(__le16 *) name);
 	if (len > MAX_NAME_LEN + 2 || len < 0 || val > MAX_NAME_LEN)
 		return -EOPNOTSUPP;
 
@@ -896,11 +897,8 @@ static void hostap_monitor_set_type(local_info_t *local)
 	if (local->monitor_type == PRISM2_MONITOR_PRISM ||
 	    local->monitor_type == PRISM2_MONITOR_CAPHDR) {
 		dev->type = ARPHRD_IEEE80211_PRISM;
-		dev->hard_header_parse =
-			hostap_80211_prism_header_parse;
 	} else {
 		dev->type = ARPHRD_IEEE80211;
-		dev->hard_header_parse = hostap_80211_header_parse;
 	}
 }
 
@@ -965,7 +963,7 @@ static int prism2_ioctl_giwessid(struct net_device *dev,
 		memset(ssid, 0, sizeof(ssid));
 		len = local->func->get_rid(dev, HFA384X_RID_CURRENTSSID,
 					   &ssid, MAX_SSID_LEN + 2, 0);
-		val = __le16_to_cpu(*(u16 *) ssid);
+		val = le16_to_cpu(*(__le16 *) ssid);
 		if (len > MAX_SSID_LEN + 2 || len < 0 || val > MAX_SSID_LEN) {
 			return -EOPNOTSUPP;
 		}
@@ -1091,6 +1089,9 @@ static int prism2_ioctl_giwrange(struct net_device *dev,
 	range->enc_capa = IW_ENC_CAPA_WPA | IW_ENC_CAPA_WPA2 |
 		IW_ENC_CAPA_CIPHER_TKIP | IW_ENC_CAPA_CIPHER_CCMP;
 
+	if (local->sta_fw_ver >= PRISM2_FW_VER(1,3,1))
+		range->scan_capa = IW_SCAN_CAPA_ESSID;
+
 	return 0;
 }
 
@@ -1140,7 +1141,7 @@ static int hostap_monitor_mode_disable(local_info_t *local)
 
 	printk(KERN_DEBUG "%s: Disabling monitor mode\n", dev->name);
 	dev->type = ARPHRD_ETHER;
-	dev->hard_header_parse = local->saved_eth_header_parse;
+
 	if (local->func->cmd(dev, HFA384X_CMDCODE_TEST |
 			     (HFA384X_TEST_STOP << 8),
 			     0, NULL, NULL))
@@ -1318,7 +1319,7 @@ static int prism2_ioctl_giwpower(struct net_device *dev,
 #else /* PRISM2_NO_STATION_MODES */
 	struct hostap_interface *iface;
 	local_info_t *local;
-	u16 enable, mcast;
+	__le16 enable, mcast;
 
 	iface = netdev_priv(dev);
 	local = iface->local;
@@ -1327,7 +1328,7 @@ static int prism2_ioctl_giwpower(struct net_device *dev,
 	    < 0)
 		return -EINVAL;
 
-	if (!__le16_to_cpu(enable)) {
+	if (!le16_to_cpu(enable)) {
 		rrq->disabled = 1;
 		return 0;
 	}
@@ -1335,29 +1336,29 @@ static int prism2_ioctl_giwpower(struct net_device *dev,
 	rrq->disabled = 0;
 
 	if ((rrq->flags & IW_POWER_TYPE) == IW_POWER_TIMEOUT) {
-		u16 timeout;
+		__le16 timeout;
 		if (local->func->get_rid(dev,
 					 HFA384X_RID_CNFPMHOLDOVERDURATION,
 					 &timeout, 2, 1) < 0)
 			return -EINVAL;
 
 		rrq->flags = IW_POWER_TIMEOUT;
-		rrq->value = __le16_to_cpu(timeout) * 1024;
+		rrq->value = le16_to_cpu(timeout) * 1024;
 	} else {
-		u16 period;
+		__le16 period;
 		if (local->func->get_rid(dev, HFA384X_RID_CNFMAXSLEEPDURATION,
 					 &period, 2, 1) < 0)
 			return -EINVAL;
 
 		rrq->flags = IW_POWER_PERIOD;
-		rrq->value = __le16_to_cpu(period) * 1024;
+		rrq->value = le16_to_cpu(period) * 1024;
 	}
 
 	if (local->func->get_rid(dev, HFA384X_RID_CNFMULTICASTRECEIVE, &mcast,
 				 2, 1) < 0)
 		return -EINVAL;
 
-	if (__le16_to_cpu(mcast))
+	if (le16_to_cpu(mcast))
 		rrq->flags |= IW_POWER_ALL_R;
 	else
 		rrq->flags |= IW_POWER_UNICAST_R;
@@ -1434,7 +1435,7 @@ static int prism2_ioctl_giwretry(struct net_device *dev,
 {
 	struct hostap_interface *iface;
 	local_info_t *local;
-	u16 shortretry, longretry, lifetime, altretry;
+	__le16 shortretry, longretry, lifetime, altretry;
 
 	iface = netdev_priv(dev);
 	local = iface->local;
@@ -1447,15 +1448,11 @@ static int prism2_ioctl_giwretry(struct net_device *dev,
 				 &lifetime, 2, 1) < 0)
 		return -EINVAL;
 
-	le16_to_cpus(&shortretry);
-	le16_to_cpus(&longretry);
-	le16_to_cpus(&lifetime);
-
 	rrq->disabled = 0;
 
 	if ((rrq->flags & IW_RETRY_TYPE) == IW_RETRY_LIFETIME) {
 		rrq->flags = IW_RETRY_LIFETIME;
-		rrq->value = lifetime * 1024;
+		rrq->value = le16_to_cpu(lifetime) * 1024;
 	} else {
 		if (local->manual_retry_count >= 0) {
 			rrq->flags = IW_RETRY_LIMIT;
@@ -1467,10 +1464,10 @@ static int prism2_ioctl_giwretry(struct net_device *dev,
 				rrq->value = local->manual_retry_count;
 		} else if ((rrq->flags & IW_RETRY_LONG)) {
 			rrq->flags = IW_RETRY_LIMIT | IW_RETRY_LONG;
-			rrq->value = longretry;
+			rrq->value = le16_to_cpu(longretry);
 		} else {
 			rrq->flags = IW_RETRY_LIMIT;
-			rrq->value = shortretry;
+			rrq->value = le16_to_cpu(shortretry);
 			if (shortretry != longretry)
 				rrq->flags |= IW_RETRY_SHORT;
 		}
@@ -2922,7 +2919,7 @@ static int prism2_ioctl_priv_monitor(struct net_device *dev, int *i)
 
 	printk(KERN_DEBUG "%s: process %d (%s) used deprecated iwpriv monitor "
 	       "- update software to use iwconfig mode monitor\n",
-	       dev->name, current->pid, current->comm);
+	       dev->name, task_pid_nr(current), current->comm);
 
 	/* Backward compatibility code - this can be removed at some point */
 
@@ -3088,7 +3085,7 @@ static int prism2_ioctl_priv_download(local_info_t *local, struct iw_point *p)
 static int prism2_set_genericelement(struct net_device *dev, u8 *elem,
 				     size_t len)
 {
-	struct hostap_interface *iface = dev->priv;
+	struct hostap_interface *iface = netdev_priv(dev);
 	local_info_t *local = iface->local;
 	u8 *buf;
 
@@ -3100,7 +3097,7 @@ static int prism2_set_genericelement(struct net_device *dev, u8 *elem,
 	if (buf == NULL)
 		return -ENOMEM;
 
-	*((u16 *) buf) = cpu_to_le16(len);
+	*((__le16 *) buf) = cpu_to_le16(len);
 	memcpy(buf + 2, elem, len);
 
 	kfree(local->generic_elem);
@@ -3116,7 +3113,7 @@ static int prism2_ioctl_siwauth(struct net_device *dev,
 				struct iw_request_info *info,
 				struct iw_param *data, char *extra)
 {
-	struct hostap_interface *iface = dev->priv;
+	struct hostap_interface *iface = netdev_priv(dev);
 	local_info_t *local = iface->local;
 
 	switch (data->flags & IW_AUTH_INDEX) {
@@ -3182,7 +3179,7 @@ static int prism2_ioctl_giwauth(struct net_device *dev,
 				struct iw_request_info *info,
 				struct iw_param *data, char *extra)
 {
-	struct hostap_interface *iface = dev->priv;
+	struct hostap_interface *iface = netdev_priv(dev);
 	local_info_t *local = iface->local;
 
 	switch (data->flags & IW_AUTH_INDEX) {
@@ -3221,7 +3218,7 @@ static int prism2_ioctl_siwencodeext(struct net_device *dev,
 				     struct iw_request_info *info,
 				     struct iw_point *erq, char *extra)
 {
-	struct hostap_interface *iface = dev->priv;
+	struct hostap_interface *iface = netdev_priv(dev);
 	local_info_t *local = iface->local;
 	struct iw_encode_ext *ext = (struct iw_encode_ext *) extra;
 	int i, ret = 0;
@@ -3395,7 +3392,7 @@ static int prism2_ioctl_giwencodeext(struct net_device *dev,
 				     struct iw_request_info *info,
 				     struct iw_point *erq, char *extra)
 {
-	struct hostap_interface *iface = dev->priv;
+	struct hostap_interface *iface = netdev_priv(dev);
 	local_info_t *local = iface->local;
 	struct ieee80211_crypt_data **crypt;
 	void *sta_ptr;
@@ -3697,8 +3694,10 @@ static int prism2_ioctl_set_assoc_ap_addr(local_info_t *local,
 					  struct prism2_hostapd_param *param,
 					  int param_len)
 {
-	printk(KERN_DEBUG "%ssta: associated as client with AP " MACSTR "\n",
-	       local->dev->name, MAC2STR(param->sta_addr));
+	DECLARE_MAC_BUF(mac);
+	printk(KERN_DEBUG "%ssta: associated as client with AP "
+	       "%s\n",
+	       local->dev->name, print_mac(mac, param->sta_addr));
 	memcpy(local->assoc_ap_addr, param->sta_addr, ETH_ALEN);
 	return 0;
 }
@@ -3716,7 +3715,7 @@ static int prism2_ioctl_giwgenie(struct net_device *dev,
 				 struct iw_request_info *info,
 				 struct iw_point *data, char *extra)
 {
-	struct hostap_interface *iface = dev->priv;
+	struct hostap_interface *iface = netdev_priv(dev);
 	local_info_t *local = iface->local;
 	int len = local->generic_elem_len - 2;
 
@@ -3755,10 +3754,10 @@ static int prism2_ioctl_siwmlme(struct net_device *dev,
 				struct iw_request_info *info,
 				struct iw_point *data, char *extra)
 {
-	struct hostap_interface *iface = dev->priv;
+	struct hostap_interface *iface = netdev_priv(dev);
 	local_info_t *local = iface->local;
 	struct iw_mlme *mlme = (struct iw_mlme *) extra;
-	u16 reason;
+	__le16 reason;
 
 	reason = cpu_to_le16(mlme->reason_code);
 
@@ -3780,7 +3779,7 @@ static int prism2_ioctl_siwmlme(struct net_device *dev,
 static int prism2_ioctl_mlme(local_info_t *local,
 			     struct prism2_hostapd_param *param)
 {
-	u16 reason;
+	__le16 reason;
 
 	reason = cpu_to_le16(param->u.mlme.reason_code);
 	switch (param->u.mlme.cmd) {
@@ -3976,9 +3975,9 @@ static const iw_handler prism2_private_handler[] =
 
 const struct iw_handler_def hostap_iw_handler_def =
 {
-	.num_standard	= sizeof(prism2_handler) / sizeof(iw_handler),
-	.num_private	= sizeof(prism2_private_handler) / sizeof(iw_handler),
-	.num_private_args = sizeof(prism2_priv) / sizeof(struct iw_priv_args),
+	.num_standard	= ARRAY_SIZE(prism2_handler),
+	.num_private	= ARRAY_SIZE(prism2_private_handler),
+	.num_private_args = ARRAY_SIZE(prism2_priv),
 	.standard	= (iw_handler *) prism2_handler,
 	.private	= (iw_handler *) prism2_private_handler,
 	.private_args	= (struct iw_priv_args *) prism2_priv,

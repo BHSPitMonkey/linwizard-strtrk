@@ -161,30 +161,30 @@ static dbdev_tab_t dbdev_tab[] = {
 	{ DSCR_CMD0_ALWAYS, DEV_FLAGS_ANYUSE, 0, 0, 0x00000000, 0, 0 },
 
 	/* Provide 16 user definable device types */
-	{ 0, 0, 0, 0, 0, 0, 0 },
-	{ 0, 0, 0, 0, 0, 0, 0 },
-	{ 0, 0, 0, 0, 0, 0, 0 },
-	{ 0, 0, 0, 0, 0, 0, 0 },
-	{ 0, 0, 0, 0, 0, 0, 0 },
-	{ 0, 0, 0, 0, 0, 0, 0 },
-	{ 0, 0, 0, 0, 0, 0, 0 },
-	{ 0, 0, 0, 0, 0, 0, 0 },
-	{ 0, 0, 0, 0, 0, 0, 0 },
-	{ 0, 0, 0, 0, 0, 0, 0 },
-	{ 0, 0, 0, 0, 0, 0, 0 },
-	{ 0, 0, 0, 0, 0, 0, 0 },
-	{ 0, 0, 0, 0, 0, 0, 0 },
-	{ 0, 0, 0, 0, 0, 0, 0 },
-	{ 0, 0, 0, 0, 0, 0, 0 },
-	{ 0, 0, 0, 0, 0, 0, 0 },
+	{ ~0, 0, 0, 0, 0, 0, 0 },
+	{ ~0, 0, 0, 0, 0, 0, 0 },
+	{ ~0, 0, 0, 0, 0, 0, 0 },
+	{ ~0, 0, 0, 0, 0, 0, 0 },
+	{ ~0, 0, 0, 0, 0, 0, 0 },
+	{ ~0, 0, 0, 0, 0, 0, 0 },
+	{ ~0, 0, 0, 0, 0, 0, 0 },
+	{ ~0, 0, 0, 0, 0, 0, 0 },
+	{ ~0, 0, 0, 0, 0, 0, 0 },
+	{ ~0, 0, 0, 0, 0, 0, 0 },
+	{ ~0, 0, 0, 0, 0, 0, 0 },
+	{ ~0, 0, 0, 0, 0, 0, 0 },
+	{ ~0, 0, 0, 0, 0, 0, 0 },
+	{ ~0, 0, 0, 0, 0, 0, 0 },
+	{ ~0, 0, 0, 0, 0, 0, 0 },
+	{ ~0, 0, 0, 0, 0, 0, 0 },
 };
 
-#define DBDEV_TAB_SIZE (sizeof(dbdev_tab) / sizeof(dbdev_tab_t))
+#define DBDEV_TAB_SIZE	ARRAY_SIZE(dbdev_tab)
 
 static chan_tab_t *chan_tab_ptr[NUM_DBDMA_CHANS];
 
 static dbdev_tab_t *
-find_dbdev_id (u32 id)
+find_dbdev_id(u32 id)
 {
 	int i;
 	dbdev_tab_t *p;
@@ -209,11 +209,11 @@ au1xxx_ddma_add_device(dbdev_tab_t *dev)
 	dbdev_tab_t *p=NULL;
 	static u16 new_id=0x1000;
 
-	p = find_dbdev_id(0);
+	p = find_dbdev_id(~0);
 	if ( NULL != p )
 	{
 		memcpy(p, dev, sizeof(dbdev_tab_t));
-		p->dev_id = DSCR_DEV2CUSTOM_ID(new_id,dev->dev_id);
+		p->dev_id = DSCR_DEV2CUSTOM_ID(new_id, dev->dev_id);
 		ret = p->dev_id;
 		new_id++;
 #if 0
@@ -671,7 +671,7 @@ _au1xxx_dbdma_put_dest(u32 chanid, void *buf, int nbytes, u32 flags)
 	 * parts. If it is fixedin the future, these dma_cache_inv will just
 	 * be nothing more than empty macros. See io.h.
 	 * */
-	dma_cache_inv((unsigned long)buf,nbytes);
+	dma_cache_inv((unsigned long)buf, nbytes);
 	dp->dscr_cmd0 |= DSCR_CMD0_V;	/* Let it rip */
 	au_sync();
 	dma_cache_wback_inv((unsigned long)dp, sizeof(dp));
@@ -859,7 +859,7 @@ dbdma_interrupt(int irq, void *dev_id)
 
 	intstat = dbdma_gptr->ddma_intstat;
 	au_sync();
-	chan_index = au_ffs(intstat) - 1;
+	chan_index = __ffs(intstat);
 
 	ctp = chan_tab_ptr[chan_index];
 	cp = ctp->chan_ptr;

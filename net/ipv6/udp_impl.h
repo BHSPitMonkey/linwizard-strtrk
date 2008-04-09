@@ -5,8 +5,9 @@
 #include <net/protocol.h>
 #include <net/addrconf.h>
 #include <net/inet_common.h>
+#include <net/transp_v6.h>
 
-extern int  	__udp6_lib_rcv(struct sk_buff **, struct hlist_head [], int );
+extern int  	__udp6_lib_rcv(struct sk_buff *, struct hlist_head [], int );
 extern void 	__udp6_lib_err(struct sk_buff *, struct inet6_skb_parm *,
 			       int , int , int , __be32 , struct hlist_head []);
 

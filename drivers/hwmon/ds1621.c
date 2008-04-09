@@ -34,7 +34,7 @@
 #include "lm75.h"
 
 /* Addresses to scan */
-static unsigned short normal_i2c[] = { 0x48, 0x49, 0x4a, 0x4b, 0x4c,
+static const unsigned short normal_i2c[] = { 0x48, 0x49, 0x4a, 0x4b, 0x4c,
 					0x4d, 0x4e, 0x4f, I2C_CLIENT_END };
 
 /* Insmod parameters */
@@ -73,7 +73,7 @@ static const u8 DS1621_REG_TEMP[3] = {
 /* Each client has this additional data */
 struct ds1621_data {
 	struct i2c_client client;
-	struct class_device *class_dev;
+	struct device *hwmon_dev;
 	struct mutex update_lock;
 	char valid;			/* !=0 if following fields are valid */
 	unsigned long last_updated;	/* In jiffies */
@@ -94,7 +94,6 @@ static struct i2c_driver ds1621_driver = {
 	.driver = {
 		.name	= "ds1621",
 	},
-	.id		= I2C_DRIVERID_DS1621,
 	.attach_adapter	= ds1621_attach_adapter,
 	.detach_client	= ds1621_detach_client,
 };
@@ -151,7 +150,7 @@ static ssize_t set_temp(struct device *dev, struct device_attribute *da,
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(da);
 	struct i2c_client *client = to_i2c_client(dev);
 	struct ds1621_data *data = ds1621_update_client(dev);
-	u16 val = LM75_TEMP_TO_REG(simple_strtoul(buf, NULL, 10));
+	u16 val = LM75_TEMP_TO_REG(simple_strtol(buf, NULL, 10));
 
 	mutex_lock(&data->update_lock);
 	data->temp[attr->index] = val;
@@ -266,9 +265,9 @@ static int ds1621_detect(struct i2c_adapter *adapter, int address,
 	if ((err = sysfs_create_group(&client->dev.kobj, &ds1621_group)))
 		goto exit_detach;
 
-	data->class_dev = hwmon_device_register(&client->dev);
-	if (IS_ERR(data->class_dev)) {
-		err = PTR_ERR(data->class_dev);
+	data->hwmon_dev = hwmon_device_register(&client->dev);
+	if (IS_ERR(data->hwmon_dev)) {
+		err = PTR_ERR(data->hwmon_dev);
 		goto exit_remove_files;
 	}
 
@@ -289,7 +288,7 @@ static int ds1621_detach_client(struct i2c_client *client)
 	struct ds1621_data *data = i2c_get_clientdata(client);
 	int err;
 
-	hwmon_device_unregister(data->class_dev);
+	hwmon_device_unregister(data->hwmon_dev);
 	sysfs_remove_group(&client->dev.kobj, &ds1621_group);
 
 	if ((err = i2c_detach_client(client)))

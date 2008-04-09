@@ -589,8 +589,63 @@ u32 omap2_clksel_get_divisor(struct clk *clk)
 
 int omap2_clksel_set_rate(struct clk *clk, unsigned long rate)
 {
-	u32 field_mask, field_val, reg_val, validrate, new_div = 0;
-	void __iomem *div_addr;
+	int ret = ~0;
+	u32 reg_val, div_off;
+	u32 div_addr = 0;
+	u32 mask = ~0;
+
+	div_off = clk->rate_offset;
+
+	switch ((*div_sel & SRC_RATE_SEL_MASK)) {
+	case CM_MPU_SEL1:
+		div_addr = (u32)&CM_CLKSEL_MPU;
+		mask = 0x1f;
+		break;
+	case CM_DSP_SEL1:
+		div_addr = (u32)&CM_CLKSEL_DSP;
+		if (cpu_is_omap2420()) {
+			if ((div_off == 0) || (div_off == 8))
+				mask = 0x1f;
+			else if (div_off == 5)
+				mask = 0x3;
+		} else if (cpu_is_omap2430()) {
+			if (div_off == 0)
+				mask = 0x1f;
+			else if (div_off == 5)
+				mask = 0x3;
+		}
+		break;
+	case CM_GFX_SEL1:
+		div_addr = (u32)&CM_CLKSEL_GFX;
+		if (div_off == 0)
+			mask = 0x7;
+		break;
+	case CM_MODEM_SEL1:
+		div_addr = (u32)&CM_CLKSEL_MDM;
+		if (div_off == 0)
+			mask = 0xf;
+		break;
+	case CM_SYSCLKOUT_SEL1:
+		div_addr = (u32)&PRCM_CLKOUT_CTRL;
+		if ((div_off == 3) || (div_off == 11))
+			mask= 0x3;
+		break;
+	case CM_CORE_SEL1:
+		div_addr = (u32)&CM_CLKSEL1_CORE;
+		switch (div_off) {
+		case 0:					/* l3 */
+		case 8:					/* dss1 */
+		case 15:				/* vylnc-2420 */
+		case 20:				/* ssi */
+			mask = 0x1f; break;
+		case 5:					/* l4 */
+			mask = 0x3; break;
+		case 13:				/* dss2 */
+			mask = 0x1; break;
+		case 25:				/* usb */
+			mask = 0x7; break;
+		}
+	}
 
 	validrate = omap2_clksel_round_rate_div(clk, rate, &new_div);
 	if (validrate != rate)

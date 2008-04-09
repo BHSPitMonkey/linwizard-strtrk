@@ -17,226 +17,8 @@
  * See http://ftdi-usb-sio.sourceforge.net for upto date testing info
  *	and extra documentation
  *
- * (21/Jul/2004) Ian Abbott
- *      Incorporated Steven Turner's code to add support for the FT2232C chip.
- *      The prelimilary port to the 2.6 kernel was by Rus V. Brushkoff.  I have
- *      fixed a couple of things.
- *
- * (27/May/2004) Ian Abbott
- *      Improved throttling code, mostly stolen from the WhiteHEAT driver.
- *
- * (26/Mar/2004) Jan Capek
- *      Added PID's for ICD-U20/ICD-U40 - incircuit PIC debuggers from CCS Inc.
- *
- * (09/Feb/2004) Ian Abbott
- *      Changed full name of USB-UIRT device to avoid "/" character.
- *      Added FTDI's alternate PID (0x6006) for FT232/245 devices.
- *      Added PID for "ELV USB Module UO100" from Stefan Frings.
- *
- * (21/Oct/2003) Ian Abbott
- *      Renamed some VID/PID macros for Matrix Orbital and Perle Systems
- *      devices.  Removed Matrix Orbital and Perle Systems devices from the
- *      8U232AM device table, but left them in the FT232BM table, as they are
- *      known to use only FT232BM.
- *
- * (17/Oct/2003) Scott Allen
- *      Added vid/pid for Perle Systems UltraPort USB serial converters
- *
- * (21/Sep/2003) Ian Abbott
- *      Added VID/PID for Omnidirectional Control Technology US101 USB to
- *      RS-232 adapter (also rebadged as Dick Smith Electronics XH6381).
- *      VID/PID supplied by Donald Gordon.
- *
- * (19/Aug/2003) Ian Abbott
- *      Freed urb's transfer buffer in write bulk callback.
- *      Omitted some paranoid checks in write bulk callback that don't matter.
- *      Scheduled work in write bulk callback regardless of port's open count.
- *
- * (05/Aug/2003) Ian Abbott
- *      Added VID/PID for ID TECH IDT1221U USB to RS-232 adapter.
- *      VID/PID provided by Steve Briggs.
- *
- * (23/Jul/2003) Ian Abbott
- *      Added PIDs for CrystalFontz 547, 633, 631, 635, 640 and 640 from
- *      Wayne Wylupski.
- *
- * (10/Jul/2003) David Glance
- *      Added PID for DSS-20 SyncStation cradle for Sony-Ericsson P800.
- *
- * (27/Jun/2003) Ian Abbott
- *	Reworked the urb handling logic.  We have no more pool, but dynamically
- *	allocate the urb and the transfer buffer on the fly.  In testing this
- *	does not incure any measurable overhead.  This also relies on the fact
- *	that we have proper reference counting logic for urbs.  I nicked this
- *	from Greg KH's Visor driver.
- *
- * (23/Jun/2003) Ian Abbott
- *      Reduced flip buffer pushes and corrected a data length test in
- *      ftdi_read_bulk_callback.
- *      Defererence pointers after any paranoid checks, not before.
- *
- * (21/Jun/2003) Erik Nygren
- *      Added support for Home Electronics Tira-1 IR transceiver using FT232BM chip.
- *      See <http://www.home-electro.com/tira1.htm>.  Only operates properly
- *      at 100000 and RTS-CTS, so set custom divisor mode on startup.
- *      Also force the Tira-1 and USB-UIRT to only use their custom baud rates.
- *
- * (18/Jun/2003) Ian Abbott
- *      Added Device ID of the USB relais from Rudolf Gugler (backported from
- *      Philipp Gühring's patch for 2.5.x kernel).
- *      Moved read transfer buffer reallocation into startup function.
- *      Free existing write urb and transfer buffer in startup function.
- *      Only use urbs in write urb pool that were successfully allocated.
- *      Moved some constant macros out of functions.
- *      Minor whitespace and comment changes.
- *
- * (12/Jun/2003) David Norwood
- *      Added support for USB-UIRT IR transceiver using 8U232AM chip.
- *      See <http://home.earthlink.net/~jrhees/USBUIRT/index.htm>.  Only
- *      operates properly at 312500, so set custom divisor mode on startup.
- *
- * (12/Jun/2003) Ian Abbott
- *      Added Sealevel SeaLINK+ 210x, 220x, 240x, 280x vid/pids from Tuan Hoang
- *      - I've eliminated some that don't seem to exist!
- *      Added Home Electronics Tira-1 IR transceiver pid from Chris Horn
- *      Some whitespace/coding-style cleanups
- *
- * (11/Jun/2003) Ian Abbott
- *      Fixed unsafe spinlock usage in ftdi_write
- *
- * (24/Feb/2003) Richard Shooter
- *      Increase read buffer size to improve read speeds at higher baud rates
- *      (specifically tested with up to 1Mb/sec at 1.5M baud)
- *
- * (23/Feb/2003) John Wilkins
- *      Added Xon/xoff flow control (activating support in the ftdi device)
- *      Added vid/pid for Videonetworks/Homechoice (UK ISP)
- *
- * (23/Feb/2003) Bill Ryder
- *      Added matrix orb device vid/pids from Wayne Wylupski
- *
- * (19/Feb/2003) Ian Abbott
- *      For TIOCSSERIAL, set alt_speed to 0 when ASYNC_SPD_MASK value has
- *      changed to something other than ASYNC_SPD_HI, ASYNC_SPD_VHI,
- *      ASYNC_SPD_SHI or ASYNC_SPD_WARP.  Also, unless ASYNC_SPD_CUST is in
- *      force, don't bother changing baud rate when custom_divisor has changed.
- *
- * (18/Feb/2003) Ian Abbott
- *      Fixed TIOCMGET handling to include state of DTR and RTS, the state
- *      of which are now saved by set_dtr() and set_rts().
- *      Fixed improper storage class for buf in set_dtr() and set_rts().
- *      Added FT232BM chip type and support for its extra baud rates (compared
- *      to FT8U232AM).
- *      Took account of special case divisor values for highest baud rates of
- *      FT8U232AM and FT232BM.
- *      For TIOCSSERIAL, forced alt_speed to 0 when ASYNC_SPD_CUST kludge used,
- *      as previous alt_speed setting is now stale.
- *      Moved startup code common between the startup routines for the
- *      different chip types into a common subroutine.
- *
- * (17/Feb/2003) Bill Ryder
- *      Added write urb buffer pool on a per device basis
- *      Added more checking for open file on callbacks (fixed OOPS)
- *      Added CrystalFontz 632 and 634 PIDs
- *         (thanx to CrystalFontz for the sample devices - they flushed out
- *           some driver bugs)
- *      Minor debugging message changes
- *      Added throttle, unthrottle and chars_in_buffer functions
- *      Fixed FTDI_SIO (the original device) bug
- *      Fixed some shutdown handling
- *
- *
- *
- *
- * (07/Jun/2002) Kuba Ober
- *	Changed FTDI_SIO_BASE_BAUD_TO_DIVISOR macro into ftdi_baud_to_divisor
- *	function. It was getting too complex.
- *	Fix the divisor calculation logic which was setting divisor of 0.125
- *	instead of 0.5 for fractional parts of divisor equal to 5/8, 6/8, 7/8.
- *	Also make it bump up the divisor to next integer in case of 7/8 - it's
- *	a better approximation.
- *
- * (25/Jul/2002) Bill Ryder inserted Dmitri's TIOCMIWAIT patch
- *      Not tested by me but it doesn't break anything I use.
- *
- * (04/Jan/2002) Kuba Ober
- *	Implemented 38400 baudrate kludge, where it can be substituted with other
- *	  values. That's the only way to set custom baudrates.
- *	Implemented TIOCSSERIAL, TIOCGSERIAL ioctl's so that setserial is happy.
- *	FIXME: both baudrate things should eventually go to usbserial.c as other
- *	  devices may need that functionality too. Actually, it can probably be
- *	  merged in serial.c somehow - too many drivers repeat this code over
- *	  and over.
- *	Fixed baudrate forgetfulness - open() used to reset baudrate to 9600 every time.
- *	Divisors for baudrates are calculated by a macro.
- *	Small code cleanups. Ugly whitespace changes for Plato's sake only ;-].
- *
- * (04/Nov/2001) Bill Ryder
- *	Fixed bug in read_bulk_callback where incorrect urb buffer was used.
- *	Cleaned up write offset calculation
- *	Added write_room since default values can be incorrect for sio
- *	Changed write_bulk_callback to use same queue_task as other drivers
- *        (the previous version caused panics)
- *	Removed port iteration code since the device only has one I/O port and it
- *	  was wrong anyway.
- *
- * (31/May/2001) gkh
- *	Switched from using spinlock to a semaphore, which fixes lots of problems.
- *
- * (23/May/2001)   Bill Ryder
- *	Added runtime debug patch (thanx Tyson D Sawyer).
- *	Cleaned up comments for 8U232
- *	Added parity, framing and overrun error handling
- *	Added receive break handling.
- *
- * (04/08/2001) gb
- *	Identify version on module load.
- *
- * (18/March/2001) Bill Ryder
- *	(Not released)
- *	Added send break handling. (requires kernel patch too)
- *	Fixed 8U232AM hardware RTS/CTS etc status reporting.
- *	Added flipbuf fix copied from generic device
- *
- * (12/3/2000) Bill Ryder
- *	Added support for 8U232AM device.
- *	Moved PID and VIDs into header file only.
- *	Turned on low-latency for the tty (device will do high baudrates)
- *	Added shutdown routine to close files when device removed.
- *	More debug and error message cleanups.
- *
- * (11/13/2000) Bill Ryder
- *	Added spinlock protected open code and close code.
- *	Multiple opens work (sort of - see webpage mentioned above).
- *	Cleaned up comments. Removed multiple PID/VID definitions.
- *	Factorised cts/dtr code
- *	Made use of __FUNCTION__ in dbg's
- *
- * (11/01/2000) Adam J. Richter
- *	usb_device_id table support
- *
- * (10/05/2000) gkh
- *	Fixed bug with urb->dev not being set properly, now that the usb
- *	core needs it.
- *
- * (09/11/2000) gkh
- *	Removed DEBUG #ifdefs with call to usb_serial_debug_data
- *
- * (07/19/2000) gkh
- *	Added module_init and module_exit functions to handle the fact that this
- *	driver is a loadable module now.
- *
- * (04/04/2000) Bill Ryder
- *	Fixed bugs in TCGET/TCSET ioctls (by removing them - they are
- *        handled elsewhere in the tty io driver chain).
- *
- * (03/30/2000) Bill Ryder
- *	Implemented lots of ioctls
- *	Fixed a race condition in write
- *	Changed some dbg's to errs
- *
- * (03/26/2000) gkh
- *	Split driver up into device specific pieces.
+ * Change entries from 2004 and earlier can be found in versions of this
+ * file in kernel versions prior to the 2.6.24 release.
  *
  */
 
@@ -294,7 +76,7 @@ struct ftdi_private {
 
 	__u16 interface;	/* FT2232C port interface (0 for FT232/245) */
 
-	int force_baud;		/* if non-zero, force the baud rate to this value */
+	speed_t force_baud;	/* if non-zero, force the baud rate to this value */
 	int force_rtscts;	/* if non-zero, force RTS-CTS to always be enabled */
 
 	spinlock_t tx_lock;	/* spinlock for transmit state */
@@ -309,12 +91,17 @@ struct ftdi_sio_quirk {
 	void (*port_probe)(struct ftdi_private *); /* Special settings for probed ports. */
 };
 
-static int   ftdi_olimex_probe		(struct usb_serial *serial);
+static int   ftdi_jtag_probe		(struct usb_serial *serial);
+static int   ftdi_mtxorb_hack_setup	(struct usb_serial *serial);
 static void  ftdi_USB_UIRT_setup	(struct ftdi_private *priv);
 static void  ftdi_HE_TIRA1_setup	(struct ftdi_private *priv);
 
-static struct ftdi_sio_quirk ftdi_olimex_quirk = {
-	.probe	= ftdi_olimex_probe,
+static struct ftdi_sio_quirk ftdi_jtag_quirk = {
+	.probe	= ftdi_jtag_probe,
+};
+
+static struct ftdi_sio_quirk ftdi_mtxorb_hack_quirk = {
+	.probe  = ftdi_mtxorb_hack_setup,
 };
 
 static struct ftdi_sio_quirk ftdi_USB_UIRT_quirk = {
@@ -379,6 +166,8 @@ static struct usb_device_id id_table_combined [] = {
 	{ USB_DEVICE(FTDI_VID, FTDI_MTXORB_4_PID) },
 	{ USB_DEVICE(FTDI_VID, FTDI_MTXORB_5_PID) },
 	{ USB_DEVICE(FTDI_VID, FTDI_MTXORB_6_PID) },
+	{ USB_DEVICE(MTXORB_VK_VID, MTXORB_VK_PID),
+		.driver_info = (kernel_ulong_t)&ftdi_mtxorb_hack_quirk },
 	{ USB_DEVICE(FTDI_VID, FTDI_PERLE_ULTRAPORT_PID) },
 	{ USB_DEVICE(FTDI_VID, FTDI_PIEGROUP_PID) },
 	{ USB_DEVICE(FTDI_VID, FTDI_TNC_X_PID) },
@@ -471,30 +260,29 @@ static struct usb_device_id id_table_combined [] = {
 	{ USB_DEVICE(FTDI_VID, FTDI_IBS_PEDO_PID) },
 	{ USB_DEVICE(FTDI_VID, FTDI_IBS_PROD_PID) },
 	/*
-	 * These will probably use user-space drivers.  Uncomment them if
-	 * you need them or use the user-specified vendor/product module
-	 * parameters (see ftdi_sio.h for the numbers).  Make a fuss if
-	 * you think the driver should recognize any of them by default.
+	 * Due to many user requests for multiple ELV devices we enable
+	 * them by default.
 	 */
-	/* { USB_DEVICE(FTDI_VID, FTDI_ELV_CLI7000_PID) }, */
-	/* { USB_DEVICE(FTDI_VID, FTDI_ELV_PPS7330_PID) }, */
-	/* { USB_DEVICE(FTDI_VID, FTDI_ELV_TFM100_PID) }, */
-	/* { USB_DEVICE(FTDI_VID, FTDI_ELV_UDF77_PID) }, */
-	/* { USB_DEVICE(FTDI_VID, FTDI_ELV_UIO88_PID) }, */
-	/* { USB_DEVICE(FTDI_VID, FTDI_ELV_UAD8_PID) }, */
-	/* { USB_DEVICE(FTDI_VID, FTDI_ELV_UDA7_PID) }, */
-	/* { USB_DEVICE(FTDI_VID, FTDI_ELV_USI2_PID) }, */
-	/* { USB_DEVICE(FTDI_VID, FTDI_ELV_T1100_PID) }, */
-	/* { USB_DEVICE(FTDI_VID, FTDI_ELV_PCD200_PID) }, */
-	/* { USB_DEVICE(FTDI_VID, FTDI_ELV_ULA200_PID) }, */
-	/* { USB_DEVICE(FTDI_VID, FTDI_ELV_CSI8_PID) }, */
-	/* { USB_DEVICE(FTDI_VID, FTDI_ELV_EM1000DL_PID) }, */
-	/* { USB_DEVICE(FTDI_VID, FTDI_ELV_PCK100_PID) }, */
-	/* { USB_DEVICE(FTDI_VID, FTDI_ELV_RFP500_PID) }, */
-	/* { USB_DEVICE(FTDI_VID, FTDI_ELV_FS20SIG_PID) }, */
-	/* { USB_DEVICE(FTDI_VID, FTDI_ELV_WS300PC_PID) }, */
-	/* { USB_DEVICE(FTDI_VID, FTDI_ELV_FHZ1300PC_PID) }, */
-	/* { USB_DEVICE(FTDI_VID, FTDI_ELV_WS500_PID) }, */
+	{ USB_DEVICE(FTDI_VID, FTDI_ELV_CLI7000_PID) },
+	{ USB_DEVICE(FTDI_VID, FTDI_ELV_PPS7330_PID) },
+	{ USB_DEVICE(FTDI_VID, FTDI_ELV_TFM100_PID) },
+	{ USB_DEVICE(FTDI_VID, FTDI_ELV_UDF77_PID) },
+	{ USB_DEVICE(FTDI_VID, FTDI_ELV_UIO88_PID) },
+	{ USB_DEVICE(FTDI_VID, FTDI_ELV_UAD8_PID) },
+	{ USB_DEVICE(FTDI_VID, FTDI_ELV_UDA7_PID) },
+	{ USB_DEVICE(FTDI_VID, FTDI_ELV_USI2_PID) },
+	{ USB_DEVICE(FTDI_VID, FTDI_ELV_T1100_PID) },
+	{ USB_DEVICE(FTDI_VID, FTDI_ELV_PCD200_PID) },
+	{ USB_DEVICE(FTDI_VID, FTDI_ELV_ULA200_PID) },
+	{ USB_DEVICE(FTDI_VID, FTDI_ELV_CSI8_PID) },
+	{ USB_DEVICE(FTDI_VID, FTDI_ELV_EM1000DL_PID) },
+	{ USB_DEVICE(FTDI_VID, FTDI_ELV_PCK100_PID) },
+	{ USB_DEVICE(FTDI_VID, FTDI_ELV_RFP500_PID) },
+	{ USB_DEVICE(FTDI_VID, FTDI_ELV_FS20SIG_PID) },
+	{ USB_DEVICE(FTDI_VID, FTDI_ELV_WS300PC_PID) },
+	{ USB_DEVICE(FTDI_VID, FTDI_ELV_FHZ1300PC_PID) },
+	{ USB_DEVICE(FTDI_VID, FTDI_ELV_EM1010PC_PID) },
+	{ USB_DEVICE(FTDI_VID, FTDI_ELV_WS500_PID) },
 	{ USB_DEVICE(FTDI_VID, LINX_SDMUSBQSS_PID) },
 	{ USB_DEVICE(FTDI_VID, LINX_MASTERDEVEL2_PID) },
 	{ USB_DEVICE(FTDI_VID, LINX_FUTURE_0_PID) },
@@ -545,6 +333,7 @@ static struct usb_device_id id_table_combined [] = {
 	{ USB_DEVICE(FTDI_VID, FTDI_ATIK_ATK16C_PID) },
 	{ USB_DEVICE(FTDI_VID, FTDI_ATIK_ATK16HR_PID) },
 	{ USB_DEVICE(FTDI_VID, FTDI_ATIK_ATK16HRC_PID) },
+	{ USB_DEVICE(FTDI_VID, FTDI_ATIK_ATK16IC_PID) },
 	{ USB_DEVICE(KOBIL_VID, KOBIL_CONV_B1_PID) },
 	{ USB_DEVICE(KOBIL_VID, KOBIL_CONV_KAAN_PID) },
 	{ USB_DEVICE(POSIFLEX_VID, POSIFLEX_PP7000_PID) },
@@ -569,8 +358,14 @@ static struct usb_device_id id_table_combined [] = {
 	{ USB_DEVICE(TELLDUS_VID, TELLDUS_TELLSTICK_PID) },
 	{ USB_DEVICE(FTDI_VID, FTDI_MAXSTREAM_PID) },
 	{ USB_DEVICE(TML_VID, TML_USB_SERIAL_PID) },
+	{ USB_DEVICE(FTDI_VID, FTDI_ELSTER_UNICOM_PID) },
+	{ USB_DEVICE(FTDI_VID, FTDI_PROPOX_JTAGCABLEII_PID) },
 	{ USB_DEVICE(OLIMEX_VID, OLIMEX_ARM_USB_OCD_PID),
-		.driver_info = (kernel_ulong_t)&ftdi_olimex_quirk },
+		.driver_info = (kernel_ulong_t)&ftdi_jtag_quirk },
+	{ USB_DEVICE(FIC_VID, FIC_NEO1973_DEBUG_PID),
+		.driver_info = (kernel_ulong_t)&ftdi_jtag_quirk },
+	{ USB_DEVICE(FTDI_VID, FTDI_OOCDLINK_PID),
+		.driver_info = (kernel_ulong_t)&ftdi_jtag_quirk },
 	{ },					/* Optional parameter entry */
 	{ }					/* Terminating entry */
 };
@@ -607,8 +402,8 @@ static const char *ftdi_chip_name[] = {
 #define FTDI_STATUS_B1_MASK	(FTDI_RS_BI)
 /* End TIOCMIWAIT */
 
-#define FTDI_IMPL_ASYNC_FLAGS = ( ASYNC_SPD_HI | ASYNC_SPD_VHI \
- ASYNC_SPD_CUST | ASYNC_SPD_SHI | ASYNC_SPD_WARP )
+#define FTDI_IMPL_ASYNC_FLAGS = (ASYNC_SPD_HI | ASYNC_SPD_VHI \
+ | ASYNC_SPD_CUST | ASYNC_SPD_SHI | ASYNC_SPD_WARP)
 
 /* function prototypes for a FTDI serial converter */
 static int  ftdi_sio_probe	(struct usb_serial *serial, const struct usb_device_id *id);
@@ -878,6 +673,7 @@ static __u32 get_ftdi_divisor(struct usb_serial_port * port)
 		if (div_value == 0) {
 			dbg("%s - Baudrate (%d) requested is not supported", __FUNCTION__,  baud);
 			div_value = ftdi_sio_b9600;
+			baud = 9600;
 			div_okay = 0;
 		}
 		break;
@@ -886,6 +682,7 @@ static __u32 get_ftdi_divisor(struct usb_serial_port * port)
 			div_value = ftdi_232am_baud_to_divisor(baud);
 		} else {
 	                dbg("%s - Baud rate too high!", __FUNCTION__);
+			baud = 9600;
 			div_value = ftdi_232am_baud_to_divisor(9600);
 			div_okay = 0;
 		}
@@ -899,6 +696,7 @@ static __u32 get_ftdi_divisor(struct usb_serial_port * port)
 	                dbg("%s - Baud rate too high!", __FUNCTION__);
 			div_value = ftdi_232bm_baud_to_divisor(9600);
 			div_okay = 0;
+			baud = 9600;
 		}
 		break;
 	} /* priv->chip_type */
@@ -909,6 +707,7 @@ static __u32 get_ftdi_divisor(struct usb_serial_port * port)
 			ftdi_chip_name[priv->chip_type]);
 	}
 
+	tty_encode_baud_rate(port->tty, baud, baud);
 	return(div_value);
 }
 
@@ -1071,7 +870,7 @@ static ssize_t show_latency_timer(struct device *dev, struct device_attribute *a
 			     (char*) &latency, 1, WDR_TIMEOUT);
 
 	if (rv < 0) {
-		dev_err(dev, "Unable to read latency timer: %i", rv);
+		dev_err(dev, "Unable to read latency timer: %i\n", rv);
 		return -EIO;
 	}
 	return sprintf(buf, "%i\n", latency);
@@ -1098,7 +897,7 @@ static ssize_t store_latency_timer(struct device *dev, struct device_attribute *
 			     buf, 0, WDR_TIMEOUT);
 
 	if (rv < 0) {
-		dev_err(dev, "Unable to write latency timer: %i", rv);
+		dev_err(dev, "Unable to write latency timer: %i\n", rv);
 		return -EIO;
 	}
 
@@ -1169,7 +968,9 @@ static void remove_sysfs_attrs(struct usb_serial_port *port)
 	/* XXX see create_sysfs_attrs */
 	if (priv->chip_type != SIO) {
 		device_remove_file(&port->dev, &dev_attr_event_char);
-		if (priv->chip_type == FT232BM || priv->chip_type == FT2232C) {
+		if (priv->chip_type == FT232BM ||
+		    priv->chip_type == FT2232C ||
+		    priv->chip_type == FT232RL) {
 			device_remove_file(&port->dev, &dev_attr_latency_timer);
 		}
 	}
@@ -1261,7 +1062,7 @@ static void ftdi_USB_UIRT_setup (struct ftdi_private *priv)
 
 	priv->flags |= ASYNC_SPD_CUST;
 	priv->custom_divisor = 77;
-	priv->force_baud = B38400;
+	priv->force_baud = 38400;
 } /* ftdi_USB_UIRT_setup */
 
 /* Setup for the HE-TIRA1 device, which requires hardwired
@@ -1272,15 +1073,16 @@ static void ftdi_HE_TIRA1_setup (struct ftdi_private *priv)
 
 	priv->flags |= ASYNC_SPD_CUST;
 	priv->custom_divisor = 240;
-	priv->force_baud = B38400;
+	priv->force_baud = 38400;
 	priv->force_rtscts = 1;
 } /* ftdi_HE_TIRA1_setup */
 
 /*
- * First port on Olimex arm-usb-ocd is reserved for JTAG interface
- * and can be accessed from userspace using openocd.
+ * First port on JTAG adaptors such as Olimex arm-usb-ocd or the FIC/OpenMoko
+ * Neo1973 Debug Board is reserved for JTAG interface and can be accessed from
+ * userspace using openocd.
  */
-static int ftdi_olimex_probe(struct usb_serial *serial)
+static int ftdi_jtag_probe(struct usb_serial *serial)
 {
 	struct usb_device *udev = serial->dev;
 	struct usb_interface *interface = serial->interface;
@@ -1288,8 +1090,25 @@ static int ftdi_olimex_probe(struct usb_serial *serial)
 	dbg("%s",__FUNCTION__);
 
 	if (interface == udev->actconfig->interface[0]) {
-		info("Ignoring reserved serial port on Olimex arm-usb-ocd\n");
+		info("Ignoring serial port reserved for JTAG");
 		return -ENODEV;
+	}
+
+	return 0;
+}
+
+/*
+ * The Matrix Orbital VK204-25-USB has an invalid IN endpoint.
+ * We have to correct it if we want to read from it.
+ */
+static int ftdi_mtxorb_hack_setup(struct usb_serial *serial)
+{
+	struct usb_host_endpoint *ep = serial->dev->ep_in[1];
+	struct usb_endpoint_descriptor *ep_desc = &ep->desc;
+
+	if (ep->enabled && ep_desc->wMaxPacketSize == 0) {
+		ep_desc->wMaxPacketSize = 0x40;
+		info("Fixing invalid wMaxPacketSize on read pipe");
 	}
 
 	return 0;
@@ -1361,7 +1180,7 @@ static int  ftdi_open (struct usb_serial_port *port, struct file *filp)
 
 	/* ftdi_set_termios  will send usb control messages */
 	if (port->tty)
-		ftdi_set_termios(port, NULL);
+		ftdi_set_termios(port, port->tty->termios);
 
 	/* FIXME: Flow control might be enabled, so it should be checked -
 	   we have no control of defaults! */
@@ -1405,7 +1224,8 @@ static void ftdi_close (struct usb_serial_port *port, struct file *filp)
 
 	dbg("%s", __FUNCTION__);
 
-	if (c_cflag & HUPCL){
+	mutex_lock(&port->serial->disc_mutex);
+	if (c_cflag & HUPCL && !port->serial->disconnected){
 		/* Disable flow control */
 		if (usb_control_msg(port->serial->dev,
 				    usb_sndctrlpipe(port->serial->dev, 0),
@@ -1419,6 +1239,7 @@ static void ftdi_close (struct usb_serial_port *port, struct file *filp)
 		/* drop RTS and DTR */
 		clear_mctrl(port, TIOCM_DTR | TIOCM_RTS);
 	} /* Note change no line if hupcl is off */
+	mutex_unlock(&port->serial->disc_mutex);
 
 	/* cancel any scheduled reading */
 	cancel_delayed_work(&priv->rx_work);
@@ -1931,32 +1752,33 @@ static void ftdi_break_ctl( struct usb_serial_port *port, int break_state )
 static void ftdi_set_termios (struct usb_serial_port *port, struct ktermios *old_termios)
 { /* ftdi_termios */
 	struct usb_device *dev = port->serial->dev;
-	unsigned int cflag = port->tty->termios->c_cflag;
 	struct ftdi_private *priv = usb_get_serial_port_data(port);
+	struct ktermios *termios = port->tty->termios;
+	unsigned int cflag = termios->c_cflag;
 	__u16 urb_value; /* will hold the new flags */
 	char buf[1]; /* Perhaps I should dynamically alloc this? */
 
 	// Added for xon/xoff support
-	unsigned int iflag = port->tty->termios->c_iflag;
+	unsigned int iflag = termios->c_iflag;
 	unsigned char vstop;
 	unsigned char vstart;
 
 	dbg("%s", __FUNCTION__);
 
 	/* Force baud rate if this device requires it, unless it is set to B0. */
-	if (priv->force_baud && ((port->tty->termios->c_cflag & CBAUD) != B0)) {
+	if (priv->force_baud && ((termios->c_cflag & CBAUD) != B0)) {
 		dbg("%s: forcing baud rate for this device", __FUNCTION__);
-		port->tty->termios->c_cflag &= ~CBAUD;
-		port->tty->termios->c_cflag |= priv->force_baud;
+		tty_encode_baud_rate(port->tty, priv->force_baud,
+					priv->force_baud);
 	}
 
 	/* Force RTS-CTS if this device requires it. */
 	if (priv->force_rtscts) {
 		dbg("%s: forcing rtscts for this device", __FUNCTION__);
-		port->tty->termios->c_cflag |= CRTSCTS;
+		termios->c_cflag |= CRTSCTS;
 	}
 
-	cflag = port->tty->termios->c_cflag;
+	cflag = termios->c_cflag;
 
 	/* FIXME -For this cut I don't care if the line is really changing or
 	   not  - so just do the change regardless  - should be able to
@@ -1966,6 +1788,8 @@ static void ftdi_set_termios (struct usb_serial_port *port, struct ktermios *old
            means - don't see any problems yet */
 
 	/* Set number of data bits, parity, stop bits */
+
+	termios->c_cflag &= ~CMSPAR;
 
 	urb_value = 0;
 	urb_value |= (cflag & CSTOPB ? FTDI_SIO_SET_DATA_STOP_BITS_2 :
@@ -2046,8 +1870,8 @@ static void ftdi_set_termios (struct usb_serial_port *port, struct ktermios *old
 			// Set the vstart and vstop -- could have been done up above where
 			// a lot of other dereferencing is done but that would be very
 			// inefficient as vstart and vstop are not always needed
-			vstart=port->tty->termios->c_cc[VSTART];
-			vstop=port->tty->termios->c_cc[VSTOP];
+			vstart = termios->c_cc[VSTART];
+			vstop = termios->c_cc[VSTOP];
 			urb_value=(vstop << 8) | (vstart);
 
 			if (usb_control_msg(dev,
@@ -2102,6 +1926,7 @@ static int ftdi_tiocmget (struct usb_serial_port *port, struct file *file)
 	case FT8U232AM:
 	case FT232BM:
 	case FT2232C:
+	case FT232RL:
 		/* the 8U232AM returns a two byte value (the sio is a 1 byte value) - in the same
 		   format as the data returned from the in point */
 		if ((ret = usb_control_msg(port->serial->dev,

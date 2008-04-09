@@ -1,6 +1,4 @@
 /*
- * linux/drivers/ide/pci/ns87415.c		Version 2.00  Sep. 10, 2002
- *
  * Copyright (C) 1997-1998	Mark Lord <mlord@pobox.com>
  * Copyright (C) 1998		Eddie C. Dost <ecd@skynet.be>
  * Copyright (C) 1999-2000	Andre Hedrick <andre@linux-ide.org>
@@ -12,11 +10,7 @@
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
-#include <linux/timer.h>
-#include <linux/mm.h>
-#include <linux/ioport.h>
 #include <linux/interrupt.h>
-#include <linux/blkdev.h>
 #include <linux/hdreg.h>
 #include <linux/pci.h>
 #include <linux/delay.h>
@@ -71,10 +65,9 @@ static u8 superio_ide_inb (unsigned long port)
 
 static void __devinit superio_ide_init_iops (struct hwif_s *hwif)
 {
+	struct pci_dev *pdev = to_pci_dev(hwif->dev);
 	u32 base, dmabase;
-	u8 tmp;
-	struct pci_dev *pdev = hwif->pci_dev;
-	u8 port = hwif->channel;
+	u8 port = hwif->channel, tmp;
 
 	base = pci_resource_start(pdev, port * 2) & ~3;
 	dmabase = pci_resource_start(pdev, 4) & ~3;
@@ -93,10 +86,11 @@ static void __devinit superio_ide_init_iops (struct hwif_s *hwif)
 
 static void __devinit init_iops_ns87415(ide_hwif_t *hwif)
 {
-	if (PCI_SLOT(hwif->pci_dev->devfn) == 0xE) {
+	struct pci_dev *dev = to_pci_dev(hwif->dev);
+
+	if (PCI_SLOT(dev->devfn) == 0xE)
 		/* Built-in - assume it's under superio. */
 		superio_ide_init_iops(hwif);
-	}
 }
 #endif
 
@@ -110,8 +104,8 @@ static unsigned int ns87415_count = 0, ns87415_control[MAX_HWIFS] = { 0 };
 static void ns87415_prepare_drive (ide_drive_t *drive, unsigned int use_dma)
 {
 	ide_hwif_t *hwif = HWIF(drive);
+	struct pci_dev *dev = to_pci_dev(hwif->dev);
 	unsigned int bit, other, new, *old = (unsigned int *) hwif->select_data;
-	struct pci_dev *dev = hwif->pci_dev;
 	unsigned long flags;
 
 	local_irq_save(flags);
@@ -189,7 +183,7 @@ static int ns87415_ide_dma_setup(ide_drive_t *drive)
 
 static void __devinit init_hwif_ns87415 (ide_hwif_t *hwif)
 {
-	struct pci_dev *dev = hwif->pci_dev;
+	struct pci_dev *dev = to_pci_dev(hwif->dev);
 	unsigned int ctrl, using_inta;
 	u8 progif;
 #ifdef __sparc_v9__
@@ -197,7 +191,6 @@ static void __devinit init_hwif_ns87415 (ide_hwif_t *hwif)
 	u8 stat;
 #endif
 
-	hwif->autodma = 0;
 	hwif->selectproc = &ns87415_selectproc;
 
 	/*
@@ -232,8 +225,8 @@ static void __devinit init_hwif_ns87415 (ide_hwif_t *hwif)
 
 #ifdef __sparc_v9__
 		/*
-		 * XXX: Reset the device, if we don't it will not respond
-		 *      to SELECT_DRIVE() properly during first probe_hwif().
+		 * XXX: Reset the device, if we don't it will not respond to
+		 *      SELECT_DRIVE() properly during first ide_probe_port().
 		 */
 		timeout = 10000;
 		outb(12, hwif->io_ports[IDE_CONTROL_OFFSET]);
@@ -259,21 +252,17 @@ static void __devinit init_hwif_ns87415 (ide_hwif_t *hwif)
 	outb(0x60, hwif->dma_status);
 	hwif->dma_setup = &ns87415_ide_dma_setup;
 	hwif->ide_dma_end = &ns87415_ide_dma_end;
-
-	if (!noautodma)
-		hwif->autodma = 1;
-	hwif->drives[0].autodma = hwif->autodma;
-	hwif->drives[1].autodma = hwif->autodma;
 }
 
-static ide_pci_device_t ns87415_chipset __devinitdata = {
+static const struct ide_port_info ns87415_chipset __devinitdata = {
 	.name		= "NS87415",
 #ifdef CONFIG_SUPERIO
 	.init_iops	= init_iops_ns87415,
 #endif
 	.init_hwif	= init_hwif_ns87415,
-	.autodma	= AUTODMA,
-	.bootable	= ON_BOARD,
+	.host_flags	= IDE_HFLAG_TRUST_BIOS_FOR_DMA |
+			  IDE_HFLAG_NO_ATAPI_DMA |
+			  IDE_HFLAG_BOOTABLE,
 };
 
 static int __devinit ns87415_init_one(struct pci_dev *dev, const struct pci_device_id *id)
@@ -281,8 +270,8 @@ static int __devinit ns87415_init_one(struct pci_dev *dev, const struct pci_devi
 	return ide_setup_pci_device(dev, &ns87415_chipset);
 }
 
-static struct pci_device_id ns87415_pci_tbl[] = {
-	{ PCI_VENDOR_ID_NS, PCI_DEVICE_ID_NS_87415, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
+static const struct pci_device_id ns87415_pci_tbl[] = {
+	{ PCI_VDEVICE(NS, PCI_DEVICE_ID_NS_87415), 0 },
 	{ 0, },
 };
 MODULE_DEVICE_TABLE(pci, ns87415_pci_tbl);

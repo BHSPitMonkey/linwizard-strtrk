@@ -249,7 +249,7 @@ static int do_ipv6_setsockopt(struct sock *sk, int level, int optname,
 			}
 
 			if (ipv6_only_sock(sk) ||
-			    !(ipv6_addr_type(&np->daddr) & IPV6_ADDR_MAPPED)) {
+			    !ipv6_addr_v4mapped(&np->daddr)) {
 				retv = -EADDRNOTAVAIL;
 				break;
 			}
@@ -268,8 +268,8 @@ static int do_ipv6_setsockopt(struct sock *sk, int level, int optname,
 				struct inet_connection_sock *icsk = inet_csk(sk);
 
 				local_bh_disable();
-				sock_prot_dec_use(sk->sk_prot);
-				sock_prot_inc_use(&tcp_prot);
+				sock_prot_inuse_add(sk->sk_prot, -1);
+				sock_prot_inuse_add(&tcp_prot, 1);
 				local_bh_enable();
 				sk->sk_prot = &tcp_prot;
 				icsk->icsk_af_ops = &ipv4_specific;
@@ -282,8 +282,8 @@ static int do_ipv6_setsockopt(struct sock *sk, int level, int optname,
 				if (sk->sk_protocol == IPPROTO_UDPLITE)
 					prot = &udplite_prot;
 				local_bh_disable();
-				sock_prot_dec_use(sk->sk_prot);
-				sock_prot_inc_use(prot);
+				sock_prot_inuse_add(sk->sk_prot, -1);
+				sock_prot_inuse_add(prot, 1);
 				local_bh_enable();
 				sk->sk_prot = prot;
 				sk->sk_socket->ops = &inet_dgram_ops;
@@ -539,12 +539,15 @@ done:
 	case IPV6_MULTICAST_IF:
 		if (sk->sk_type == SOCK_STREAM)
 			goto e_inval;
-		if (sk->sk_bound_dev_if && sk->sk_bound_dev_if != val)
-			goto e_inval;
 
-		if (__dev_get_by_index(val) == NULL) {
-			retv = -ENODEV;
-			break;
+		if (val) {
+			if (sk->sk_bound_dev_if && sk->sk_bound_dev_if != val)
+				goto e_inval;
+
+			if (__dev_get_by_index(&init_net, val) == NULL) {
+				retv = -ENODEV;
+				break;
+			}
 		}
 		np->mcast_oif = val;
 		retv = 0;
@@ -663,7 +666,7 @@ done:
 			break;
 		}
 		gsf = kmalloc(optlen,GFP_KERNEL);
-		if (gsf == 0) {
+		if (!gsf) {
 			retv = -ENOBUFS;
 			break;
 		}
@@ -1043,7 +1046,7 @@ static int do_ipv6_getsockopt(struct sock *sk, int level, int optname,
 		break;
 
 	default:
-		return -EINVAL;
+		return -ENOPROTOOPT;
 	}
 	len = min_t(unsigned int, sizeof(int), len);
 	if(put_user(len, optlen))
@@ -1066,9 +1069,8 @@ int ipv6_getsockopt(struct sock *sk, int level, int optname,
 
 	err = do_ipv6_getsockopt(sk, level, optname, optval, optlen);
 #ifdef CONFIG_NETFILTER
-	/* we need to exclude all possible EINVALs except default case */
-	if (err == -EINVAL && optname != IPV6_ADDRFORM &&
-			optname != MCAST_MSFILTER) {
+	/* we need to exclude all possible ENOPROTOOPTs except default case */
+	if (err == -ENOPROTOOPT && optname != IPV6_2292PKTOPTIONS) {
 		int len;
 
 		if (get_user(len, optlen))
@@ -1105,9 +1107,8 @@ int compat_ipv6_getsockopt(struct sock *sk, int level, int optname,
 
 	err = do_ipv6_getsockopt(sk, level, optname, optval, optlen);
 #ifdef CONFIG_NETFILTER
-	/* we need to exclude all possible EINVALs except default case */
-	if (err == -EINVAL && optname != IPV6_ADDRFORM &&
-			optname != MCAST_MSFILTER) {
+	/* we need to exclude all possible ENOPROTOOPTs except default case */
+	if (err == -ENOPROTOOPT && optname != IPV6_2292PKTOPTIONS) {
 		int len;
 
 		if (get_user(len, optlen))
@@ -1127,9 +1128,10 @@ int compat_ipv6_getsockopt(struct sock *sk, int level, int optname,
 EXPORT_SYMBOL(compat_ipv6_getsockopt);
 #endif
 
-void __init ipv6_packet_init(void)
+int __init ipv6_packet_init(void)
 {
 	dev_add_pack(&ipv6_packet_type);
+	return 0;
 }
 
 void ipv6_packet_cleanup(void)

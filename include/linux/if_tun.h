@@ -21,6 +21,8 @@
 /* Uncomment to enable debugging */
 /* #define TUN_DEBUG 1 */
 
+#include <linux/types.h>
+
 #ifdef __KERNEL__
 
 #ifdef TUN_DEBUG
@@ -42,7 +44,6 @@ struct tun_struct {
 	struct sk_buff_head	readq;
 
 	struct net_device	*dev;
-	struct net_device_stats	stats;
 
 	struct fasync_struct    *fasync;
 
@@ -89,7 +90,7 @@ struct tun_struct {
 
 struct tun_pi {
 	unsigned short flags;
-	unsigned short proto;
+	__be16 proto;
 };
 #define TUN_PKT_STRIP	0x0001
 

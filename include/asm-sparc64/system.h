@@ -1,4 +1,3 @@
-/* $Id: system.h,v 1.69 2002/02/09 19:49:31 davem Exp $ */
 #ifndef __SPARC64_SYSTEM_H
 #define __SPARC64_SYSTEM_H
 
@@ -9,6 +8,7 @@
 #ifndef __ASSEMBLY__
 
 #include <linux/irqflags.h>
+#include <asm-generic/cmpxchg-local.h>
 
 /*
  * Sparc (general) CPU types
@@ -29,6 +29,8 @@ enum sparc_cpu {
 /* This cannot ever be a sun4c nor sun4 :) That's just history. */
 #define ARCH_SUN4C_SUN4 0
 #define ARCH_SUN4 0
+
+extern char reboot_command[];
 
 /* These are here in an effort to more fully work around Spitfire Errata
  * #51.  Essentially, if a memory barrier occurs soon after a mispredicted
@@ -117,6 +119,7 @@ do {	__asm__ __volatile__("ba,pt	%%xcc, 1f\n\t" \
 extern void sun_do_break(void);
 extern int stop_a_enabled;
 
+extern void fault_in_user_windows(void);
 extern void synchronize_user_stack(void);
 
 extern void __flushw_user(void);
@@ -179,7 +182,9 @@ do {	if (test_thread_flag(TIF_PERFCTR)) {				\
 	"ldx	[%%g6 + %9], %%g4\n\t"					\
 	"brz,pt %%o7, 1f\n\t"						\
 	" mov	%%g7, %0\n\t"						\
-	"b,a ret_from_syscall\n\t"					\
+	"sethi	%%hi(ret_from_syscall), %%g1\n\t"			\
+	"jmpl	%%g1 + %%lo(ret_from_syscall), %%g0\n\t"		\
+	" nop\n\t"							\
 	"1:\n\t"							\
 	: "=&r" (last), "=r" (current), "=r" (current_thread_info_reg),	\
 	  "=r" (__local_per_cpu_offset)					\
@@ -240,7 +245,7 @@ static inline unsigned long xchg64(__volatile__ unsigned long *m, unsigned long 
 
 extern void __xchg_called_with_bad_pointer(void);
 
-static __inline__ unsigned long __xchg(unsigned long x, __volatile__ void * ptr,
+static inline unsigned long __xchg(unsigned long x, __volatile__ void * ptr,
 				       int size)
 {
 	switch (size) {
@@ -263,7 +268,7 @@ extern void die_if_kernel(char *str, struct pt_regs *regs) __attribute__ ((noret
 
 #define __HAVE_ARCH_CMPXCHG 1
 
-static __inline__ unsigned long
+static inline unsigned long
 __cmpxchg_u32(volatile int *m, int old, int new)
 {
 	__asm__ __volatile__("membar #StoreLoad | #LoadLoad\n"
@@ -276,7 +281,7 @@ __cmpxchg_u32(volatile int *m, int old, int new)
 	return new;
 }
 
-static __inline__ unsigned long
+static inline unsigned long
 __cmpxchg_u64(volatile long *m, unsigned long old, unsigned long new)
 {
 	__asm__ __volatile__("membar #StoreLoad | #LoadLoad\n"
@@ -293,7 +298,7 @@ __cmpxchg_u64(volatile long *m, unsigned long old, unsigned long new)
    if something tries to do an invalid cmpxchg().  */
 extern void __cmpxchg_called_with_bad_pointer(void);
 
-static __inline__ unsigned long
+static inline unsigned long
 __cmpxchg(volatile void *ptr, unsigned long old, unsigned long new, int size)
 {
 	switch (size) {
@@ -312,6 +317,34 @@ __cmpxchg(volatile void *ptr, unsigned long old, unsigned long new, int size)
      __typeof__(*(ptr)) _n_ = (n);					 \
      (__typeof__(*(ptr))) __cmpxchg((ptr), (unsigned long)_o_,		 \
 				    (unsigned long)_n_, sizeof(*(ptr))); \
+  })
+
+/*
+ * cmpxchg_local and cmpxchg64_local are atomic wrt current CPU. Always make
+ * them available.
+ */
+
+static inline unsigned long __cmpxchg_local(volatile void *ptr,
+				      unsigned long old,
+				      unsigned long new, int size)
+{
+	switch (size) {
+	case 4:
+	case 8:	return __cmpxchg(ptr, old, new, size);
+	default:
+		return __cmpxchg_local_generic(ptr, old, new, size);
+	}
+
+	return old;
+}
+
+#define cmpxchg_local(ptr, o, n)				  	\
+	((__typeof__(*(ptr)))__cmpxchg_local((ptr), (unsigned long)(o),	\
+			(unsigned long)(n), sizeof(*(ptr))))
+#define cmpxchg64_local(ptr, o, n)					\
+  ({									\
+	BUILD_BUG_ON(sizeof(*(ptr)) != 8);				\
+	cmpxchg_local((ptr), (o), (n));					\
   })
 
 #endif /* !(__ASSEMBLY__) */

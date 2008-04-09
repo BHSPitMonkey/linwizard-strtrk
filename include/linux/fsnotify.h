@@ -41,8 +41,9 @@ static inline void fsnotify_d_move(struct dentry *entry)
  */
 static inline void fsnotify_move(struct inode *old_dir, struct inode *new_dir,
 				 const char *old_name, const char *new_name,
-				 int isdir, struct inode *target, struct inode *source)
+				 int isdir, struct inode *target, struct dentry *moved)
 {
+	struct inode *source = moved->d_inode;
 	u32 cookie = inotify_get_cookie();
 
 	if (old_dir == new_dir)
@@ -67,7 +68,7 @@ static inline void fsnotify_move(struct inode *old_dir, struct inode *new_dir,
 	if (source) {
 		inotify_inode_queue_event(source, IN_MOVE_SELF, 0, NULL, NULL);
 	}
-	audit_inode_child(new_name, source, new_dir);
+	audit_inode_child(new_name, moved, new_dir);
 }
 
 /*
@@ -91,6 +92,14 @@ static inline void fsnotify_inoderemove(struct inode *inode)
 }
 
 /*
+ * fsnotify_link_count - inode's link count changed
+ */
+static inline void fsnotify_link_count(struct inode *inode)
+{
+	inotify_inode_queue_event(inode, IN_ATTRIB, 0, NULL, NULL);
+}
+
+/*
  * fsnotify_create - 'name' was linked in
  */
 static inline void fsnotify_create(struct inode *inode, struct dentry *dentry)
@@ -98,7 +107,21 @@ static inline void fsnotify_create(struct inode *inode, struct dentry *dentry)
 	inode_dir_notify(inode, DN_CREATE);
 	inotify_inode_queue_event(inode, IN_CREATE, 0, dentry->d_name.name,
 				  dentry->d_inode);
-	audit_inode_child(dentry->d_name.name, dentry->d_inode, inode);
+	audit_inode_child(dentry->d_name.name, dentry, inode);
+}
+
+/*
+ * fsnotify_link - new hardlink in 'inode' directory
+ * Note: We have to pass also the linked inode ptr as some filesystems leave
+ *   new_dentry->d_inode NULL and instantiate inode pointer later
+ */
+static inline void fsnotify_link(struct inode *dir, struct inode *inode, struct dentry *new_dentry)
+{
+	inode_dir_notify(dir, DN_CREATE);
+	inotify_inode_queue_event(dir, IN_CREATE, 0, new_dentry->d_name.name,
+				  inode);
+	fsnotify_link_count(inode);
+	audit_inode_child(new_dentry->d_name.name, new_dentry, dir);
 }
 
 /*
@@ -109,7 +132,7 @@ static inline void fsnotify_mkdir(struct inode *inode, struct dentry *dentry)
 	inode_dir_notify(inode, DN_CREATE);
 	inotify_inode_queue_event(inode, IN_CREATE | IN_ISDIR, 0, 
 				  dentry->d_name.name, dentry->d_inode);
-	audit_inode_child(dentry->d_name.name, dentry->d_inode, inode);
+	audit_inode_child(dentry->d_name.name, dentry, inode);
 }
 
 /*

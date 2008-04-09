@@ -24,6 +24,7 @@ enum {
 	ND_OPT_MTU = 5,			/* RFC2461 */
 	__ND_OPT_ARRAY_MAX,
 	ND_OPT_ROUTE_INFO = 24,		/* RFC4191 */
+	ND_OPT_RDNSS = 25,		/* RFC5006 */
 	__ND_OPT_MAX
 };
 
@@ -102,7 +103,6 @@ extern void			ndisc_send_redirect(struct sk_buff *skb,
 extern int			ndisc_mc_map(struct in6_addr *addr, char *buf, struct net_device *dev, int dir);
 
 
-struct rt6_info *		dflt_rt_lookup(void);
 
 /*
  *	IGMP

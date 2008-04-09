@@ -31,7 +31,6 @@
 #define CARD_NAME "ESS Maestro3/Allegro/Canyon3D-2"
 #define DRIVER_NAME "Maestro3"
 
-#include <sound/driver.h>
 #include <asm/io.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
@@ -731,7 +730,6 @@ MODULE_PARM_DESC(amp_gpio, "GPIO pin number for external amp. (default = -1)");
 #define SRC3_TEMP_OUTBUF_ADDR_OFFSET    (CDATA_HEADER_LEN + 17)
 
 #define MINISRC_IN_BUFFER_SIZE   ( 0x50 * 2 )
-#define MINISRC_OUT_BUFFER_SIZE  ( 0x50 * 2 * 2)
 #define MINISRC_OUT_BUFFER_SIZE  ( 0x50 * 2 * 2)
 #define MINISRC_TMP_BUFFER_SIZE  ( 112 + ( MINISRC_BIQUAD_STAGE * 3 + 4 ) * 2 * 2 )
 #define MINISRC_BIQUAD_STAGE    2
@@ -1821,7 +1819,6 @@ snd_m3_playback_open(struct snd_pcm_substream *subs)
 		return err;
 
 	runtime->hw = snd_m3_playback;
-	snd_pcm_set_sync(subs);
 
 	return 0;
 }
@@ -1846,7 +1843,6 @@ snd_m3_capture_open(struct snd_pcm_substream *subs)
 		return err;
 
 	runtime->hw = snd_m3_capture;
-	snd_pcm_set_sync(subs);
 
 	return 0;
 }

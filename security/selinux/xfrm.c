@@ -31,7 +31,6 @@
  *   2. Emulating a reasonable SO_PEERSEC across machines
  *   3. Testing addition of sk_policy's with security context via setsockopt
  */
-#include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/security.h>
@@ -47,11 +46,14 @@
 #include <net/checksum.h>
 #include <net/udp.h>
 #include <asm/semaphore.h>
+#include <asm/atomic.h>
 
 #include "avc.h"
 #include "objsec.h"
 #include "xfrm.h"
 
+/* Labeled XFRM instance counter */
+atomic_t selinux_xfrm_refcount = ATOMIC_INIT(0);
 
 /*
  * Returns true if an LSM/SELinux context
@@ -212,26 +214,27 @@ static int selinux_xfrm_sec_ctx_alloc(struct xfrm_sec_ctx **ctxp,
 	if (uctx->ctx_doi != XFRM_SC_ALG_SELINUX)
 		return -EINVAL;
 
-	if (uctx->ctx_len >= PAGE_SIZE)
+	str_len = uctx->ctx_len;
+	if (str_len >= PAGE_SIZE)
 		return -ENOMEM;
 
 	*ctxp = ctx = kmalloc(sizeof(*ctx) +
-			      uctx->ctx_len + 1,
+			      str_len + 1,
 			      GFP_KERNEL);
 
 	if (!ctx)
 		return -ENOMEM;
 
 	ctx->ctx_doi = uctx->ctx_doi;
-	ctx->ctx_len = uctx->ctx_len;
+	ctx->ctx_len = str_len;
 	ctx->ctx_alg = uctx->ctx_alg;
 
 	memcpy(ctx->ctx_str,
 	       uctx+1,
-	       ctx->ctx_len);
-	ctx->ctx_str[ctx->ctx_len] = 0;
+	       str_len);
+	ctx->ctx_str[str_len] = 0;
 	rc = security_context_to_sid(ctx->ctx_str,
-				     ctx->ctx_len,
+				     str_len,
 				     &ctx->ctx_sid);
 
 	if (rc)
@@ -293,6 +296,9 @@ int selinux_xfrm_policy_alloc(struct xfrm_policy *xp,
 	BUG_ON(!uctx);
 
 	err = selinux_xfrm_sec_ctx_alloc(&xp->security, uctx, 0);
+	if (err == 0)
+		atomic_inc(&selinux_xfrm_refcount);
+
 	return err;
 }
 
@@ -340,10 +346,13 @@ int selinux_xfrm_policy_delete(struct xfrm_policy *xp)
 	struct xfrm_sec_ctx *ctx = xp->security;
 	int rc = 0;
 
-	if (ctx)
+	if (ctx) {
 		rc = avc_has_perm(tsec->sid, ctx->ctx_sid,
 				  SECCLASS_ASSOCIATION,
 				  ASSOCIATION__SETCONTEXT, NULL);
+		if (rc == 0)
+			atomic_dec(&selinux_xfrm_refcount);
+	}
 
 	return rc;
 }
@@ -360,6 +369,8 @@ int selinux_xfrm_state_alloc(struct xfrm_state *x, struct xfrm_user_sec_ctx *uct
 	BUG_ON(!x);
 
 	err = selinux_xfrm_sec_ctx_alloc(&x->security, uctx, secid);
+	if (err == 0)
+		atomic_inc(&selinux_xfrm_refcount);
 	return err;
 }
 
@@ -382,10 +393,13 @@ int selinux_xfrm_state_delete(struct xfrm_state *x)
 	struct xfrm_sec_ctx *ctx = x->security;
 	int rc = 0;
 
-	if (ctx)
+	if (ctx) {
 		rc = avc_has_perm(tsec->sid, ctx->ctx_sid,
 				  SECCLASS_ASSOCIATION,
 				  ASSOCIATION__SETCONTEXT, NULL);
+		if (rc == 0)
+			atomic_dec(&selinux_xfrm_refcount);
+	}
 
 	return rc;
 }
@@ -449,7 +463,7 @@ int selinux_xfrm_postroute_last(u32 isec_sid, struct sk_buff *skb,
 	if (dst) {
 		struct dst_entry *dst_test;
 
-		for (dst_test = dst; dst_test != 0;
+		for (dst_test = dst; dst_test != NULL;
 		     dst_test = dst_test->child) {
 			struct xfrm_state *x = dst_test->xfrm;
 

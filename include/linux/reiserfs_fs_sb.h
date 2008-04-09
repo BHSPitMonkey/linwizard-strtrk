@@ -120,7 +120,7 @@ struct reiserfs_journal_cnode {
 	struct buffer_head *bh;	/* real buffer head */
 	struct super_block *sb;	/* dev of real buffer head */
 	__u32 blocknr;		/* block number of real buffer head, == 0 when buffer on disk */
-	long state;
+	unsigned long state;
 	struct reiserfs_journal_list *jlist;	/* journal list this cnode lives in */
 	struct reiserfs_journal_cnode *next;	/* next in transaction list */
 	struct reiserfs_journal_cnode *prev;	/* prev in transaction list */
@@ -181,11 +181,11 @@ struct reiserfs_journal {
 	struct block_device *j_dev_bd;
 	int j_1st_reserved_block;	/* first block on s_dev of reserved area journal */
 
-	long j_state;
+	unsigned long j_state;
 	unsigned long j_trans_id;
 	unsigned long j_mount_id;
 	unsigned long j_start;	/* start of current waiting commit (index into j_ap_blocks) */
-	unsigned long j_len;	/* lenght of current waiting commit */
+	unsigned long j_len;	/* length of current waiting commit */
 	unsigned long j_len_alloc;	/* number of buffers requested by journal_begin() */
 	atomic_t j_wcount;	/* count of writers for current commit */
 	unsigned long j_bcount;	/* batch count. allows turning X transactions into 1 */
@@ -265,9 +265,7 @@ enum journal_state_bits {
 typedef __u32(*hashf_t) (const signed char *, int);
 
 struct reiserfs_bitmap_info {
-	// FIXME: Won't work with block sizes > 8K
-	__u16 first_zero_hint;
-	__u16 free_count;
+	__u32 free_count;
 };
 
 struct proc_dir_entry;

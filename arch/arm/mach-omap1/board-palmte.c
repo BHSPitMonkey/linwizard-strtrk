@@ -45,7 +45,6 @@
 #include <asm/arch/common.h>
 #include <asm/arch/mcbsp.h>
 #include <asm/arch/omap-alsa.h>
-#include <asm/arch/gpio-switch.h>
 
 static void __init omap_palmte_init_irq(void)
 {
@@ -342,7 +341,8 @@ static struct spi_board_info palmte_spi_info[] __initdata = {
 	},
 };
 
-static void palmte_headphones_detect(void *data, int state) {
+static void palmte_headphones_detect(void *data, int state)
+{
 	if (state) {
 		/* Headphones connected, disable speaker */
 		omap_set_gpio_dataout(PALMTE_SPEAKER_GPIO, 0);
@@ -353,37 +353,6 @@ static void palmte_headphones_detect(void *data, int state) {
 		printk(KERN_INFO "PM: speaker on\n");
 	}
 }
-
-static struct omap_gpio_switch palmte_switches[] __initdata = {
-	/* Speaker-enable pin is an output */
-	{
-		.name	= "speaker-enable",
-		.gpio	= PALMTE_SPEAKER_GPIO,
-		.type	= OMAP_GPIO_SWITCH_TYPE_ACTIVITY,
-		.flags	= OMAP_GPIO_SWITCH_FLAG_OUTPUT |
-			OMAP_GPIO_SWITCH_FLAG_INVERTED,
-	},
-	/* Indicates whether power is from DC-IN or battery */
-	{
-		.name	= "dc-in",
-		.gpio	= PALMTE_DC_GPIO,
-		.type	= OMAP_GPIO_SWITCH_TYPE_CONNECTION,
-		.flags	= OMAP_GPIO_SWITCH_FLAG_INVERTED,
-	},
-	/* Indicates whether a USB host is on the other end of the cable */
-	{
-		.name	= "usb",
-		.gpio	= PALMTE_USBDETECT_GPIO,
-		.type	= OMAP_GPIO_SWITCH_TYPE_CONNECTION,
-	},
-	/* High when headphones jack is plugged in */
-	{
-		.name	= "headphones",
-		.gpio	= PALMTE_HEADPHONES_GPIO,
-		.type	= OMAP_GPIO_SWITCH_TYPE_CONNECTION,
-		.notify	= palmte_headphones_detect,
-	},
-};
 
 static void __init palmte_misc_gpio_setup(void)
 {
@@ -410,12 +379,9 @@ static void __init omap_palmte_init(void)
 	platform_add_devices(palmte_devices, ARRAY_SIZE(palmte_devices));
 
 	spi_register_board_info(palmte_spi_info, ARRAY_SIZE(palmte_spi_info));
-
-	omap_register_gpio_switches(palmte_switches,
-			ARRAY_SIZE(palmte_switches));
-
 	palmte_misc_gpio_setup();
 	omap_serial_init();
+	omap_register_i2c_bus(1, 100, NULL, 0);
 }
 
 static void __init omap_palmte_map_io(void)

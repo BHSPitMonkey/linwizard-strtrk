@@ -67,7 +67,7 @@ static void queue_process(struct work_struct *work)
 		local_irq_save(flags);
 		netif_tx_lock(dev);
 		if ((netif_queue_stopped(dev) ||
-		     netif_subqueue_stopped(dev, skb->queue_mapping)) ||
+		     netif_subqueue_stopped(dev, skb)) ||
 		     dev->hard_start_xmit(skb, dev) != NETDEV_TX_OK) {
 			skb_queue_head(&npinfo->txq, skb);
 			netif_tx_unlock(dev);
@@ -116,51 +116,69 @@ static __sum16 checksum_udp(struct sk_buff *skb, struct udphdr *uh,
  * network adapter, forcing superfluous retries and possibly timeouts.
  * Thus, we set our budget to greater than 1.
  */
-static void poll_napi(struct netpoll *np)
+static int poll_one_napi(struct netpoll_info *npinfo,
+			 struct napi_struct *napi, int budget)
 {
-	struct netpoll_info *npinfo = np->dev->npinfo;
+	int work;
+
+	/* net_rx_action's ->poll() invocations and our's are
+	 * synchronized by this test which is only made while
+	 * holding the napi->poll_lock.
+	 */
+	if (!test_bit(NAPI_STATE_SCHED, &napi->state))
+		return budget;
+
+	npinfo->rx_flags |= NETPOLL_RX_DROP;
+	atomic_inc(&trapped);
+
+	work = napi->poll(napi, budget);
+
+	atomic_dec(&trapped);
+	npinfo->rx_flags &= ~NETPOLL_RX_DROP;
+
+	return budget - work;
+}
+
+static void poll_napi(struct net_device *dev)
+{
+	struct napi_struct *napi;
 	int budget = 16;
 
-	if (test_bit(__LINK_STATE_RX_SCHED, &np->dev->state) &&
-	    npinfo->poll_owner != smp_processor_id() &&
-	    spin_trylock(&npinfo->poll_lock)) {
-		npinfo->rx_flags |= NETPOLL_RX_DROP;
-		atomic_inc(&trapped);
+	list_for_each_entry(napi, &dev->napi_list, dev_list) {
+		if (napi->poll_owner != smp_processor_id() &&
+		    spin_trylock(&napi->poll_lock)) {
+			budget = poll_one_napi(dev->npinfo, napi, budget);
+			spin_unlock(&napi->poll_lock);
 
-		np->dev->poll(np->dev, &budget);
-
-		atomic_dec(&trapped);
-		npinfo->rx_flags &= ~NETPOLL_RX_DROP;
-		spin_unlock(&npinfo->poll_lock);
+			if (!budget)
+				break;
+		}
 	}
 }
 
 static void service_arp_queue(struct netpoll_info *npi)
 {
-	struct sk_buff *skb;
+	if (npi) {
+		struct sk_buff *skb;
 
-	if (unlikely(!npi))
-		return;
-
-	skb = skb_dequeue(&npi->arp_tx);
-
-	while (skb != NULL) {
-		arp_reply(skb);
-		skb = skb_dequeue(&npi->arp_tx);
+		while ((skb = skb_dequeue(&npi->arp_tx)))
+			arp_reply(skb);
 	}
 }
 
 void netpoll_poll(struct netpoll *np)
 {
-	if (!np->dev || !netif_running(np->dev) || !np->dev->poll_controller)
+	struct net_device *dev = np->dev;
+
+	if (!dev || !netif_running(dev) || !dev->poll_controller)
 		return;
 
 	/* Process pending work on NIC */
-	np->dev->poll_controller(np->dev);
-	if (np->dev->poll)
-		poll_napi(np);
+	dev->poll_controller(dev);
 
-	service_arp_queue(np->dev->npinfo);
+	poll_napi(dev);
+
+	service_arp_queue(dev->npinfo);
 
 	zap_completion_queue();
 }
@@ -197,10 +215,12 @@ static void zap_completion_queue(void)
 		while (clist != NULL) {
 			struct sk_buff *skb = clist;
 			clist = clist->next;
-			if (skb->destructor)
+			if (skb->destructor) {
+				atomic_inc(&skb->users);
 				dev_kfree_skb_any(skb); /* put this one back */
-			else
+			} else {
 				__kfree_skb(skb);
+			}
 		}
 	}
 
@@ -233,6 +253,17 @@ repeat:
 	return skb;
 }
 
+static int netpoll_owner_active(struct net_device *dev)
+{
+	struct napi_struct *napi;
+
+	list_for_each_entry(napi, &dev->napi_list, dev_list) {
+		if (napi->poll_owner == smp_processor_id())
+			return 1;
+	}
+	return 0;
+}
+
 static void netpoll_send_skb(struct netpoll *np, struct sk_buff *skb)
 {
 	int status = NETDEV_TX_BUSY;
@@ -246,8 +277,7 @@ static void netpoll_send_skb(struct netpoll *np, struct sk_buff *skb)
 	}
 
 	/* don't get messages out of order, and no recursion */
-	if (skb_queue_len(&npinfo->txq) == 0 &&
-		    npinfo->poll_owner != smp_processor_id()) {
+	if (skb_queue_len(&npinfo->txq) == 0 && !netpoll_owner_active(dev)) {
 		unsigned long flags;
 
 		local_irq_save(flags);
@@ -256,7 +286,7 @@ static void netpoll_send_skb(struct netpoll *np, struct sk_buff *skb)
 		     tries > 0; --tries) {
 			if (netif_tx_trylock(dev)) {
 				if (!netif_queue_stopped(dev) &&
-				    !netif_subqueue_stopped(dev, skb->queue_mapping))
+				    !netif_subqueue_stopped(dev, skb))
 					status = dev->hard_start_xmit(skb, dev);
 				netif_tx_unlock(dev);
 
@@ -332,8 +362,8 @@ void netpoll_send_udp(struct netpoll *np, const char *msg, int len)
 	eth = (struct ethhdr *) skb_push(skb, ETH_HLEN);
 	skb_reset_mac_header(skb);
 	skb->protocol = eth->h_proto = htons(ETH_P_IP);
-	memcpy(eth->h_source, np->local_mac, 6);
-	memcpy(eth->h_dest, np->remote_mac, 6);
+	memcpy(eth->h_source, np->dev->dev_addr, ETH_ALEN);
+	memcpy(eth->h_dest, np->remote_mac, ETH_ALEN);
 
 	skb->dev = np->dev;
 
@@ -386,7 +416,8 @@ static void arp_reply(struct sk_buff *skb)
 	memcpy(&tip, arp_ptr, 4);
 
 	/* Should we ignore arp? */
-	if (tip != htonl(np->local_ip) || LOOPBACK(tip) || MULTICAST(tip))
+	if (tip != htonl(np->local_ip) ||
+	    ipv4_is_loopback(tip) || ipv4_is_multicast(tip))
 		return;
 
 	size = sizeof(struct arphdr) + 2 * (skb->dev->addr_len + 4);
@@ -402,11 +433,9 @@ static void arp_reply(struct sk_buff *skb)
 	send_skb->protocol = htons(ETH_P_ARP);
 
 	/* Fill the device header for the ARP frame */
-
-	if (np->dev->hard_header &&
-	    np->dev->hard_header(send_skb, skb->dev, ptype,
-				 sha, np->local_mac,
-				 send_skb->len) < 0) {
+	if (dev_hard_header(send_skb, skb->dev, ptype,
+			    sha, np->dev->dev_addr,
+			    send_skb->len) < 0) {
 		kfree_skb(send_skb);
 		return;
 	}
@@ -519,6 +548,23 @@ out:
 	return 0;
 }
 
+void netpoll_print_options(struct netpoll *np)
+{
+	DECLARE_MAC_BUF(mac);
+	printk(KERN_INFO "%s: local port %d\n",
+			 np->name, np->local_port);
+	printk(KERN_INFO "%s: local IP %d.%d.%d.%d\n",
+			 np->name, HIPQUAD(np->local_ip));
+	printk(KERN_INFO "%s: interface %s\n",
+			 np->name, np->dev_name);
+	printk(KERN_INFO "%s: remote port %d\n",
+			 np->name, np->remote_port);
+	printk(KERN_INFO "%s: remote IP %d.%d.%d.%d\n",
+			 np->name, HIPQUAD(np->remote_ip));
+	printk(KERN_INFO "%s: remote ethernet address %s\n",
+	                 np->name, print_mac(mac, np->remote_mac));
+}
+
 int netpoll_parse_options(struct netpoll *np, char *opt)
 {
 	char *cur=opt, *delim;
@@ -531,7 +577,6 @@ int netpoll_parse_options(struct netpoll *np, char *opt)
 		cur = delim;
 	}
 	cur++;
-	printk(KERN_INFO "%s: local port %d\n", np->name, np->local_port);
 
 	if (*cur != '/') {
 		if ((delim = strchr(cur, '/')) == NULL)
@@ -539,9 +584,6 @@ int netpoll_parse_options(struct netpoll *np, char *opt)
 		*delim = 0;
 		np->local_ip = ntohl(in_aton(cur));
 		cur = delim;
-
-		printk(KERN_INFO "%s: local IP %d.%d.%d.%d\n",
-		       np->name, HIPQUAD(np->local_ip));
 	}
 	cur++;
 
@@ -555,8 +597,6 @@ int netpoll_parse_options(struct netpoll *np, char *opt)
 	}
 	cur++;
 
-	printk(KERN_INFO "%s: interface %s\n", np->name, np->dev_name);
-
 	if (*cur != '@') {
 		/* dst port */
 		if ((delim = strchr(cur, '@')) == NULL)
@@ -566,7 +606,6 @@ int netpoll_parse_options(struct netpoll *np, char *opt)
 		cur = delim;
 	}
 	cur++;
-	printk(KERN_INFO "%s: remote port %d\n", np->name, np->remote_port);
 
 	/* dst ip */
 	if ((delim = strchr(cur, '/')) == NULL)
@@ -574,9 +613,6 @@ int netpoll_parse_options(struct netpoll *np, char *opt)
 	*delim = 0;
 	np->remote_ip = ntohl(in_aton(cur));
 	cur = delim + 1;
-
-	printk(KERN_INFO "%s: remote IP %d.%d.%d.%d\n",
-	       np->name, HIPQUAD(np->remote_ip));
 
 	if (*cur != 0) {
 		/* MAC address */
@@ -608,15 +644,7 @@ int netpoll_parse_options(struct netpoll *np, char *opt)
 		np->remote_mac[5] = simple_strtol(cur, NULL, 16);
 	}
 
-	printk(KERN_INFO "%s: remote ethernet address "
-	       "%02x:%02x:%02x:%02x:%02x:%02x\n",
-	       np->name,
-	       np->remote_mac[0],
-	       np->remote_mac[1],
-	       np->remote_mac[2],
-	       np->remote_mac[3],
-	       np->remote_mac[4],
-	       np->remote_mac[5]);
+	netpoll_print_options(np);
 
 	return 0;
 
@@ -635,7 +663,7 @@ int netpoll_setup(struct netpoll *np)
 	int err;
 
 	if (np->dev_name)
-		ndev = dev_get_by_name(np->dev_name);
+		ndev = dev_get_by_name(&init_net, np->dev_name);
 	if (!ndev) {
 		printk(KERN_ERR "%s: %s doesn't exist, aborting.\n",
 		       np->name, np->dev_name);
@@ -652,8 +680,6 @@ int netpoll_setup(struct netpoll *np)
 
 		npinfo->rx_flags = 0;
 		npinfo->rx_np = NULL;
-		spin_lock_init(&npinfo->poll_lock);
-		npinfo->poll_owner = -1;
 
 		spin_lock_init(&npinfo->rx_lock);
 		skb_queue_head_init(&npinfo->arp_tx);
@@ -713,9 +739,6 @@ int netpoll_setup(struct netpoll *np)
 			msleep(4000);
 		}
 	}
-
-	if (is_zero_ether_addr(np->local_mac) && ndev->dev_addr)
-		memcpy(np->local_mac, ndev->dev_addr, 6);
 
 	if (!np->local_ip) {
 		rcu_read_lock();
@@ -789,11 +812,7 @@ void netpoll_cleanup(struct netpoll *np)
 				cancel_rearming_delayed_work(&npinfo->tx_work);
 
 				/* clean after last, unfinished work */
-				if (!skb_queue_empty(&npinfo->txq)) {
-					struct sk_buff *skb;
-					skb = __skb_dequeue(&npinfo->txq);
-					kfree_skb(skb);
-				}
+				__skb_queue_purge(&npinfo->txq);
 				kfree(npinfo);
 				np->dev->npinfo = NULL;
 			}
@@ -820,6 +839,7 @@ void netpoll_set_trap(int trap)
 
 EXPORT_SYMBOL(netpoll_set_trap);
 EXPORT_SYMBOL(netpoll_trap);
+EXPORT_SYMBOL(netpoll_print_options);
 EXPORT_SYMBOL(netpoll_parse_options);
 EXPORT_SYMBOL(netpoll_setup);
 EXPORT_SYMBOL(netpoll_cleanup);

@@ -13,8 +13,8 @@
 #include <linux/errno.h>
 #include <linux/mod_devicetable.h>
 
-#define PNP_MAX_PORT		8
-#define PNP_MAX_MEM		4
+#define PNP_MAX_PORT		40
+#define PNP_MAX_MEM		24
 #define PNP_MAX_IRQ		2
 #define PNP_MAX_DMA		2
 #define PNP_NAME_LEN		50
@@ -126,7 +126,7 @@ struct pnp_resource_table {
 };
 
 /*
- * Device Managemnt
+ * Device Management
  */
 
 struct pnp_card {
@@ -243,11 +243,11 @@ struct pnp_fixup {
 #define PNP_CONFIGURABLE	0x0008
 #define PNP_REMOVABLE		0x0010
 
-#define pnp_can_read(dev)	(((dev)->protocol) && ((dev)->protocol->get) && \
+#define pnp_can_read(dev)	(((dev)->protocol->get) && \
 				 ((dev)->capabilities & PNP_READ))
-#define pnp_can_write(dev)	(((dev)->protocol) && ((dev)->protocol->set) && \
+#define pnp_can_write(dev)	(((dev)->protocol->set) && \
 				 ((dev)->capabilities & PNP_WRITE))
-#define pnp_can_disable(dev)	(((dev)->protocol) && ((dev)->protocol->disable) && \
+#define pnp_can_disable(dev)	(((dev)->protocol->disable) && \
 				 ((dev)->capabilities & PNP_DISABLE))
 #define pnp_can_configure(dev)	((!(dev)->active) && \
 				 ((dev)->capabilities & PNP_CONFIGURABLE))
@@ -258,6 +258,7 @@ extern struct pnp_protocol isapnp_protocol;
 #else
 #define pnp_device_is_isapnp(dev) 0
 #endif
+extern struct mutex pnp_res_mutex;
 
 #ifdef CONFIG_PNPBIOS
 extern struct pnp_protocol pnpbios_protocol;

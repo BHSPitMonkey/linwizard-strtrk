@@ -12,10 +12,6 @@ config PPC_MULTIPLATFORM
 	  RS/6000 machine, an Apple machine, or a PReP, CHRP,
 	  Maple or Cell-based machine.
 
-config EMBEDDED6xx
-	bool "Embedded 6xx/7xx/7xxx-based board"
-	depends on PPC32 && (BROKEN||BROKEN_ON_SMP)
-
 config PPC_82xx
 	bool "Freescale 82xx"
 	depends on 6xx
@@ -24,8 +20,8 @@ config PPC_83xx
 	bool "Freescale 83xx"
 	depends on 6xx
 	select FSL_SOC
-	select 83xx
-	select WANT_DEVICE_TREE
+	select MPC83xx
+	select IPIC
 
 config PPC_86xx
 	bool "Freescale 86xx"
@@ -43,6 +39,7 @@ config CLASSIC32
 source "arch/powerpc/platforms/pseries/Kconfig"
 source "arch/powerpc/platforms/iseries/Kconfig"
 source "arch/powerpc/platforms/chrp/Kconfig"
+source "arch/powerpc/platforms/512x/Kconfig"
 source "arch/powerpc/platforms/52xx/Kconfig"
 source "arch/powerpc/platforms/powermac/Kconfig"
 source "arch/powerpc/platforms/prep/Kconfig"
@@ -58,7 +55,7 @@ source "arch/powerpc/platforms/85xx/Kconfig"
 source "arch/powerpc/platforms/86xx/Kconfig"
 source "arch/powerpc/platforms/embedded6xx/Kconfig"
 source "arch/powerpc/platforms/44x/Kconfig"
-#source "arch/powerpc/platforms/4xx/Kconfig
+source "arch/powerpc/platforms/40x/Kconfig"
 
 config PPC_NATIVE
 	bool
@@ -82,6 +79,10 @@ config XICS
 	depends on PPC_PSERIES
 	bool
 	default y
+
+config IPIC
+	bool
+	default n
 
 config MPIC
 	bool
@@ -120,10 +121,10 @@ config RTAS_FLASH
 
 config PPC_PMI
 	tristate "Support for PMI"
-	depends PPC_IBM_CELL_BLADE
+	depends on PPC_IBM_CELL_BLADE
 	help
 	  PMI (Platform Management Interrupt) is a way to
-	  communicate with the BMC (Baseboard Mangement Controller).
+	  communicate with the BMC (Baseboard Management Controller).
 	  It is used in some IBM Cell blades.
 	default m
 
@@ -135,6 +136,16 @@ config MPIC_U3_HT_IRQS
 	bool
 	depends on PPC_MAPLE
 	default y
+
+config MPIC_BROKEN_REGREAD
+	bool
+	depends on MPIC
+	help
+	  This option enables a MPIC driver workaround for some chips
+	  that have a bug that causes some interrupt source information
+	  to not read back properly. It is safe to use on other chips as
+	  well, but enabling it uses about 8KB of memory to keep copies
+	  of the register contents in software.
 
 config IBMVIO
 	depends on PPC_PSERIES || PPC_ISERIES
@@ -257,6 +268,8 @@ config TAU_AVERAGE
 
 config QUICC_ENGINE
 	bool
+	select PPC_LIB_RHEAP
+	select CRC32
 	help
 	  The QUICC Engine (QE) is a new generation of communications
 	  coprocessors on Freescale embedded CPUs (akin to CPM in older chips).
@@ -264,13 +277,26 @@ config QUICC_ENGINE
 	  for a machine with a QE coprocessor.
 
 config CPM2
-	bool
-	default n
+	bool "Enable support for the CPM2 (Communications Processor Module)"
+	depends on MPC85xx || 8260
+	select CPM
+	select PPC_LIB_RHEAP
 	help
 	  The CPM2 (Communications Processor Module) is a coprocessor on
 	  embedded CPUs made by Freescale.  Selecting this option means that
 	  you wish to build a kernel for a machine with a CPM2 coprocessor
 	  on it (826x, 827x, 8560).
+
+config PPC_CPM_NEW_BINDING
+	bool
+	depends on CPM1 || CPM2
+	help
+	  Select this if your board has been converted to use the new
+	  device tree bindings for CPM, and no longer needs the
+	  ioport callbacks or the platform device glue code.
+
+	  The fs_enet and cpm_uart drivers will be built as
+	  of_platform devices.
 
 config AXON_RAM
 	tristate "Axon DDR2 memory device driver"
@@ -290,5 +316,16 @@ config FSL_ULI1575
 	  Supports for the ULI1575 PCIe south bridge that exists on some
 	  Freescale reference boards. The boards all use the ULI in pretty
 	  much the same way.
+
+config CPM
+	bool
+
+config OF_RTC
+	bool
+	help
+	  Uses information from the OF or flattened device tree to instatiate
+	  platform devices for direct mapped RTC chips like the DS1742 or DS1743.
+
+source "arch/powerpc/sysdev/bestcomm/Kconfig"
 
 endmenu

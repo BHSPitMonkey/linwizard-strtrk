@@ -58,6 +58,7 @@
 #include <linux/slab.h>
 #include <linux/idr.h>
 #include <linux/kref.h>
+#include <linux/net.h>
 #include <net/tcp.h>
 
 #include <asm/uaccess.h>
@@ -70,14 +71,6 @@
 #include "quorum.h"
 
 #include "tcp_internal.h"
-
-/* 
- * The linux network stack isn't sparse endian clean.. It has macros like
- * ntohs() which perform the endian checks and structs like sockaddr_in
- * which aren't annotated.  So __force is found here to get the build
- * clean.  When they emerge from the dark ages and annotate the code
- * we can remove these.
- */
 
 #define SC_NODEF_FMT "node %s (num %u) at %u.%u.%u.%u:%u"
 #define SC_NODEF_ARGS(sc) sc->sc_node->nd_name, sc->sc_node->nd_num,	\
@@ -458,9 +451,9 @@ static void o2net_set_nn_state(struct o2net_node *nn,
 		/* delay if we're withing a RECONNECT_DELAY of the
 		 * last attempt */
 		delay = (nn->nn_last_connect_attempt +
-			 msecs_to_jiffies(o2net_reconnect_delay(sc->sc_node)))
+			 msecs_to_jiffies(o2net_reconnect_delay(NULL)))
 			- jiffies;
-		if (delay > msecs_to_jiffies(o2net_reconnect_delay(sc->sc_node)))
+		if (delay > msecs_to_jiffies(o2net_reconnect_delay(NULL)))
 			delay = 0;
 		mlog(ML_CONN, "queueing conn attempt in %lu jiffies\n", delay);
 		queue_delayed_work(o2net_wq, &nn->nn_connect_work, delay);
@@ -616,8 +609,7 @@ static void o2net_shutdown_sc(struct work_struct *work)
 		del_timer_sync(&sc->sc_idle_timeout);
 		o2net_sc_cancel_delayed_work(sc, &sc->sc_keepalive_work);
 		sc_put(sc);
-		sc->sc_sock->ops->shutdown(sc->sc_sock,
-					   RCV_SHUTDOWN|SEND_SHUTDOWN);
+		kernel_sock_shutdown(sc->sc_sock, SHUT_RDWR);
 	}
 
 	/* not fatal so failed connects before the other guy has our
@@ -1500,7 +1492,7 @@ static void o2net_start_connect(struct work_struct *work)
 
 	myaddr.sin_family = AF_INET;
 	myaddr.sin_addr.s_addr = mynode->nd_ipv4_address;
-	myaddr.sin_port = (__force u16)htons(0); /* any port */
+	myaddr.sin_port = htons(0); /* any port */
 
 	ret = sock->ops->bind(sock, (struct sockaddr *)&myaddr,
 			      sizeof(myaddr));
@@ -1560,12 +1552,11 @@ static void o2net_connect_expired(struct work_struct *work)
 
 	spin_lock(&nn->nn_lock);
 	if (!nn->nn_sc_valid) {
-		struct o2nm_node *node = nn->nn_sc->sc_node;
 		mlog(ML_ERROR, "no connection established with node %u after "
 		     "%u.%u seconds, giving up and returning errors.\n",
 		     o2net_num_from_nn(nn),
-		     o2net_idle_timeout(node) / 1000,
-		     o2net_idle_timeout(node) % 1000);
+		     o2net_idle_timeout(NULL) / 1000,
+		     o2net_idle_timeout(NULL) % 1000);
 
 		o2net_set_nn_state(nn, NULL, 0, -ENOTCONN);
 	}
@@ -1701,11 +1692,11 @@ static int o2net_accept_one(struct socket *sock)
 	if (ret < 0)
 		goto out;
 
-	node = o2nm_get_node_by_ip((__force __be32)sin.sin_addr.s_addr);
+	node = o2nm_get_node_by_ip(sin.sin_addr.s_addr);
 	if (node == NULL) {
 		mlog(ML_NOTICE, "attempt to connect from unknown node at "
 		     "%u.%u.%u.%u:%d\n", NIPQUAD(sin.sin_addr.s_addr),
-		     ntohs((__force __be16)sin.sin_port));
+		     ntohs(sin.sin_port));
 		ret = -EINVAL;
 		goto out;
 	}
@@ -1714,7 +1705,7 @@ static int o2net_accept_one(struct socket *sock)
 		mlog(ML_NOTICE, "unexpected connect attempted from a lower "
 		     "numbered node '%s' at " "%u.%u.%u.%u:%d with num %u\n",
 		     node->nd_name, NIPQUAD(sin.sin_addr.s_addr),
-		     ntohs((__force __be16)sin.sin_port), node->nd_num);
+		     ntohs(sin.sin_port), node->nd_num);
 		ret = -EINVAL;
 		goto out;
 	}
@@ -1725,7 +1716,7 @@ static int o2net_accept_one(struct socket *sock)
 		mlog(ML_CONN, "attempt to connect from node '%s' at "
 		     "%u.%u.%u.%u:%d but it isn't heartbeating\n",
 		     node->nd_name, NIPQUAD(sin.sin_addr.s_addr),
-		     ntohs((__force __be16)sin.sin_port));
+		     ntohs(sin.sin_port));
 		ret = -EINVAL;
 		goto out;
 	}
@@ -1742,7 +1733,7 @@ static int o2net_accept_one(struct socket *sock)
 		mlog(ML_NOTICE, "attempt to connect from node '%s' at "
 		     "%u.%u.%u.%u:%d but it already has an open connection\n",
 		     node->nd_name, NIPQUAD(sin.sin_addr.s_addr),
-		     ntohs((__force __be16)sin.sin_port));
+		     ntohs(sin.sin_port));
 		goto out;
 	}
 

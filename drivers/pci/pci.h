@@ -1,14 +1,15 @@
 /* Functions internal to the PCI core code */
 
-extern int pci_uevent(struct device *dev, char **envp, int num_envp,
-		      char *buffer, int buffer_size);
+extern int pci_uevent(struct device *dev, struct kobj_uevent_env *env);
 extern int pci_create_sysfs_dev_files(struct pci_dev *pdev);
 extern void pci_remove_sysfs_dev_files(struct pci_dev *pdev);
 extern void pci_cleanup_rom(struct pci_dev *dev);
 
 /* Firmware callbacks */
-extern pci_power_t (*platform_pci_choose_state)(struct pci_dev *dev, pm_message_t state);
-extern int (*platform_pci_set_power_state)(struct pci_dev *dev, pci_power_t state);
+extern pci_power_t (*platform_pci_choose_state)(struct pci_dev *dev,
+						pm_message_t state);
+extern int (*platform_pci_set_power_state)(struct pci_dev *dev,
+						pci_power_t state);
 
 extern int pci_user_read_config_byte(struct pci_dev *dev, int where, u8 *val);
 extern int pci_user_read_config_word(struct pci_dev *dev, int where, u16 *val);
@@ -46,10 +47,10 @@ static inline void pci_no_msi(void) { }
 static inline void pci_msi_init_pci_dev(struct pci_dev *dev) { }
 #endif
 
-#if defined(CONFIG_PCI_MSI) && defined(CONFIG_PM)
-void pci_restore_msi_state(struct pci_dev *dev);
+#ifdef CONFIG_PCIEAER
+void pci_no_aer(void);
 #else
-static inline void pci_restore_msi_state(struct pci_dev *dev) {}
+static inline void pci_no_aer(void) { }
 #endif
 
 static inline int pci_no_d1d2(struct pci_dev *dev)
@@ -63,14 +64,14 @@ static inline int pci_no_d1d2(struct pci_dev *dev)
 }
 extern int pcie_mch_quirk;
 extern struct device_attribute pci_dev_attrs[];
-extern struct class_device_attribute class_device_attr_cpuaffinity;
+extern struct device_attribute dev_attr_cpuaffinity;
 
 /**
  * pci_match_one_device - Tell if a PCI device structure has a matching
  *                        PCI device id structure
  * @id: single PCI device id structure to match
  * @dev: the PCI device structure to match against
- * 
+ *
  * Returns the matching pci_device_id structure or %NULL if there is no match.
  */
 static inline const struct pci_device_id *
@@ -85,3 +86,4 @@ pci_match_one_device(const struct pci_device_id *id, const struct pci_dev *dev)
 	return NULL;
 }
 
+struct pci_dev *pci_find_upstream_pcie_bridge(struct pci_dev *pdev);

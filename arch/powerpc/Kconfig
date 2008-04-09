@@ -14,6 +14,11 @@ config 64BIT
 	bool
 	default y if PPC64
 
+config WORD_SIZE
+	int
+	default 64 if PPC64
+	default 32 if !PPC64
+
 config PPC_MERGE
 	def_bool y
 
@@ -21,9 +26,24 @@ config MMU
 	bool
 	default y
 
+config GENERIC_CMOS_UPDATE
+	def_bool y
+
+config GENERIC_TIME
+	def_bool y
+
+config GENERIC_TIME_VSYSCALL
+	def_bool y
+
+config GENERIC_CLOCKEVENTS
+	def_bool y
+
 config GENERIC_HARDIRQS
 	bool
 	default y
+
+config HAVE_SETUP_PER_CPU_AREA
+	def_bool PPC64
 
 config IRQ_PER_CPU
 	bool
@@ -35,6 +55,11 @@ config RWSEM_GENERIC_SPINLOCK
 config RWSEM_XCHGADD_ALGORITHM
 	bool
 	default y
+
+config GENERIC_LOCKBREAK
+	bool
+	default y
+	depends on SMP && PREEMPT
 
 config ARCH_HAS_ILOG2_U32
 	bool
@@ -62,6 +87,10 @@ config ARCH_NO_VIRT_TO_BUS
 config PPC
 	bool
 	default y
+	select HAVE_IDE
+	select HAVE_OPROFILE
+	select HAVE_KPROBES
+	select HAVE_KRETPROBES
 
 config EARLY_PRINTK
 	bool
@@ -70,6 +99,7 @@ config EARLY_PRINTK
 config COMPAT
 	bool
 	default y if PPC64
+	select COMPAT_BINFMT_ELF
 
 config SYSVIPC_COMPAT
 	bool
@@ -123,10 +153,27 @@ config DEFAULT_UIMAGE
 	  Used to allow a board to specify it wants a uImage built by default
 	default n
 
-config PPC64_SWSUSP
+config REDBOOT
 	bool
-	depends on PPC64 && (BROKEN || (PPC_PMAC64 && EXPERIMENTAL))
+
+config HIBERNATE_32
+	bool
+	depends on (PPC_PMAC && !SMP) || BROKEN
 	default y
+
+config HIBERNATE_64
+	bool
+	depends on BROKEN || (PPC_PMAC64 && EXPERIMENTAL)
+	default y
+
+config ARCH_HIBERNATION_POSSIBLE
+	bool
+	depends on (PPC64 && HIBERNATE_64) || (PPC32 && HIBERNATE_32)
+	default y
+
+config ARCH_SUSPEND_POSSIBLE
+	def_bool y
+	depends on ADB_PMU || PPC_EFIKA || PPC_LITE5200
 
 config PPC_DCR_NATIVE
 	bool
@@ -143,11 +190,13 @@ config PPC_DCR
 
 config PPC_OF_PLATFORM_PCI
 	bool
+	depends on PCI
 	depends on PPC64 # not supported on 32 bits yet
 	default n
 
 source "init/Kconfig"
 
+source "arch/powerpc/sysdev/Kconfig"
 source "arch/powerpc/platforms/Kconfig"
 
 menu "Kernel options"
@@ -156,6 +205,7 @@ config HIGHMEM
 	bool "High memory support"
 	depends on PPC32
 
+source kernel/time/Kconfig
 source kernel/Kconfig.hz
 source kernel/Kconfig.preempt
 source "fs/Kconfig.binfmt"
@@ -169,6 +219,11 @@ config FORCE_MAX_ZONEORDER
 	default "9" if PPC_64K_PAGES
 	default "13"
 
+config HUGETLB_PAGE_SIZE_VARIABLE
+	bool
+	depends on HUGETLB_PAGE
+	default y
+
 config MATH_EMULATION
 	bool "Math emulation"
 	depends on 4xx || 8xx || E200 || PPC_MPC832x || E500
@@ -180,17 +235,32 @@ config MATH_EMULATION
 	  unit, which will allow programs that use floating-point
 	  instructions to run.
 
+config 8XX_MINIMAL_FPEMU
+	bool "Minimal math emulation for 8xx"
+	depends on 8xx && !MATH_EMULATION
+	help
+	  Older arch/ppc kernels still emulated a few floating point
+	  instructions such as load and store, even when full math
+	  emulation is disabled.  Say "Y" here if you want to preserve
+	  this behavior.
+
+	  It is recommended that you build a soft-float userspace instead.
+
 config IOMMU_VMERGE
-	bool "Enable IOMMU virtual merging (EXPERIMENTAL)"
-	depends on EXPERIMENTAL && PPC64
-	default n
+	bool "Enable IOMMU virtual merging"
+	depends on PPC64
+	default y
 	help
 	  Cause IO segments sent to a device for DMA to be merged virtually
 	  by the IOMMU when they happen to have been allocated contiguously.
 	  This doesn't add pressure to the IOMMU allocator. However, some
 	  drivers don't support getting large merged segments coming back
-	  from *_map_sg(). Say Y if you know the drivers you are using are
-	  properly handling this case.
+	  from *_map_sg().
+
+	  Most drivers don't have this problem; it is safe to say Y here.
+
+config IOMMU_HELPER
+	def_bool PPC64
 
 config HOTPLUG_CPU
 	bool "Support for enabling/disabling CPUs"
@@ -202,6 +272,12 @@ config HOTPLUG_CPU
 	  Say N if you are unsure.
 
 config ARCH_ENABLE_MEMORY_HOTPLUG
+	def_bool y
+
+config ARCH_HAS_WALK_MEMORY
+	def_bool y
+
+config ARCH_ENABLE_MEMORY_HOTREMOVE
 	def_bool y
 
 config KEXEC
@@ -265,6 +341,7 @@ config ARCH_FLATMEM_ENABLE
 config ARCH_SPARSEMEM_ENABLE
 	def_bool y
 	depends on PPC64
+	select SPARSEMEM_VMEMMAP_ENABLE
 
 config ARCH_SPARSEMEM_DEFAULT
 	def_bool y
@@ -304,6 +381,14 @@ config PPC_64K_PAGES
 	  while on hardware with such support, it will be used to map
 	  normal application pages.
 
+config PPC_SUBPAGE_PROT
+	bool "Support setting protections for 4k subpages"
+	depends on PPC_64K_PAGES
+	help
+	  This option adds support for a system call to allow user programs
+	  to set access permissions (read/write, readonly, or no access)
+	  on the 4k subpages of each 64k page.
+
 config SCHED_SMT
 	bool "SMT (Hyperthreading) scheduler support"
 	depends on PPC64 && SMP
@@ -334,6 +419,10 @@ config CMDLINE
 	  most cases you will need to specify the root device here.
 
 if !44x || BROKEN
+config ARCH_WANTS_FREEZER_CONTROL
+	def_bool y
+	depends on ADB_PMU
+
 source kernel/power/Kconfig
 endif
 
@@ -354,34 +443,11 @@ config SECCOMP
 
 	  If unsure, say Y. Only embedded should say N here.
 
-config WANT_DEVICE_TREE
-	bool
-	default n
-
-config DEVICE_TREE
-	string "Static device tree source file"
-	depends on WANT_DEVICE_TREE
-	help
-	  This specifies the device tree source (.dts) file to be
-	  compiled and included when building the bootwrapper.  If a
-	  relative filename is given, then it will be relative to
-	  arch/powerpc/boot/dts.  If you are not using the bootwrapper,
-	  or do not need to build a dts into the bootwrapper, this
-	  field is ignored.
-
-	  For example, this is required when building a cuImage target
-	  for an older U-Boot, which cannot pass a device tree itself.
-	  Such a kernel will not work with a newer U-Boot that tries to
-	  pass a device tree (unless you tell it not to).  If your U-Boot
-	  does not mention a device tree in "help bootm", then use the
-	  cuImage target and specify a device tree here.  Otherwise, use
-	  the uImage target and leave this field blank.
-
 endmenu
 
 config ISA_DMA_API
 	bool
-	default y
+	default !PPC_ISERIES || PCI
 
 menu "Bus options"
 
@@ -431,8 +497,8 @@ config MCA
 config PCI
 	bool "PCI support" if 40x || CPM2 || PPC_83xx || PPC_85xx || PPC_86xx \
 		|| PPC_MPC52xx || (EMBEDDED && (PPC_PSERIES || PPC_ISERIES)) \
-		|| PPC_PS3
-	default y if !40x && !CPM2 && !8xx && !PPC_83xx \
+		|| PPC_PS3 || 44x
+	default y if !40x && !CPM2 && !8xx && !PPC_MPC512x && !PPC_83xx \
 		&& !PPC_85xx && !PPC_86xx
 	default PCI_PERMEDIA if !4xx && !CPM2 && !8xx
 	default PCI_QSPAN if !4xx && !CPM2 && 8xx
@@ -465,7 +531,7 @@ config PCI_8260
 
 config 8260_PCI9
 	bool "Enable workaround for MPC826x erratum PCI 9"
-	depends on PCI_8260 && !ADS8272
+	depends on PCI_8260 && !8272
 	default y
 
 choice
@@ -569,7 +635,8 @@ config TASK_SIZE_BOOL
 
 config TASK_SIZE
 	hex "Size of user task space" if TASK_SIZE_BOOL
-	default "0x80000000"
+	default "0x80000000" if PPC_PREP || PPC_8xx
+	default "0xc0000000"
 
 config CONSISTENT_START_BOOL
 	bool "Set custom consistent memory pool address"
@@ -581,6 +648,7 @@ config CONSISTENT_START_BOOL
 
 config CONSISTENT_START
 	hex "Base virtual address of consistent memory pool" if CONSISTENT_START_BOOL
+	default "0xfd000000" if (NOT_COHERENT_CACHE && 8xx)
 	default "0xff100000" if NOT_COHERENT_CACHE
 
 config CONSISTENT_SIZE_BOOL
@@ -636,22 +704,6 @@ source "arch/powerpc/sysdev/qe_lib/Kconfig"
 
 source "lib/Kconfig"
 
-menu "Instrumentation Support"
-	depends on EXPERIMENTAL
-
-source "arch/powerpc/oprofile/Kconfig"
-
-config KPROBES
-	bool "Kprobes"
-	depends on !BOOKE && !4xx && KALLSYMS && MODULES
-	help
-	  Kprobes allows you to trap at almost any kernel address and
-	  execute a callback function.  register_kprobe() establishes
-	  a probepoint and specifies the callback.  Kprobes is useful
-	  for kernel debugging, non-intrusive instrumentation and testing.
-	  If in doubt, say "N".
-endmenu
-
 source "arch/powerpc/Kconfig.debug"
 
 source "security/Kconfig"
@@ -662,3 +714,11 @@ config KEYS_COMPAT
 	default y
 
 source "crypto/Kconfig"
+
+config PPC_CLOCK
+	bool
+	default n
+
+config PPC_LIB_RHEAP
+	bool
+
