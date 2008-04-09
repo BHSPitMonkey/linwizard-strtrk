@@ -721,8 +721,6 @@ static int __init omap_pm_init(void)
 		omap_sram_suspend = omap_sram_push(omap730_cpu_suspend,
 						   omap730_cpu_suspend_sz);
 	} else if (cpu_is_omap850()) {
-		omap_sram_idle = omap_sram_push(omap850_idle_loop_suspend,
-						omap850_idle_loop_suspend_sz);
 		omap_sram_suspend = omap_sram_push(omap850_cpu_suspend,
 						   omap850_cpu_suspend_sz);
 	} else if (cpu_is_omap15xx()) {
