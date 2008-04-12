@@ -136,3 +136,9 @@ $(obj)/defkeymap.c: $(obj)/%.c: $(src)/%.map
 	rm $@.tmp
 
 endif
+
+ifdef CONFIG_MACH_OMAP_HTCWIZARD
+# Use our generated keymap, do not enable GENERATE_KEYMAP
+$(obj)/defkeymap.c: $(src)/defkeymap-htcwizard.c
+	cp -f $< $@
+endif

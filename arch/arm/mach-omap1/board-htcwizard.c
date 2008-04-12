@@ -97,7 +97,7 @@ static int htc_wizard_keymap[] = {
 	KEY(2,3,KEY_J),
 	KEY(2,4,KEY_ENTER),
 	KEY(2,5,KEY_H),
-	KEY(2,6,KEY_Z),
+	KEY(2,6,KEY_Y),
 	KEY(3,0,KEY_SPACE),
 	KEY(3,1,KEY_L),
 	KEY(3,2,KEY_B),
@@ -113,7 +113,7 @@ static int htc_wizard_keymap[] = {
 	KEY(4,5,KEY_E),
 	KEY(4,6,KEY_D),
 	KEY(5,0,KEY_X),
-	KEY(5,1,KEY_Y),
+	KEY(5,1,KEY_Z),
 	KEY(5,2,KEY_S),
 	KEY(5,3,KEY_W),
 	KEY(5,4,KEY_P),
@@ -129,8 +129,8 @@ static int htc_wizard_keymap[] = {
 };
 
 struct omap_kp_platform_data kp_data = {
-	.rows	= 8,
-	.cols	= 8,
+	.rows	= 7,
+	.cols	= 7,
 	.delay = 10,
 	.keymap = htc_wizard_keymap,
 };

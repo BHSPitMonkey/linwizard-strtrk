@@ -1,0 +1,82 @@
+#
+# Keymap for HTC Wizard
+# Copyright (C) 2008, Angelo Arrifano <miknix@gmail.com>
+# Copyright (C) 2008, The linwizard team
+# http://linwizard.sourceforge.net
+#
+# Red dot key available on htc wizard will behave as Alt
+#
+# TODO: Set ctrl sequences, directional keys and composite strings
+# NOTE: After editing this file dont forget to run
+# loadkeys --mktable defkeymap-htcwizard.map > defkeymap-htcwizard.c
+#
+keymaps 0-2,4-5,8,12
+
+keycode 14 = Delete
+	alt keycode 14 = greater
+keycode 15 = Tab
+keycode 28 = Return
+	alt keycode 28 = less
+keycode 56 = Alt
+keycode 58 = Shift
+	alt keycode 58 = Caps_Lock
+
+keycode 16 = q
+	alt keycode 16 = one
+keycode 17 = w
+	alt keycode 17 = two
+keycode 18 = e
+	alt keycode 18 = three
+keycode 19 = r
+	alt keycode 19 = four
+keycode 20 = t
+	alt keycode 20 = five
+keycode 21 = y
+	alt keycode 21 = six
+keycode 22 = u
+	alt keycode 22 = seven
+keycode 23 = i
+	alt keycode 23 = eight
+keycode 24 = o
+	alt keycode 24 = nine
+keycode 25 = p
+	alt keycode 25 = zero
+keycode 30 = a
+	alt keycode 30 = dead_tilde
+keycode 31 = s
+	alt keycode 31 = exclam
+keycode 32 = d
+	alt keycode 32 = at
+keycode 33 = f
+	alt keycode 33 = numbersign
+keycode 34 = g
+	alt keycode 34 = dollar
+keycode 35 = h
+	alt keycode 35 = percent
+keycode 36 = j
+	alt keycode 36 = ampersand
+keycode 37 = k
+	alt keycode 37 = parenleft
+keycode 38 = l
+	alt keycode 38 = parenright
+keycode 44 = z
+	alt keycode 44 = apostrophe
+keycode 45 = x
+	alt keycode 45 = minus
+keycode 46 = c
+	alt keycode 46 = underscore
+keycode 47 = v
+	alt keycode 47 = plus
+keycode 48 = b
+	alt keycode 48 = equal
+keycode 49 = n
+	alt keycode 49 = asterisk
+keycode 50 = m
+	alt keycode 50 = semicolon
+keycode 51 = period
+	alt keycode 51 = comma
+keycode 53 = slash # FIXME: This is KEY_OK
+	alt keycode 53 = backslash
+keycode 57 = space
+	alt keycode 57 = bar
+
