@@ -38,10 +38,10 @@
 #include <asm/arch/mux.h>
 #include <asm/arch/fpga.h>
 
-#ifdef CONFIG_ARCH_OMAP730
+#if defined(CONFIG_ARCH_OMAP730) || defined(CONFIG_ARCH_OMAP850)
 /*
- * unlike other omap architectures, omap730 has 16bits MMC register
- * offsets ...
+ * unlike other omap architectures, omap730 and omap850
+ * have 16bits MMC register offsets ...
  * linwizard: patch from Nicolas Schichan linux tree.
  */
 # define OMAP_MMC_REG_CMD  0x00
