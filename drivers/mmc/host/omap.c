@@ -38,31 +38,67 @@
 #include <asm/arch/mux.h>
 #include <asm/arch/fpga.h>
 
-#define	OMAP_MMC_REG_CMD	0x00
-#define	OMAP_MMC_REG_ARGL	0x04
-#define	OMAP_MMC_REG_ARGH	0x08
-#define	OMAP_MMC_REG_CON	0x0c
-#define	OMAP_MMC_REG_STAT	0x10
-#define	OMAP_MMC_REG_IE		0x14
-#define	OMAP_MMC_REG_CTO	0x18
-#define	OMAP_MMC_REG_DTO	0x1c
-#define	OMAP_MMC_REG_DATA	0x20
-#define	OMAP_MMC_REG_BLEN	0x24
-#define	OMAP_MMC_REG_NBLK	0x28
-#define	OMAP_MMC_REG_BUF	0x2c
-#define OMAP_MMC_REG_SDIO	0x34
-#define	OMAP_MMC_REG_REV	0x3c
-#define	OMAP_MMC_REG_RSP0	0x40
-#define	OMAP_MMC_REG_RSP1	0x44
-#define	OMAP_MMC_REG_RSP2	0x48
-#define	OMAP_MMC_REG_RSP3	0x4c
-#define	OMAP_MMC_REG_RSP4	0x50
-#define	OMAP_MMC_REG_RSP5	0x54
-#define	OMAP_MMC_REG_RSP6	0x58
-#define	OMAP_MMC_REG_RSP7	0x5c
-#define	OMAP_MMC_REG_IOSR	0x60
-#define	OMAP_MMC_REG_SYSC	0x64
-#define	OMAP_MMC_REG_SYSS	0x68
+#ifdef CONFIG_ARCH_OMAP730
+/*
+ * unlike other omap architectures, omap730 has 16bits MMC register
+ * offsets ...
+ * linwizard: patch from Nicolas Schichan linux tree.
+ */
+# define OMAP_MMC_REG_CMD  0x00
+# define OMAP_MMC_REG_ARGL 0x02
+# define OMAP_MMC_REG_ARGH 0x04
+# define OMAP_MMC_REG_CON  0x06
+# define OMAP_MMC_REG_STAT 0x08
+# define OMAP_MMC_REG_IE   0x0a
+# define OMAP_MMC_REG_CTO  0x0c
+# define OMAP_MMC_REG_DTO  0x0e
+# define OMAP_MMC_REG_DATA 0x10
+# define OMAP_MMC_REG_BLEN 0x12
+# define OMAP_MMC_REG_NBLK 0x14
+# define OMAP_MMC_REG_BUF  0x16
+# define OMAP_MMC_REG_SDIO 0x1a
+# define OMAP_MMC_REG_REV  0x1e
+# define OMAP_MMC_REG_RSP0 0x20
+# define OMAP_MMC_REG_RSP1 0x22
+# define OMAP_MMC_REG_RSP2 0x24
+# define OMAP_MMC_REG_RSP3 0x26
+# define OMAP_MMC_REG_RSP4 0x28
+# define OMAP_MMC_REG_RSP5 0x2a
+# define OMAP_MMC_REG_RSP6 0x2c
+# define OMAP_MMC_REG_RSP7 0x2e
+# define OMAP_MMC_REG_IOSR 0x30
+# define OMAP_MMC_REG_SYSC 0x32
+# define OMAP_MMC_REG_SYSS 0x34
+
+#else
+
+# define	OMAP_MMC_REG_CMD	0x00
+# define	OMAP_MMC_REG_ARGL	0x04
+# define	OMAP_MMC_REG_ARGH	0x08
+# define	OMAP_MMC_REG_CON	0x0c
+# define	OMAP_MMC_REG_STAT	0x10
+# define	OMAP_MMC_REG_IE	0x14
+# define	OMAP_MMC_REG_CTO	0x18
+# define	OMAP_MMC_REG_DTO	0x1c
+# define	OMAP_MMC_REG_DATA	0x20
+# define	OMAP_MMC_REG_BLEN	0x24
+# define	OMAP_MMC_REG_NBLK	0x28
+# define	OMAP_MMC_REG_BUF	0x2c
+# define OMAP_MMC_REG_SDIO	0x34
+# define	OMAP_MMC_REG_REV	0x3c
+# define	OMAP_MMC_REG_RSP0	0x40
+# define	OMAP_MMC_REG_RSP1	0x44
+# define	OMAP_MMC_REG_RSP2	0x48
+# define	OMAP_MMC_REG_RSP3	0x4c
+# define	OMAP_MMC_REG_RSP4	0x50
+# define	OMAP_MMC_REG_RSP5	0x54
+# define	OMAP_MMC_REG_RSP6	0x58
+# define	OMAP_MMC_REG_RSP7	0x5c
+# define	OMAP_MMC_REG_IOSR	0x60
+# define	OMAP_MMC_REG_SYSC	0x64
+# define	OMAP_MMC_REG_SYSS	0x68
+
+#endif
 
 #define	OMAP_MMC_STAT_CARD_ERR		(1 << 14)
 #define	OMAP_MMC_STAT_CARD_IRQ		(1 << 13)

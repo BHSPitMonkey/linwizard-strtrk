@@ -50,10 +50,15 @@
 
 #include <linux/delay.h>
 
-#define ADS7846_PENDOWN_GPIO	76
+#define ADS7846_PENDOWN_GPIO 76
 
 #define HTCWIZARD_GPIO_DM 35
 #define HTCWIZARD_GPIO_DP 36
+
+#define OMAP_MMC_REG_SYSC (0xfffb7800 + 0x32)
+#define OMAP_MMC_REG_SYSS (0xfffb7800 + 0x34)
+#define OMAP_MMC_REG_CTO  (0xfffb7800 + 0x0e)
+#define OMAP_MMC_REG_DTO  (0xfffb7800 + 0x1c)
 
 static struct omap_lcd_config htcwizard_lcd_config __initdata = {
 	.ctrl_name	= "internal",
@@ -67,10 +72,22 @@ static struct omap_usb_config htcwizard_usb_config __initdata = {
 	.pins[0]	= 2,
 };
 
+static struct omap_mmc_config htcwizard_mmc_config __initdata =
+{
+	.mmc[0] = {
+		.enabled = 1,
+		.nomux = 1,
+		.wire4 = 1,
+		.power_pin = -1,
+		.switch_pin = -1,
+	}
+};
+
 static struct omap_board_config_kernel htcwizard_config[] = 
 {
 	{ OMAP_TAG_LCD, &htcwizard_lcd_config },
 	{ OMAP_TAG_USB, &htcwizard_usb_config },
+	{ OMAP_TAG_MMC, &htcwizard_mmc_config },
 };
 /* Keyboard definition */
 
@@ -298,6 +315,33 @@ static void __init htcwizard_usb_otg(void)
 	omap_writel(omap_readl(OMAP730_MODE_1) & ~(1 << 11), OMAP730_MODE_1);
 }
 
+/* 
+ * mmc_init from board-tornado
+ * by Nicolas Schichan.
+ */
+static void __init
+htcwizard_mmc_init(void)
+{
+	unsigned int tries;
+
+	/* put mmc host into reset ... */
+	omap_writew(1, OMAP_MMC_REG_SYSC);
+
+	tries = 100;
+	while (omap_readw(OMAP_MMC_REG_SYSS) == 0 && tries) {
+		mdelay(50);
+		--tries;
+	}
+   
+	printk("MMC host reset done: remaining tries: %i\n", tries);
+
+	/* force mode 0 for D_SMC_DAT3, D_SMC_DAT2, D_SMC, no pull up enable */
+	omap_writel(omap_readl(OMAP850_IO_CONF_2) & ~(0xF << 8), OMAP850_IO_CONF_2);
+	omap_writel(omap_readl(OMAP850_IO_CONF_2) & ~(0xF << 12), OMAP850_IO_CONF_2);
+	omap_writel(omap_readl(OMAP850_IO_CONF_2) & ~(0xF << 16), OMAP850_IO_CONF_2);
+}
+
+
 static void __init htcwizard_init(void)
 {
   printk("HTC Wizard init.\n");
@@ -310,6 +354,7 @@ static void __init htcwizard_init(void)
 
   htcwizard_usb_otg();
   htcwizard_usb_enable();
+  htcwizard_mmc_init();
 
   /* For testing.. Disable for now
 	* spi_register_board_info(htcwizard_spi_board_info,
