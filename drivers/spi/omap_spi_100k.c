@@ -690,11 +690,13 @@ static int __init omap1_spi100k_probe(struct platform_device *pdev)
 
 	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (r == NULL) {
+		printk("SPI: Get resource FAILED\n");
 		status = -ENODEV;
 		goto err1;
 	}
 	if (!request_mem_region(r->start, (r->end - r->start) + 1,
 			pdev->dev.bus_id)) {
+		printk("SPI: Request mem region FAILED\n");
 		status = -EBUSY;
 		goto err1;
 	}
@@ -708,12 +710,14 @@ static int __init omap1_spi100k_probe(struct platform_device *pdev)
 
 	spi100k->ick = clk_get(&pdev->dev, "spi100k_ick");
 	if (IS_ERR(spi100k->ick)) {
+		printk("SPI: cant get ick\n");
 		dev_dbg(&pdev->dev, "can't get spi100k_ick\n");
 		status = PTR_ERR(spi100k->ick);
 		goto err1a;
 	}
 	spi100k->fck = clk_get(&pdev->dev, "spi100k_fck");
 	if (IS_ERR(spi100k->fck)) {
+		printk("SPI: Gcan get fck\n");
 		dev_dbg(&pdev->dev, "can't get spi100k_fck\n");
 		status = PTR_ERR(spi100k->fck);
 		goto err2;

@@ -56,6 +56,8 @@
 #define HTCWIZARD_GPIO_DM 35
 #define HTCWIZARD_GPIO_DP 36
 
+/* FIXME: These are, at least, omap850 specific, they
+   should go away from this machine file */
 #define OMAP_SPI1_BASE 0xfffc0800
 #define OMAP_SPI2_BASE 0xfffc1000
 
@@ -175,11 +177,15 @@ static struct platform_device *devices[] __initdata = {
  * SPI Controller
  */
 
-static struct omap_spi100k_platform_config htcwizard_spi_config = {
+static struct omap_spi100k_platform_config htcwizard_spi1_config = {
+	.num_cs = 1,
+};
+
+static struct omap_spi100k_platform_config htcwizard_spi2_config = {
 	.num_cs = 2,
 };
 
-static struct resource htcwizard_spi_resources[] = {
+static struct resource htcwizard_spi1_resources[] = {
 	{
 		.start	= OMAP_SPI1_BASE,
 		.end		= OMAP_SPI1_BASE + 0xff,
@@ -187,16 +193,33 @@ static struct resource htcwizard_spi_resources[] = {
 	},
 };
 
-struct platform_device htcwizard_spi = {
-	.name           = "omap1_spi100k",
-	.id             = 1,
-	.num_resources  = ARRAY_SIZE(htcwizard_spi_resources),
-	.resource       = htcwizard_spi_resources,
-	.dev            = {
-		.platform_data = &htcwizard_spi_config,
+static struct resource htcwizard_spi2_resources[] = {
+	{
+		.start	= OMAP_SPI2_BASE,
+		.end		= OMAP_SPI2_BASE + 0xff,
+		.flags	= IORESOURCE_MEM,
 	},
 };
 
+struct platform_device htcwizard_spi1 = {
+	.name           = "omap1_spi100k",
+	.id             = 1,
+	.num_resources  = ARRAY_SIZE(htcwizard_spi1_resources),
+	.resource       = htcwizard_spi1_resources,
+	.dev            = {
+		.platform_data = &htcwizard_spi1_config,
+	},
+};
+
+struct platform_device htcwizard_spi2 = {
+	.name           = "omap1_spi100k",
+	.id             = 2,
+	.num_resources  = ARRAY_SIZE(htcwizard_spi2_resources),
+	.resource       = htcwizard_spi2_resources,
+	.dev            = {
+		.platform_data = &htcwizard_spi2_config,
+	},
+};
 
 /*
  * Touchscreen
@@ -330,7 +353,8 @@ static void __init htcwizard_usb_otg(void)
 
 static void htcwizard_spi100k_init(void)
 {
-	platform_device_register(&htcwizard_spi);
+	platform_device_register(&htcwizard_spi1);
+	platform_device_register(&htcwizard_spi2);
 }
 
 static void __init htcwizard_init(void)
