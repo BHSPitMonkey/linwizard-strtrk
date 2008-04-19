@@ -44,6 +44,7 @@
 #include <asm/arch/irqs.h>
 #include <asm/arch/gpio.h>
 #include <asm/arch/keypad.h>
+#include <asm/arch/spi100k.h>
 
 #include <linux/spi/spi.h>
 #include <linux/spi/ads7846.h>
@@ -54,6 +55,9 @@
 
 #define HTCWIZARD_GPIO_DM 35
 #define HTCWIZARD_GPIO_DP 36
+
+#define OMAP_SPI1_BASE 0xfffc0800
+#define OMAP_SPI2_BASE 0xfffc1000
 
 static struct omap_lcd_config htcwizard_lcd_config __initdata = {
 	.ctrl_name	= "internal",
@@ -167,9 +171,35 @@ static struct platform_device *devices[] __initdata = {
 	&lcd_device,
 };
 
+/*
+ * SPI Controller
+ */
+
+static struct omap_spi100k_platform_config htcwizard_spi_config = {
+	.num_cs = 2,
+};
+
+static struct resource htcwizard_spi_resources[] = {
+	{
+		.start	= OMAP_SPI1_BASE,
+		.end		= OMAP_SPI1_BASE + 0xff,
+		.flags	= IORESOURCE_MEM,
+	},
+};
+
+struct platform_device htcwizard_spi = {
+	.name           = "omap1_spi100k",
+	.id             = 1,
+	.num_resources  = ARRAY_SIZE(htcwizard_spi_resources),
+	.resource       = htcwizard_spi_resources,
+	.dev            = {
+		.platform_data = &htcwizard_spi_config,
+	},
+};
+
 
 /*
- * SPI Stuff based on nokia770-board.c
+ * Touchscreen
  */
 static int ads7846_get_pendown_state(void)
 {
@@ -298,6 +328,11 @@ static void __init htcwizard_usb_otg(void)
 	omap_writel(omap_readl(OMAP730_MODE_1) & ~(1 << 11), OMAP730_MODE_1);
 }
 
+static void htcwizard_spi100k_init(void)
+{
+	platform_device_register(&htcwizard_spi);
+}
+
 static void __init htcwizard_init(void)
 {
   printk("HTC Wizard init.\n");
@@ -310,6 +345,8 @@ static void __init htcwizard_init(void)
 
   htcwizard_usb_otg();
   htcwizard_usb_enable();
+
+  htcwizard_spi100k_init();
 
   /* For testing.. Disable for now
 	* spi_register_board_info(htcwizard_spi_board_info,
