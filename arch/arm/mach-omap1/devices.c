@@ -24,7 +24,69 @@
 #include <asm/arch/mux.h>
 #include <asm/arch/gpio.h>
 
+#if defined(CONFIG_SPI_OMAP_100K)
+
+#include <asm/arch/spi100k.h>
+#include <linux/spi/spi.h>
+
+#define OMAP_SPI1_BASE	0xfffc0800
+#define OMAP_SPI2_BASE	0xfffc1000
+
 /*-------------------------------------------------------------------------*/
+
+static struct omap_spi100k_platform_config omap_spi1_config = {
+        .num_cs         = 2,
+};
+
+static struct resource omap_spi1_resources[] = {
+	{
+	        .start          = OMAP_SPI1_BASE,
+	        .end            = OMAP_SPI1_BASE + 0x7ff,
+        	.flags          = IORESOURCE_MEM,
+	},
+};
+
+struct platform_device omap_spi1 = {
+        .name           = "omap1_spi100k",
+        .id             = 1,
+        .num_resources  = ARRAY_SIZE(omap_spi1_resources),
+        .resource       = omap_spi1_resources,
+        .dev            = {
+                .platform_data = &omap_spi1_config,
+        },
+};
+
+static struct omap_spi100k_platform_config omap_spi2_config = {
+        .num_cs         = 2,
+};
+
+static struct resource omap_spi2_resources[] = {
+        {
+                .start          = OMAP_SPI2_BASE,
+                .end            = OMAP_SPI2_BASE + 0x7ff,
+                .flags          = IORESOURCE_MEM,
+        },
+};
+
+struct platform_device omap_spi2 = {
+        .name           = "omap1_spi100k",
+        .id             = 2,
+        .num_resources  = ARRAY_SIZE(omap_spi2_resources),
+        .resource       = omap_spi2_resources,
+        .dev            = {
+	        .platform_data = &omap_spi2_config,
+	},
+};
+
+static void omap_init_spi100k(void)
+{
+        platform_device_register(&omap_spi1);
+        platform_device_register(&omap_spi2);
+}
+
+#else
+static inline void omap_init_spi100k(void) {}
+#endif
 
 #if defined(CONFIG_RTC_DRV_OMAP) || defined(CONFIG_RTC_DRV_OMAP_MODULE)
 
@@ -168,6 +230,7 @@ static int __init omap1_init_devices(void)
 	omap_init_mbox();
 	omap_init_rtc();
 	omap_init_sti();
+	omap_init_spi100k();
 
 	return 0;
 }

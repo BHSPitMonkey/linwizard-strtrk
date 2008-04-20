@@ -771,20 +771,22 @@ static struct clk i2c_ick = {
 };
 
 static struct clk spi100k_ick = {
-   .name    = "spi100k_ick",
-   .id      = 1,
-   .parent     = &ck_ref,
-   .flags      = CLOCK_IN_OMAP850,
-   .enable		= &omap1_clk_enable_generic,
+   .name       = "spi100k_ick",
+   .id         = 1,
+   .parent     = &armper_ck.clk,
+   .flags      = CLOCK_IN_OMAP850 | CLOCK_IN_OMAP310 | CLOCK_IN_OMAP1510 | CLOCK_IN_OMAP16XX | CLOCK_IN_OMAP730 | VIRTUAL_CLOCK | CLOCK_NO_IDLE_PARENT | ALWAYS_ENABLED,
+   .enable     = &omap1_clk_enable_generic,
+   .disable    = &omap1_clk_disable_generic,
    .recalc     = &followparent_recalc,
 };
 
 static struct clk spi100k_fck = {
-   .name    = "spi100k_fck",
-   .id      = 1,
-   .parent     = &ck_ref,
-   .flags      = CLOCK_IN_OMAP850,
-   .enable		= &omap1_clk_enable_generic,
+   .name       = "spi100k_fck",
+   .id         = 1,
+   .parent     = &armper_ck.clk,
+   .flags      = CLOCK_IN_OMAP850 | CLOCK_IN_OMAP310 | CLOCK_IN_OMAP1510 | CLOCK_IN_OMAP16XX | CLOCK_IN_OMAP730 | VIRTUAL_CLOCK | CLOCK_NO_IDLE_PARENT | ALWAYS_ENABLED,
+   .enable     = &omap1_clk_enable_generic,
+   .disable    = &omap1_clk_disable_generic,
    .recalc     = &followparent_recalc,
 };
 

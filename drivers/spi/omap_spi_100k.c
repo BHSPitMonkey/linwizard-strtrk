@@ -664,7 +664,7 @@ static int __init omap1_spi100k_probe(struct platform_device *pdev)
 	struct omap1_spi100k	*spi100k;
 	struct resource		*r;
 	int			status = 0, i;
-	unsigned		num_chipselect;
+	unsigned		num_chipselect = 1;
 
 	if ( !pdev->id)
 		return -EINVAL;

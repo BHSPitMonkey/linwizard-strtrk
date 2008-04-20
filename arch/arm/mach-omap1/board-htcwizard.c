@@ -58,8 +58,6 @@
 
 /* FIXME: These are, at least, omap850 specific, they
    should go away from this machine file */
-#define OMAP_SPI1_BASE 0xfffc0800
-#define OMAP_SPI2_BASE 0xfffc1000
 
 static struct omap_lcd_config htcwizard_lcd_config __initdata = {
 	.ctrl_name	= "internal",
@@ -174,83 +172,33 @@ static struct platform_device *devices[] __initdata = {
 };
 
 /*
- * SPI Controller
- */
-
-static struct omap_spi100k_platform_config htcwizard_spi1_config = {
-	.num_cs = 1,
-};
-
-static struct omap_spi100k_platform_config htcwizard_spi2_config = {
-	.num_cs = 2,
-};
-
-static struct resource htcwizard_spi1_resources[] = {
-	{
-		.start	= OMAP_SPI1_BASE,
-		.end		= OMAP_SPI1_BASE + 0xff,
-		.flags	= IORESOURCE_MEM,
-	},
-};
-
-static struct resource htcwizard_spi2_resources[] = {
-	{
-		.start	= OMAP_SPI2_BASE,
-		.end		= OMAP_SPI2_BASE + 0xff,
-		.flags	= IORESOURCE_MEM,
-	},
-};
-
-struct platform_device htcwizard_spi1 = {
-	.name           = "omap1_spi100k",
-	.id             = 1,
-	.num_resources  = ARRAY_SIZE(htcwizard_spi1_resources),
-	.resource       = htcwizard_spi1_resources,
-	.dev            = {
-		.platform_data = &htcwizard_spi1_config,
-	},
-};
-
-struct platform_device htcwizard_spi2 = {
-	.name           = "omap1_spi100k",
-	.id             = 2,
-	.num_resources  = ARRAY_SIZE(htcwizard_spi2_resources),
-	.resource       = htcwizard_spi2_resources,
-	.dev            = {
-		.platform_data = &htcwizard_spi2_config,
-	},
-};
-
-/*
  * Touchscreen
  */
 static int ads7846_get_pendown_state(void)
 {
-	return !omap_get_gpio_datain(ADS7846_PENDOWN_GPIO);
+	return !omap_get_gpio_datain(76);
 }
 
 /* Values below need to be verified */
-static struct ads7846_platform_data htcwizard_ads7846_platform_data __initdata = {
-	.x_max		= 0x0fff,
-	.y_max		= 0x0fff,
-	.x_plate_ohms	= 180,
-	.pressure_max	= 255,
-	.debounce_max	= 10,
-	.debounce_tol	= 3,
-	.debounce_rep	= 1,
+static struct ads7846_platform_data htcwizard_ads7846_platform_data = {
+	.model			= 7846,
+	.vref_delay_usecs	= 100, /* internal, no capacitor */
+	.x_plate_ohms		= 419,
+	.y_plate_ohms		= 486,
 	.get_pendown_state	= ads7846_get_pendown_state,
 };
 
 /* Values below need to be verified */
 static struct spi_board_info htcwizard_spi_board_info[] __initdata = {
-	[0] = {
+	{
 		.modalias       = "ads7846",
 		.bus_num        = 2,
 		.chip_select    = 0,
-		.max_speed_hz   = 2500000,
-		.irq		= OMAP_GPIO_IRQ(15),
+		.max_speed_hz   = 120000 /* max sample rate at 3V */
+                                        * 26 /* command + data + overhead */,
+		.irq		= OMAP_GPIO_IRQ(76),
 		.platform_data	= &htcwizard_ads7846_platform_data,
-	},
+	}
 };
 
 /*
@@ -351,12 +299,6 @@ static void __init htcwizard_usb_otg(void)
 	omap_writel(omap_readl(OMAP730_MODE_1) & ~(1 << 11), OMAP730_MODE_1);
 }
 
-static void htcwizard_spi100k_init(void)
-{
-	platform_device_register(&htcwizard_spi1);
-	platform_device_register(&htcwizard_spi2);
-}
-
 static void __init htcwizard_init(void)
 {
   printk("HTC Wizard init.\n");
@@ -370,13 +312,11 @@ static void __init htcwizard_init(void)
   htcwizard_usb_otg();
   htcwizard_usb_enable();
 
-  htcwizard_spi100k_init();
-
-  /* For testing.. Disable for now
-	* spi_register_board_info(htcwizard_spi_board_info,
-				ARRAY_SIZE(htcwizard_spi_board_info));
+  /* For testing.. Disable for now */
+  spi_register_board_info(htcwizard_spi_board_info,
+			ARRAY_SIZE(htcwizard_spi_board_info));
   
-  ads7846_dev_init(); */
+  ads7846_dev_init(); 
 
 }
 
