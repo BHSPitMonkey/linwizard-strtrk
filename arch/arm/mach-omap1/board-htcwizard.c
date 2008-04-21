@@ -299,6 +299,19 @@ static void __init htcwizard_usb_otg(void)
 	omap_writel(omap_readl(OMAP730_MODE_1) & ~(1 << 11), OMAP730_MODE_1);
 }
 
+static void __init htcwizard_spi_mux(void)
+{
+	/* Setup MUX config for SPI */
+	omap_writel(omap_readl(OMAP850_IO_CONF_6) |  0x00088880, OMAP850_IO_CONF_6);
+	omap_writel(omap_readl(OMAP850_IO_CONF_6) &  0x00077770, OMAP850_IO_CONF_6);
+
+	omap_writel(omap_readl(OMAP850_IO_CONF_8) |  0x01000000, OMAP850_IO_CONF_8);
+	omap_writel(omap_readl(OMAP850_IO_CONF_8) & ~0x10110000, OMAP850_IO_CONF_8);
+
+	omap_writel(omap_readl(OMAP850_IO_CONF_9) |  0x00000010, OMAP850_IO_CONF_9);
+	omap_writel(omap_readl(OMAP850_IO_CONF_9) & ~0x00000001, OMAP850_IO_CONF_9);
+}
+
 static void __init htcwizard_init(void)
 {
   printk("HTC Wizard init.\n");
@@ -311,6 +324,7 @@ static void __init htcwizard_init(void)
 
   htcwizard_usb_otg();
   htcwizard_usb_enable();
+  htcwizard_spi_mux();
 
   /* For testing.. Disable for now */
   spi_register_board_info(htcwizard_spi_board_info,
