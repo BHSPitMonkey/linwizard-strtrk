@@ -335,10 +335,8 @@ htcwizard_mmc_init(void)
    
 	printk("MMC host reset done: remaining tries: %i\n", tries);
 
-	/* force mode 0 for D_SMC_DAT3, D_SMC_DAT2, D_SMC, no pull up enable */
-	omap_writel(omap_readl(OMAP850_IO_CONF_2) & ~(0xF << 8), OMAP850_IO_CONF_2);
-	omap_writel(omap_readl(OMAP850_IO_CONF_2) & ~(0xF << 12), OMAP850_IO_CONF_2);
-	omap_writel(omap_readl(OMAP850_IO_CONF_2) & ~(0xF << 16), OMAP850_IO_CONF_2);
+	/* Set MUX config for SDMC */
+	omap_writel(omap_readl(OMAP850_IO_CONF_2) & ~0x0008FF00, OMAP850_IO_CONF_2);
 }
 
 
