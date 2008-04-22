@@ -46,6 +46,8 @@
 #define OMAP850_DSPREG_SIZE	SZ_128K
 #define OMAP850_DSPREG_START	0xE1000000
 
+#define OMAP850_SPI1_BASE	0xfffc0800
+#define OMAP850_SPI2_BASE	0xfffc1000
 /*
  * ----------------------------------------------------------------------------
  * OMAP850 specific configuration registers

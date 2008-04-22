@@ -24,6 +24,9 @@
 #include <asm/atomic.h>
 #include <asm/device.h>
 
+#define DEBUG
+#define VERBOSE_DEBUG
+
 #define DEVICE_NAME_SIZE	50
 /* DEVICE_NAME_HALF is really less than half to accommodate slop */
 #define DEVICE_NAME_HALF	__stringify(20)

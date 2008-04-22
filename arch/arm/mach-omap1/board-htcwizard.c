@@ -310,6 +310,11 @@ static void __init htcwizard_spi_mux(void)
 
 	omap_writel(omap_readl(OMAP850_IO_CONF_9) |  0x00000010, OMAP850_IO_CONF_9);
 	omap_writel(omap_readl(OMAP850_IO_CONF_9) & ~0x00000001, OMAP850_IO_CONF_9);
+
+	/* configure spi setup registers */
+	omap_writew(0xfffe, OMAP850_SPI2_BASE + 0x02);
+	omap_writew(0x0000, OMAP850_SPI2_BASE + 0x08);
+	omap_writew(0x7ff8, OMAP850_SPI2_BASE + 0x0e);
 }
 
 static void __init htcwizard_init(void)
