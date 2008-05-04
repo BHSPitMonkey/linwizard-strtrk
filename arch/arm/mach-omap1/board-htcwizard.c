@@ -315,31 +315,6 @@ static void __init htcwizard_usb_otg(void)
 	omap_writel(omap_readl(OMAP730_MODE_1) & ~(1 << 11), OMAP730_MODE_1);
 }
 
-/* 
- * mmc_init from board-tornado
- * by Nicolas Schichan.
- */
-static void __init
-htcwizard_mmc_init(void)
-{
-	unsigned int tries;
-
-	/* put mmc host into reset ... */
-	omap_writew(1, OMAP_MMC_REG_SYSC);
-
-	tries = 100;
-	while (omap_readw(OMAP_MMC_REG_SYSS) == 0 && tries) {
-		mdelay(50);
-		--tries;
-	}
-   
-	printk("MMC host reset done: remaining tries: %i\n", tries);
-
-	/* Set MUX config for SDMC */
-	omap_writel(omap_readl(OMAP850_IO_CONF_2) & ~0x0008FF00, OMAP850_IO_CONF_2);
-}
-
-
 static void __init htcwizard_init(void)
 {
   printk("HTC Wizard init.\n");

@@ -1551,52 +1551,6 @@ static int __init mmc_omap_probe(struct platform_device *pdev)
 		goto err_free_iclk;
 	}
 
-	/* REVISIT:
- 	 * Also, use minfo->cover to decide how to manage
-	 * the card detect sensing.
-	 * LINWIZARD - this code removed from upstream! Please move.
-	 */
-	host->power_pin = minfo->power_pin;
-	host->switch_pin = minfo->switch_pin;
-	host->wp_pin = minfo->wp_pin;
-	host->use_dma = 1;
-	host->dma_ch = -1;
-
-	host->irq = irq;
-	host->phys_base = host->mem_res->start;
-	host->virt_base = (void __iomem *) IO_ADDRESS(host->phys_base);
-
-	mmc->ops = &mmc_omap_ops;
-	mmc->f_min = 400000;
-	mmc->f_max = 24000000;
-	mmc->ocr_avail = MMC_VDD_32_33 | MMC_VDD_33_34;
-	mmc->caps = MMC_CAP_MULTIWRITE;
-
-	if (minfo->wire4)
-		 mmc->caps |= MMC_CAP_4_BIT_DATA;
-
-	/* Use scatterlist DMA to reduce per-transfer costs.
-	 * NOTE max_seg_size assumption that small blocks aren't
-	 * normally used (except e.g. for reading SD registers).
-	 */
-	mmc->max_phys_segs = 32;
-	mmc->max_hw_segs = 32;
-	mmc->max_blk_size = 2048;	/* BLEN is 11 bits (+1) */
-	mmc->max_blk_count = 2048;	/* NBLK is 11 bits (+1) */
-	mmc->max_req_size = mmc->max_blk_size * mmc->max_blk_count;
-	mmc->max_seg_size = mmc->max_req_size;
-
-	if (host->power_pin >= 0) {
-		if ((ret = omap_request_gpio(host->power_pin)) != 0) {
-			dev_err(mmc_dev(host->mmc),
-				"Unable to get GPIO pin for MMC power\n");
-			goto err_free_fclk;
-		}
-		omap_set_gpio_direction(host->power_pin, 0);
-	}
-
-	/* LINWIZARD - End deprecated code block. */
-
 	ret = request_irq(host->irq, mmc_omap_irq, 0, DRIVER_NAME, host);
 	if (ret)
 		goto err_free_fclk;
