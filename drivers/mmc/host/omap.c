@@ -72,21 +72,21 @@
 #define OMAP_MMC_REG_SYSC 0x32
 #define OMAP_MMC_REG_SYSS 0x34
 
-#endif
+#else
 
 #define	OMAP_MMC_REG_CMD	0x00
 #define	OMAP_MMC_REG_ARGL	0x04
 #define	OMAP_MMC_REG_ARGH	0x08
 #define	OMAP_MMC_REG_CON	0x0c
 #define	OMAP_MMC_REG_STAT	0x10
-#define	OMAP_MMC_REG_IE		0x14
+#define	OMAP_MMC_REG_IE   0x14
 #define	OMAP_MMC_REG_CTO	0x18
 #define	OMAP_MMC_REG_DTO	0x1c
 #define	OMAP_MMC_REG_DATA	0x20
 #define	OMAP_MMC_REG_BLEN	0x24
 #define	OMAP_MMC_REG_NBLK	0x28
 #define	OMAP_MMC_REG_BUF	0x2c
-#define OMAP_MMC_REG_SDIO	0x34
+#define  OMAP_MMC_REG_SDIO 0x34
 #define	OMAP_MMC_REG_REV	0x3c
 #define	OMAP_MMC_REG_RSP0	0x40
 #define	OMAP_MMC_REG_RSP1	0x44
@@ -99,6 +99,8 @@
 #define	OMAP_MMC_REG_IOSR	0x60
 #define	OMAP_MMC_REG_SYSC	0x64
 #define	OMAP_MMC_REG_SYSS	0x68
+
+#endif
 
 #define	OMAP_MMC_STAT_CARD_ERR		(1 << 14)
 #define	OMAP_MMC_STAT_CARD_IRQ		(1 << 13)
