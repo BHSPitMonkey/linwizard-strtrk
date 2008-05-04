@@ -1570,7 +1570,6 @@ static int __init _omap_gpio_init(void)
 			gpio_count = 32; /* 850 has 32-bit GPIOs */
 		}
 
->>>>>>> v2.6.25-omap1:arch/arm/plat-omap/gpio.c
 #if defined(CONFIG_ARCH_OMAP24XX) || defined(CONFIG_ARCH_OMAP34XX)
 		if (bank->method == METHOD_GPIO_24XX) {
 			static const u32 non_wakeup_gpios[] = {
