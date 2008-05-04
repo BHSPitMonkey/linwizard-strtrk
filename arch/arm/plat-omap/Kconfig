@@ -32,6 +32,16 @@ config OMAP_DEBUG_LEDS
 	depends on OMAP_DEBUG_DEVICES
 	default y if LEDS || LEDS_OMAP_DEBUG
 
+config OMAP_DEBUG_SRAM_PATCH
+	bool "Extra sanity checking for SRAM patch code"
+	depends on ARCH_OMAP
+	default y
+	help
+	  Say Y here if you want the kernel to use extra caution
+	  in patching SRAM virtual addresses.  If you are
+	  confident in your SRAM code, disabling this will save
+	  about 600 bytes.
+
 config OMAP_RESET_CLOCKS
 	bool "Reset unused clocks during boot"
 	depends on ARCH_OMAP
@@ -103,17 +113,6 @@ config OMAP_MUX_WARNINGS
 	  to change the pin multiplexing setup.  When there are no warnings
 	  printed, it's safe to deselect OMAP_MUX for your product.
 
-config OMAP_STI
-	bool "STI/XTI support"
-	depends on ARCH_OMAP16XX || ARCH_OMAP24XX
-	default n
-
-config OMAP_STI_CONSOLE
-	bool "STI console support"
-	depends on OMAP_STI
-	help
-	  This enables a console driver by way of STI/XTI.
-
 config OMAP_MCBSP
 	bool "McBSP support"
 	depends on ARCH_OMAP
@@ -123,7 +122,7 @@ config OMAP_MCBSP
 	  Buffered Serial Port.
 
 config OMAP_MMU_FWK
-	tristate "MMU framework support"
+	bool "MMU framework support"
 	depends on ARCH_OMAP
 	default n
 	help
@@ -200,8 +199,6 @@ config OMAP_SERIAL_WAKE
 	  Select this option if you want to have your system wake up
 	  to data on the serial RX line. This allows you to wake the
 	  system from serial console.
-
-source "arch/arm/plat-omap/dsp/Kconfig"
 
 endmenu
 

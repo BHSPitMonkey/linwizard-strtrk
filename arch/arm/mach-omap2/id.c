@@ -17,16 +17,22 @@
 
 #include <asm/io.h>
 
-#if defined(CONFIG_ARCH_OMAP2420)
-#define OMAP24XX_TAP_BASE	io_p2v(0x48014000)
-#endif
+#include <asm/arch/control.h>
 
-#if defined(CONFIG_ARCH_OMAP2430)
-#define OMAP24XX_TAP_BASE	io_p2v(0x4900A000)
+#if defined(CONFIG_ARCH_OMAP2420)
+#define TAP_BASE	io_p2v(0x48014000)
+#elif defined(CONFIG_ARCH_OMAP2430)
+#define TAP_BASE	io_p2v(0x4900A000)
+#elif defined(CONFIG_ARCH_OMAP34XX)
+#define TAP_BASE	io_p2v(0x4830A000)
 #endif
 
 #define OMAP_TAP_IDCODE		0x0204
+#if defined(CONFIG_ARCH_OMAP34XX)
+#define OMAP_TAP_PROD_ID	0x0210
+#else
 #define OMAP_TAP_PROD_ID	0x0208
+#endif
 
 #define OMAP_TAP_DIE_ID_0	0x0218
 #define OMAP_TAP_DIE_ID_1	0x021C
@@ -58,11 +64,38 @@ static struct omap_id omap_ids[] __initdata = {
 
 static u32 __init read_tap_reg(int reg)
 {
-	return __raw_readl(TAP_BASE + reg);
+	unsigned int regval = 0;
+	u32 cpuid;
+
+	/* Reading the IDCODE register on 3430 ES1 results in a
+	 * data abort as the register is not exposed on the OCP
+	 * Hence reading the Cortex Rev
+	 */
+	cpuid = read_cpuid(CPUID_ID);
+
+	/* If the processor type is Cortex-A8 and the revision is 0x0
+	 * it means its Cortex r0p0 which is 3430 ES1
+	 */
+	if ((((cpuid >> 4) & 0xFFF) == 0xC08) && ((cpuid & 0xF) == 0x0)) {
+		switch (reg) {
+		case OMAP_TAP_IDCODE  : regval = 0x0B7AE02F; break;
+		/* Making DevType as 0xF in ES1 to differ from ES2 */
+		case OMAP_TAP_PROD_ID : regval = 0x000F00F0; break;
+		case OMAP_TAP_DIE_ID_0: regval = 0x01000000; break;
+		case OMAP_TAP_DIE_ID_1: regval = 0x1012d687; break;
+		case OMAP_TAP_DIE_ID_2:	regval = 0x00000000; break;
+		case OMAP_TAP_DIE_ID_3:	regval = 0x2d2c0000; break;
+		}
+	} else
+		regval = __raw_readl(TAP_BASE + reg);
+
+	return regval;
+
 }
 
 void __init omap2_check_revision(void)
 {
+	int ctrl_status = 0;
 	int i, j;
 	u32 idcode;
 	u32 prod_id;
@@ -92,6 +125,17 @@ void __init omap2_check_revision(void)
 		prod_id, dev_type);
 #endif
 
+	/*
+	 * Detection for 34xx ES2.0 and above can be done with just
+	 * hawkeye and rev. See TRM 1.5.2 Device Identification.
+	 * Note that rev cannot be used directly as ES1.0 uses value 0.
+	 */
+	if (hawkeye == 0xb7ae) {
+		system_rev = 0x34300000 | ((1 + rev) << 12);
+		pr_info("OMAP%04x ES2.%i\n", system_rev >> 16, rev);
+		return;
+	}
+
 	/* Check hawkeye ids */
 	for (i = 0; i < ARRAY_SIZE(omap_ids); i++) {
 		if (hawkeye == omap_ids[i].hawkeye)
@@ -114,23 +158,44 @@ void __init omap2_check_revision(void)
 				omap_ids[i].type >> 16);
 		j = i;
 	}
-	system_rev = omap_ids[j].type;
 
-	system_rev |= rev << 8;
-
-	/* REVISIT:
-	 * OMAP 3430 ES 1.0 does't populate IDCODE registers
-	 * Following lines have to be revisited for next version
+	/*
+	 * system_rev encoding is as follows
+	 * system_rev & 0xff000000 -> Omap Class (24xx/34xx)
+	 * system_rev & 0xfff00000 -> Omap Sub Class (242x/343x)
+	 * system_rev & 0xffff0000 -> Omap type (2420/2422/2423/2430/3430)
+	 * system_rev & 0x0000f000 -> Silicon revision (ES1, ES2 )
+	 * system_rev & 0x00000700 -> Device Type ( EMU/HS/GP/BAD )
+	 * system_rev & 0x000000c0 -> IDCODE revision[6:7]
+	 * system_rev & 0x0000003f -> sys_boot[0:5]
 	 */
+	/* Embedding the ES revision info in type field */
+	system_rev = omap_ids[j].type;
+	/* Also add IDCODE revision info only two lower bits */
+	system_rev |= ((rev & 0x3) << 6);
 
-#ifndef CONFIG_ARCH_OMAP3
-	system_rev |= 0x24;
-#else
-	system_rev |= 0x34;
-#endif
+	/* Add in the device type and sys_boot fields (see above) */
+	if (cpu_is_omap24xx()) {
+		i = OMAP24XX_CONTROL_STATUS;
+	} else if (cpu_is_omap343x()) {
+		i = OMAP343X_CONTROL_STATUS;
+	} else {
+		printk(KERN_ERR "id: unknown CPU type\n");
+		BUG();
+	}
+	ctrl_status = omap_ctrl_readl(i);
+	system_rev |= (ctrl_status & (OMAP2_SYSBOOT_5_MASK |
+				      OMAP2_SYSBOOT_4_MASK |
+				      OMAP2_SYSBOOT_3_MASK |
+				      OMAP2_SYSBOOT_2_MASK |
+				      OMAP2_SYSBOOT_1_MASK |
+				      OMAP2_SYSBOOT_0_MASK));
+	system_rev |= (ctrl_status & OMAP2_DEVICETYPE_MASK);
+
 	pr_info("OMAP%04x", system_rev >> 16);
 	if ((system_rev >> 8) & 0x0f)
-		printk("%x", (system_rev >> 8) & 0x0f);
+		printk("ES%x", (system_rev >> 12) & 0xf);
 	printk("\n");
+
 }
 

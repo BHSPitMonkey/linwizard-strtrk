@@ -20,14 +20,15 @@
 #include <asm/mach/map.h>
 
 #include <asm/arch/tc.h>
+#include <asm/arch/control.h>
 #include <asm/arch/board.h>
+#include <asm/arch/mmc.h>
 #include <asm/arch/mux.h>
 #include <asm/arch/gpio.h>
 #include <asm/arch/menelaus.h>
+#include <asm/arch/dsp_common.h>
 
 #if	defined(CONFIG_OMAP_DSP) || defined(CONFIG_OMAP_DSP_MODULE)
-
-#include "../plat-omap/dsp/dsp_common.h"
 
 static struct dsp_platform_data dsp_pdata = {
 	.kdev_list = LIST_HEAD_INIT(dsp_pdata.kdev_list),
@@ -162,25 +163,38 @@ static inline void omap_init_kp(void) {}
 
 /*-------------------------------------------------------------------------*/
 
-#if	defined(CONFIG_MMC_OMAP) || defined(CONFIG_MMC_OMAP_MODULE)
+#if	defined(CONFIG_MMC_OMAP) || defined(CONFIG_MMC_OMAP_MODULE) \
+	|| defined(CONFIG_MMC_OMAP_HS) || defined(CONFIG_MMC_OMAP_HS_MODULE)
 
-#ifdef CONFIG_ARCH_OMAP24XX
+#if defined(CONFIG_ARCH_OMAP24XX) || defined(CONFIG_ARCH_OMAP34XX)
 #define	OMAP_MMC1_BASE		0x4809c000
-#define OMAP_MMC1_INT		INT_24XX_MMC_IRQ
-#else
-#define	OMAP_MMC1_BASE		0xfffb7800
-#define OMAP_MMC1_INT		INT_MMC
-#endif
-#define	OMAP_MMC2_BASE		0xfffb7c00	/* omap16xx only */
+#define	OMAP_MMC1_END		OMAP_MMC1_BASE + 0x1fc
+#define	OMAP_MMC1_INT		INT_24XX_MMC_IRQ
 
-static struct omap_mmc_conf mmc1_conf;
+#define	OMAP_MMC2_BASE		0x480b4000
+#define	OMAP_MMC2_END		OMAP_MMC2_BASE + 0x1fc
+#define	OMAP_MMC2_INT		INT_24XX_MMC2_IRQ
+
+#else
+
+#define	OMAP_MMC1_BASE		0xfffb7800
+#define	OMAP_MMC1_END		OMAP_MMC1_BASE + 0x7f
+#define OMAP_MMC1_INT		INT_MMC
+
+#define	OMAP_MMC2_BASE		0xfffb7c00	/* omap16xx only */
+#define	OMAP_MMC2_END		OMAP_MMC2_BASE + 0x7f
+#define	OMAP_MMC2_INT		INT_1610_MMC2
+
+#endif
+
+static struct omap_mmc_platform_data mmc1_data;
 
 static u64 mmc1_dmamask = 0xffffffff;
 
 static struct resource mmc1_resources[] = {
 	{
 		.start		= OMAP_MMC1_BASE,
-		.end		= OMAP_MMC1_BASE + 0x7f,
+		.end		= OMAP_MMC1_END,
 		.flags		= IORESOURCE_MEM,
 	},
 	{
@@ -194,15 +208,16 @@ static struct platform_device mmc_omap_device1 = {
 	.id		= 1,
 	.dev = {
 		.dma_mask	= &mmc1_dmamask,
-		.platform_data	= &mmc1_conf,
+		.platform_data	= &mmc1_data,
 	},
 	.num_resources	= ARRAY_SIZE(mmc1_resources),
 	.resource	= mmc1_resources,
 };
 
-#ifdef	CONFIG_ARCH_OMAP16XX
+#if defined(CONFIG_ARCH_OMAP16XX) || defined(CONFIG_ARCH_OMAP243X) || \
+	defined(CONFIG_ARCH_OMAP34XX)
 
-static struct omap_mmc_conf mmc2_conf;
+static struct omap_mmc_platform_data mmc2_data;
 
 static u64 mmc2_dmamask = 0xffffffff;
 
@@ -210,11 +225,11 @@ static u64 mmc2_dmamask = 0xffffffff;
 static struct resource mmc2_resources[] = {
 	{
 		.start		= OMAP_MMC2_BASE,
-		.end		= OMAP_MMC2_BASE + 0x7f,
+		.end		= OMAP_MMC2_END,
 		.flags		= IORESOURCE_MEM,
 	},
 	{
-		.start		= INT_1610_MMC2,
+		.start		= OMAP_MMC2_INT,
 		.flags		= IORESOURCE_IRQ,
 	},
 };
@@ -224,7 +239,7 @@ static struct platform_device mmc_omap_device2 = {
 	.id		= 2,
 	.dev = {
 		.dma_mask	= &mmc2_dmamask,
-		.platform_data	= &mmc2_conf,
+		.platform_data	= &mmc2_data,
 	},
 	.num_resources	= ARRAY_SIZE(mmc2_resources),
 	.resource	= mmc2_resources,
@@ -236,10 +251,6 @@ static void __init omap_init_mmc(void)
 	const struct omap_mmc_config	*mmc_conf;
 	const struct omap_mmc_conf	*mmc;
 
-	/* REVISIT: 2430 has HS MMC */
-	if (cpu_is_omap2430() || cpu_is_omap34xx())
-		return;
-
 	/* NOTE:  assumes MMC was never (wrongly) enabled */
 	mmc_conf = omap_get_config(OMAP_TAG_MMC, struct omap_mmc_config);
 	if (!mmc_conf)
@@ -247,6 +258,20 @@ static void __init omap_init_mmc(void)
 
 	/* block 1 is always available and has just one pinout option */
 	mmc = &mmc_conf->mmc[0];
+
+	if (cpu_is_omap2430() || cpu_is_omap34xx()) {
+		if (mmc->enabled)
+			(void) platform_device_register(&mmc_omap_device1);
+
+#if defined(CONFIG_ARCH_OMAP243X) || defined(CONFIG_ARCH_OMAP34XX)
+		mmc = &mmc_conf->mmc[1];
+		if (mmc->enabled)
+			(void) platform_device_register(&mmc_omap_device2);
+#endif
+
+		return;
+	}
+
 	if (mmc->enabled) {
 		if (cpu_is_omap24xx()) {
 			omap_cfg_reg(H18_24XX_MMC_CMD);
@@ -281,6 +306,7 @@ static void __init omap_init_mmc(void)
 				omap_cfg_reg(MMC_DAT3);
 			}
 		}
+#if defined(CONFIG_ARCH_OMAP2420)
 		if (mmc->internal_clock) {
 			/*
 			 * Use internal loop-back in MMC/SDIO
@@ -288,13 +314,14 @@ static void __init omap_init_mmc(void)
 			 */
 #ifdef CONFIG_ARCH_OMAP24XX
 			if (cpu_is_omap24xx()) {
-				u32 v = omap_readl(OMAP2_CONTROL_DEVCONF);
-				v |= (1 << 24);
-				omap_writel(v, OMAP2_CONTROL_DEVCONF);
+				u32 v = omap_ctrl_readl(OMAP2_CONTROL_DEVCONF0);
+				v |= (1 << 24); /* not used in 243x */
+				omap_ctrl_writel(v, OMAP2_CONTROL_DEVCONF0);
 			}
 #endif
 		}
-		mmc1_conf = *mmc;
+#endif
+		mmc1_data.conf = *mmc;
 		(void) platform_device_register(&mmc_omap_device1);
 	}
 
@@ -323,13 +350,32 @@ static void __init omap_init_mmc(void)
 		if (cpu_is_omap1710())
 			omap_writel(omap_readl(MOD_CONF_CTRL_1) | (1 << 24),
 				     MOD_CONF_CTRL_1);
-		mmc2_conf = *mmc;
+		mmc2_data.conf = *mmc;
 		(void) platform_device_register(&mmc_omap_device2);
 	}
 #endif
 	return;
 }
+
+void omap_set_mmc_info(int host, const struct omap_mmc_platform_data *info)
+{
+	switch (host) {
+	case 1:
+		mmc1_data = *info;
+		break;
+#if defined(CONFIG_ARCH_OMAP16XX) || defined(CONFIG_ARCH_OMAP243X) || \
+	defined(CONFIG_ARCH_OMAP34XX)
+	case 2:
+		mmc2_data = *info;
+		break;
+#endif
+	default:
+		BUG();
+	}
+}
+
 #else
+void omap_set_mmc_info(int host, const struct omap_mmc_platform_data *info) {}
 static inline void omap_init_mmc(void) {}
 #endif
 
@@ -381,7 +427,9 @@ static inline void omap_init_uwire(void) {}
 
 #if	defined(CONFIG_OMAP_WATCHDOG) || defined(CONFIG_OMAP_WATCHDOG_MODULE)
 
-#ifdef CONFIG_ARCH_OMAP24XX
+#if defined(CONFIG_ARCH_OMAP34XX)
+#define	OMAP_WDT_BASE		0x48314000
+#elif defined(CONFIG_ARCH_OMAP24XX)
 
 #ifdef CONFIG_ARCH_OMAP2430
 /* WDT2 */
@@ -481,10 +529,6 @@ static int __init omap_init_devices(void)
 	omap_init_uwire();
 	omap_init_wdt();
 	omap_init_rng();
-	if (!cpu_is_omap2430() && !cpu_is_omap34xx()) {
-					// Broken in linwizard
-					//		omap_init_i2c();
-	}
 	return 0;
 }
 arch_initcall(omap_init_devices);

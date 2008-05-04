@@ -468,10 +468,11 @@ config ARCH_DAVINCI
 config ARCH_OMAP
 	bool "TI OMAP"
 	select GENERIC_GPIO
+	select HAVE_GPIO_LIB
 	select GENERIC_TIME
 	select GENERIC_CLOCKEVENTS
 	help
-	  Support for TI's OMAP platform (OMAP1, OMAP2 and OMAP3).
+	  Support for TI's OMAP platform (OMAP1 and OMAP2).
 
 config ARCH_MSM7X00A
 	bool "Qualcomm MSM7X00A"
@@ -1173,6 +1174,11 @@ source "drivers/rtc/Kconfig"
 source "drivers/dma/Kconfig"
 
 source "drivers/dca/Kconfig"
+
+if ARCH_OMAP
+source "drivers/cbus/Kconfig"
+source "drivers/dsp/dspgateway/Kconfig"
+endif
 
 endmenu
 

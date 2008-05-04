@@ -114,8 +114,9 @@
 	!defined(CONFIG_ARCH_OMAP8xx) && \
 	!defined(CONFIG_ARCH_OMAP15XX) && \
 	!defined(CONFIG_ARCH_OMAP16XX) && \
-	!defined(CONFIG_ARCH_OMAP24XX)
-#warning "Power management for this processor not implemented yet"
+	!defined(CONFIG_ARCH_OMAP24XX) && \
+	!defined(CONFIG_ARCH_OMAP34XX)
+#error "Power management for this processor not implemented yet"
 #endif
 
 #ifndef __ASSEMBLER__
@@ -141,8 +142,13 @@ void clk_deny_idle(struct clk *clk);
 
 extern void omap_pm_idle(void);
 extern void omap_pm_suspend(void);
+#ifdef CONFIG_PM
 extern void omap2_block_sleep(void);
 extern void omap2_allow_sleep(void);
+#else
+static inline void omap2_block_sleep(void) { }
+static inline void omap2_allow_sleep(void) { }
+#endif
 extern void omap730_cpu_suspend(unsigned short, unsigned short);
 extern void omap850_cpu_suspend(unsigned short, unsigned short);
 extern void omap1510_cpu_suspend(unsigned short, unsigned short);

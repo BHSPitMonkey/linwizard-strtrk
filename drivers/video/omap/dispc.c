@@ -879,20 +879,24 @@ static irqreturn_t omap_dispc_irq_handler(int irq, void *dev)
 
 static int get_dss_clocks(void)
 {
-	if (IS_ERR((dispc.dss_ick = clk_get(dispc.fbdev->dev, "dss_ick")))) {
-		dev_err(dispc.fbdev->dev, "can't get dss_ick\n");
+	char *dss_ick = "dss_ick";
+	char *dss1_fck = cpu_is_omap34xx() ? "dss1_alwon_fck" : "dss1_fck";
+	char *tv_fck = cpu_is_omap34xx() ? "dss_tv_fck" : "dss_54m_fck";
+
+	if (IS_ERR((dispc.dss_ick = clk_get(dispc.fbdev->dev, dss_ick)))) {
+		dev_err(dispc.fbdev->dev, "can't get %s", dss_ick);
 		return PTR_ERR(dispc.dss_ick);
 	}
 
-	if (IS_ERR((dispc.dss1_fck = clk_get(dispc.fbdev->dev, "dss1_fck")))) {
-		dev_err(dispc.fbdev->dev, "can't get dss1_fck\n");
+	if (IS_ERR((dispc.dss1_fck = clk_get(dispc.fbdev->dev, dss1_fck)))) {
+		dev_err(dispc.fbdev->dev, "can't get %s", dss1_fck);
 		clk_put(dispc.dss_ick);
 		return PTR_ERR(dispc.dss1_fck);
 	}
 
 	if (IS_ERR((dispc.dss_54m_fck =
-				clk_get(dispc.fbdev->dev, "dss_54m_fck")))) {
-		dev_err(dispc.fbdev->dev, "can't get dss_54m_fck\n");
+				clk_get(dispc.fbdev->dev, tv_fck)))) {
+		dev_err(dispc.fbdev->dev, "can't get %s", tv_fck);
 		clk_put(dispc.dss_ick);
 		clk_put(dispc.dss1_fck);
 		return PTR_ERR(dispc.dss_54m_fck);
@@ -1401,7 +1405,7 @@ static int omap_dispc_init(struct omapfb_device *fbdev, int ext_mode,
 	dispc_write_reg(DISPC_CONFIG, l);
 
 	l = dispc_read_reg(DISPC_IRQSTATUS);
-	dispc_write_reg(l, DISPC_IRQSTATUS);
+	dispc_write_reg(DISPC_IRQSTATUS, l);
 
 	/* Enable those that we handle always */
 	omap_dispc_enable_irqs(DISPC_IRQ_FRAMEMASK);

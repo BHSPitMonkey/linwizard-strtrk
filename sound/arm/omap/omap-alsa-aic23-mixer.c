@@ -37,7 +37,8 @@
  *				Initial version with aic23 codec for osk5912
  */
 
-#include <sound/driver.h>
+#include <linux/kernel.h>
+
 #include <asm/arch/aic23.h>
 
 #include <asm/arch/omap-alsa.h>

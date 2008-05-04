@@ -10,6 +10,8 @@
  * published by the Free Software Foundation.
  */
 
+#include <linux/cpufreq.h>
+
 #ifndef __ARCH_ARM_OMAP_CLOCK_H
 #define __ARCH_ARM_OMAP_CLOCK_H
 
@@ -33,14 +35,25 @@ struct dpll_data {
 	void __iomem		*mult_div1_reg;
 	u32			mult_mask;
 	u32			div1_mask;
-	void __iomem		*div2_reg;
-	u32			div2_mask;
+	u16			last_rounded_m;
+	u8			last_rounded_n;
+	unsigned long		last_rounded_rate;
+	unsigned int		rate_tolerance;
+	u16			max_multiplier;
+	u8			max_divider;
+	u32			max_tolerance;
 #  if defined(CONFIG_ARCH_OMAP3)
+	u32			freqsel_mask;
+	u8			modes;
 	void __iomem		*control_reg;
 	u32			enable_mask;
 	u8			auto_recal_bit;
 	u8			recal_en_bit;
 	u8			recal_st_bit;
+	void __iomem		*autoidle_reg;
+	u32			autoidle_mask;
+	void __iomem		*idlest_reg;
+	u8			idlest_bit;
 #  endif
 };
 
@@ -68,10 +81,13 @@ struct clk {
 	void __iomem		*clksel_reg;
 	u32			clksel_mask;
 	const struct clksel	*clksel;
-	const struct dpll_data	*dpll_data;
+	struct dpll_data	*dpll_data;
 #else
 	__u8			rate_offset;
 	__u8			src_offset;
+#endif
+#if defined(CONFIG_PM_DEBUG) && defined(CONFIG_DEBUG_FS)
+	struct dentry		*dent;	/* For visible tree hierarchy */
 #endif
 };
 
@@ -85,6 +101,9 @@ struct clk_functions {
 	void		(*clk_allow_idle)(struct clk *clk);
 	void		(*clk_deny_idle)(struct clk *clk);
 	void		(*clk_disable_unused)(struct clk *clk);
+#ifdef	CONFIG_CPU_FREQ
+	void		(*clk_init_cpufreq_table)(struct cpufreq_frequency_table **table);
+#endif
 };
 
 extern unsigned int mpurate;
@@ -99,6 +118,9 @@ extern void clk_allow_idle(struct clk *clk);
 extern void clk_deny_idle(struct clk *clk);
 extern int clk_get_usecount(struct clk *clk);
 extern void clk_enable_init_clocks(void);
+#ifdef CONFIG_CPU_FREQ
+extern void clk_init_cpufreq_table(struct cpufreq_frequency_table **table);
+#endif
 
 /* Clock flags */
 #define RATE_CKCTL		(1 << 0)	/* Main fixed ratio clocks */
@@ -122,15 +144,19 @@ extern void clk_enable_init_clocks(void);
 #define CLOCK_IN_OMAP16XX	(1 << 24)
 #define CLOCK_IN_OMAP242X	(1 << 25)
 #define CLOCK_IN_OMAP243X	(1 << 26)
-#define CLOCK_IN_OMAP343X	(1 << 27)
+#define CLOCK_IN_OMAP343X	(1 << 27)	/* clocks common to all 343X */
 #define PARENT_CONTROLS_CLOCK	(1 << 28)
+#define CLOCK_IN_OMAP3430ES1	(1 << 29)	/* 3430ES1 clocks only */
+#define CLOCK_IN_OMAP3430ES2	(1 << 30)	/* 3430ES2 clocks only */
 
 /* Clksel_rate flags */
-#define DEFAULT_RATE            (1 << 0)
-#define RATE_IN_242X            (1 << 1)
-#define RATE_IN_243X            (1 << 2)
-#define RATE_IN_343X            (1 << 3)
-#define RATE_IN_24XX            (RATE_IN_242X | RATE_IN_243X)
+#define DEFAULT_RATE		(1 << 0)
+#define RATE_IN_242X		(1 << 1)
+#define RATE_IN_243X		(1 << 2)
+#define RATE_IN_343X		(1 << 3)	/* rates common to all 343X */
+#define RATE_IN_3430ES2		(1 << 4)	/* 3430ES2 rates only */
+
+#define RATE_IN_24XX		(RATE_IN_242X | RATE_IN_243X)
 
 
 /* CM_CLKSEL2_PLL.CORE_CLK_SRC options (24XX) */

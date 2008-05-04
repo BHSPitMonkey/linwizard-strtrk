@@ -34,7 +34,6 @@ struct vfp_hard_struct {
 #endif
 	__u32 fpexc;
 	__u32 fpscr;
-#ifndef CONFIG_VFPv3
 	/*
 	 * VFP implementation specific state
 	 */

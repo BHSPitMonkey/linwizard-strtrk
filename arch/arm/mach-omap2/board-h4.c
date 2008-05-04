@@ -33,6 +33,7 @@
 #include <asm/mach/map.h>
 #include <asm/mach/flash.h>
 
+#include <asm/arch/control.h>
 #include <asm/arch/gpio.h>
 #include <asm/arch/gpioexpander.h>
 #include <asm/arch/mux.h>
@@ -268,20 +269,53 @@ static struct platform_device *h4_devices[] __initdata = {
 	&h4_lcd_device,
 };
 
+/* 2420 Sysboot setup (2430 is different) */
+static u32 get_sysboot_value(void)
+{
+	return (omap_ctrl_readl(OMAP24XX_CONTROL_STATUS) &
+		(OMAP2_SYSBOOT_5_MASK | OMAP2_SYSBOOT_4_MASK |
+		 OMAP2_SYSBOOT_3_MASK | OMAP2_SYSBOOT_2_MASK |
+		 OMAP2_SYSBOOT_1_MASK | OMAP2_SYSBOOT_0_MASK));
+}
+
+/* FIXME: This function should be moved to some other file, gpmc.c? */
+
+/* H4-2420's always used muxed mode, H4-2422's always use non-muxed
+ *
+ * Note: OMAP-GIT doesn't correctly do is_cpu_omap2422 and is_cpu_omap2423
+ *  correctly.  The macro needs to look at production_id not just hawkeye.
+ */
+static u32 is_gpmc_muxed(void)
+{
+	u32 mux;
+	mux = get_sysboot_value();
+	if ((mux & 0xF) == 0xd)
+		return 1;	/* NAND config (could be either) */
+	if (mux & 0x2)		/* if mux'ed */
+		return 1;
+	else
+		return 0;
+}
+
 static inline void __init h4_init_debug(void)
 {
 	int eth_cs;
 	unsigned long cs_mem_base;
 	unsigned int muxed, rate;
-	struct clk *l3ck;
+	struct clk *gpmc_fck;
 
 	eth_cs	= H4_SMC91X_CS;
 
-	l3ck = clk_get(NULL, "core_l3_ck");
-	if (IS_ERR(l3ck))
-		rate = 100000000;
-	else
-		rate = clk_get_rate(l3ck);
+	gpmc_fck = clk_get(NULL, "gpmc_fck");	/* Always on ENABLE_ON_INIT */
+	if (IS_ERR(gpmc_fck)) {
+		WARN_ON(1);
+		return;
+	}
+
+	clk_enable(gpmc_fck);
+	rate = clk_get_rate(gpmc_fck);
+	clk_disable(gpmc_fck);
+	clk_put(gpmc_fck);
 
 	if (is_gpmc_muxed())
 		muxed = 0x200;
@@ -314,7 +348,7 @@ static inline void __init h4_init_debug(void)
 
 	if (gpmc_cs_request(eth_cs, SZ_16M, &cs_mem_base) < 0) {
 		printk(KERN_ERR "Failed to request GPMC mem for smc91x\n");
-		return;
+		goto out;
 	}
 
 	udelay(100);
@@ -322,6 +356,22 @@ static inline void __init h4_init_debug(void)
 	omap_cfg_reg(M15_24XX_GPIO92);
 	if (debug_card_init(cs_mem_base, OMAP24XX_ETHR_GPIO_IRQ) < 0)
 		gpmc_cs_free(eth_cs);
+
+out:
+	clk_disable(gpmc_fck);
+	clk_put(gpmc_fck);
+}
+
+static void __init h4_init_flash(void)
+{
+	unsigned long base;
+
+	if (gpmc_cs_request(H4_FLASH_CS, SZ_64M, &base) < 0) {
+		printk("Can't request GPMC CS for flash\n");
+		return;
+	}
+	h4_flash_resource.start	= base;
+	h4_flash_resource.end	= base + SZ_64M - 1;
 }
 
 static void __init omap_h4_init_irq(void)
@@ -329,6 +379,7 @@ static void __init omap_h4_init_irq(void)
 	omap2_init_common_hw();
 	omap_init_irq();
 	omap_gpio_init();
+	h4_init_flash();
 }
 
 static struct omap_uart_config h4_uart_config __initdata = {
@@ -343,11 +394,14 @@ static struct omap_mmc_config h4_mmc_config __initdata = {
 	.mmc [0] = {
 		.enabled	= 1,
 		.wire4		= 1,
-		.wp_pin		= -1,
-		.power_pin	= -1,
-		.switch_pin	= -1,
+	},
+	.mmc [1] = {
+		.enabled	= 1,
+		.wire4		= 1,
 	},
 };
+
+extern struct omap_mmc_platform_data h4_mmc_data;
 
 static struct omap_lcd_config h4_lcd_config __initdata = {
 	.ctrl_name	= "internal",
@@ -381,8 +435,8 @@ static struct omap_usb_config h4_usb_config __initdata = {
 	 */
 	.register_dev	= 1,
 	.pins[0]	= 3,
-//	.hmc_mode	= 0x14,	/* 0:dev 1:host 2:disable */
-	.hmc_mode	= 0x00,	/* 0:dev|otg 1:disable 2:disable */
+/*	.hmc_mode	= 0x14,*/	/* 0:dev 1:host 2:disable */
+	.hmc_mode	= 0x00,		/* 0:dev|otg 1:disable 2:disable */
 #endif
 };
 
@@ -463,7 +517,7 @@ static void __init tusb_evm_setup(void)
 		 */
 		omap_cfg_reg(AA10_242X_GPIO13);
 		irq = 13;
-		// omap_cfg_reg(J15_24XX_DMAREQ0);
+		/* omap_cfg_reg(J15_24XX_DMAREQ0); */
 		break;
 	default:
 		/* Later Menelaus boards can support all 6 DMA request
@@ -487,6 +541,7 @@ static void __init tusb_evm_setup(void)
 
 #endif
 
+#if defined(CONFIG_VIDEO_OV9640) || defined(CONFIG_VIDEO_OV9640_MODULE)
 /*
  * Common OV9640 register initialization for all image sizes, pixel formats,
  * and frame rates
@@ -525,63 +580,37 @@ const static struct ov9640_reg ov9640_common[] = {
 	{ OV9640_REG_TERM, OV9640_VAL_TERM }
 };
 
-#if defined(CONFIG_VIDEO_OV9640) || defined(CONFIG_VIDEO_OV9640_MODULE)
-static int ov9640_sensor_powerup(void)
-{
-	unsigned char expa;
-	int err;
-
-	/* read current state of GPIO EXPA outputs */
-	if ((err = read_gpio_expa(&expa, 0x20))) {
-		printk(KERN_ERR "Error reading GPIO EXPA\n");
-		return err;
-	}
-	/* Set GPIO EXPA P3 (CAMERA_MODULE_EN) to power-up sensor */
-	if ((err = write_gpio_expa(expa | 0x08, 0x20))) {
-		printk(KERN_ERR "Error writing to GPIO EXPA\n");
-		return err;
-	}
-
-	/* read current state of GPIO EXPA outputs */
-	if ((err = read_gpio_expa(&expa, 0x22))) {
-		printk(KERN_ERR "Error reading GPIO EXPA\n");
-		return err;
-	}
-	/* Clear GPIO EXPA P7 (CAM_RST) */
-	if ((err = write_gpio_expa(expa & ~0x80, 0x22))) {
-		printk(KERN_ERR "Error writing to GPIO EXPA\n");
-		return err;
-	}
-
-	return 0;
-}
-static int ov9640_sensor_powerdown(void)
-{
-	unsigned char expa;
-	int err;
-
-	/* read current state of GPIO EXPA outputs */
-	if ((err = read_gpio_expa(&expa, 0x20))) {
-		printk(KERN_ERR "Error reading GPIO EXPA\n");
-		return err;
-	}
-	/* Clear GPIO EXPA P3 (CAMERA_MODULE_EN) to power-down sensor */
-	if ((err = write_gpio_expa(expa & ~0x08, 0x20))) {
-		printk(KERN_ERR "Error writing to GPIO EXPA\n");
-		return err;
-	}
-
-	return 0;
-}
-
 static int ov9640_sensor_power_set(int power)
 {
-	int err = 0;
+	unsigned char expa;
+	int err;
 
-	if (power)
-		err = ov9640_sensor_powerup();
-	else
-		err = ov9640_sensor_powerdown();
+	/* read current state of GPIO EXPA outputs */
+	if ((err = read_gpio_expa(&expa, 0x20))) {
+		printk(KERN_ERR "Error reading GPIO EXPA 0x20\n");
+		return err;
+	}
+
+	expa = power ? expa | 0x80 : expa & ~0x08;
+
+	/* Set GPIO EXPA P3 (CAMERA_MODULE_EN) to power-up sensor */
+	if ((err = write_gpio_expa(expa, 0x20))) {
+		printk(KERN_ERR "Error writing to GPIO EXPA 0x20\n");
+		return err;
+	}
+
+	if (power) {
+		/* read current state of GPIO EXPA outputs */
+		if ((err = read_gpio_expa(&expa, 0x22))) {
+			printk(KERN_ERR "Error reading GPIO EXPA\n");
+			return err;
+		}
+		/* Clear GPIO EXPA P7 (CAM_RST) */
+		if ((err = write_gpio_expa(expa & ~0x80, 0x22))) {
+			printk(KERN_ERR "Error writing to GPIO EXPA\n");
+			return err;
+		}
+	}
 
 	return err;
 }
@@ -605,16 +634,13 @@ static int ov9640_ifparm(struct v4l2_ifparm *p)
 
 	return 0;
 }
-#else
-static int ov9640_sensor_power_set(int power) { return 0; }
-static int ov9640_ifparm(struct v4l2_ifparm *p) { return 0; }
-#endif
 
 static struct ov9640_platform_data h4_ov9640_platform_data = {
 	.power_set	= ov9640_sensor_power_set,
 	.default_regs	= ov9640_common,
 	.ifparm		= ov9640_ifparm,
 };
+#endif
 
 static struct i2c_board_info __initdata h4_i2c_board_info[] = {
 	{
@@ -627,9 +653,16 @@ static struct i2c_board_info __initdata h4_i2c_board_info[] = {
 		.irq = INT_24XX_SYS_NIRQ,
 	},
 	{
+		I2C_BOARD_INFO("isp1301_omap", 0x2d),
+		.type		= "isp1301_omap",
+		.irq		= OMAP_GPIO_IRQ(125),
+	},
+#if defined(CONFIG_VIDEO_OV9640) || defined(CONFIG_VIDEO_OV9640_MODULE)
+	{
 		I2C_BOARD_INFO("ov9640", 0x30),
 		.platform_data = &h4_ov9640_platform_data,
 	},
+#endif
 };
 
 static void __init omap_h4_init(void)
@@ -663,13 +696,13 @@ static void __init omap_h4_init(void)
 	/* Menelaus interrupt */
 	omap_cfg_reg(W19_24XX_SYS_NIRQ);
 
-	i2c_register_board_info(1, h4_i2c_board_info,
-			ARRAY_SIZE(h4_i2c_board_info));
-
 	platform_add_devices(h4_devices, ARRAY_SIZE(h4_devices));
 	omap_board_config = h4_config;
 	omap_board_config_size = ARRAY_SIZE(h4_config);
 	omap_serial_init();
+	h4_mmc_init();
+	omap_register_i2c_bus(1, 100, h4_i2c_board_info,
+			      ARRAY_SIZE(h4_i2c_board_info));
 
 	/* smc91x, debug leds, ps/2, extra uarts */
 	h4_init_debug();
@@ -704,6 +737,7 @@ static void __init omap_h4_init(void)
 
 static void __init omap_h4_map_io(void)
 {
+	omap2_set_globals_242x();
 	omap2_map_common_io();
 }
 

@@ -18,6 +18,7 @@
 #include <linux/spi/ads7846.h>
 #include <linux/workqueue.h>
 #include <linux/delay.h>
+#include <linux/mutex.h>
 
 #include <asm/hardware.h>
 #include <asm/mach-types.h>
@@ -33,6 +34,7 @@
 #include <asm/arch/dsp_common.h>
 #include <asm/arch/aic23.h>
 #include <asm/arch/omapfb.h>
+#include <asm/arch/hwa742.h>
 #include <asm/arch/lcd_mipid.h>
 
 #define ADS7846_PENDOWN_GPIO	15
@@ -243,7 +245,7 @@ static struct omap_board_config_kernel nokia770_config[] __initdata = {
 #define	AMPLIFIER_CTRL_GPIO	58
 
 static struct clk *dspxor_ck;
-static DECLARE_MUTEX(audio_pwr_sem);
+static DEFINE_MUTEX(audio_pwr_mutex);
 /*
  * audio_pwr_state
  * +--+-------------------------+---------------------------------------+
@@ -259,7 +261,7 @@ static DECLARE_MUTEX(audio_pwr_sem);
 static int audio_pwr_state = -1;
 
 /*
- * audio_pwr_up / down should be called under audio_pwr_sem
+ * audio_pwr_up / down should be called under audio_pwr_mutex
  */
 static void nokia770_audio_pwr_up(void)
 {
@@ -278,11 +280,11 @@ static void nokia770_audio_pwr_up(void)
 
 static void codec_delayed_power_down(struct work_struct *work)
 {
-	down(&audio_pwr_sem);
+	mutex_lock(&audio_pwr_mutex);
 	if (audio_pwr_state == -1)
 		aic23_power_down();
 	clk_disable(dspxor_ck);
-	up(&audio_pwr_sem);
+	mutex_unlock(&audio_pwr_mutex);
 }
 
 static DECLARE_DELAYED_WORK(codec_power_down_work, codec_delayed_power_down);
@@ -299,19 +301,19 @@ static void nokia770_audio_pwr_down(void)
 static int
 nokia770_audio_pwr_up_request(struct dsp_kfunc_device *kdev, int stage)
 {
-	down(&audio_pwr_sem);
+	mutex_lock(&audio_pwr_mutex);
 	if (audio_pwr_state == -1)
 		nokia770_audio_pwr_up();
 	/* force audio_pwr_state = 0, even if it was 1. */
 	audio_pwr_state = 0;
-	up(&audio_pwr_sem);
+	mutex_unlock(&audio_pwr_mutex);
 	return 0;
 }
 
 static int
 nokia770_audio_pwr_down_request(struct dsp_kfunc_device *kdev, int stage)
 {
-	down(&audio_pwr_sem);
+	mutex_lock(&audio_pwr_mutex);
 	switch (stage) {
 	case 1:
 		if (audio_pwr_state == 0)
@@ -324,10 +326,9 @@ nokia770_audio_pwr_down_request(struct dsp_kfunc_device *kdev, int stage)
 		}
 		break;
 	}
-	up(&audio_pwr_sem);
+	mutex_unlock(&audio_pwr_mutex);
 	return 0;
 }
-#endif	/* CONFIG_OMAP_DSP */
 
 static struct dsp_kfunc_device nokia770_audio_device = {
 	.name	 = "audio",
@@ -374,6 +375,7 @@ static void __init omap_nokia770_init(void)
 	omap_serial_init();
 	omap_register_i2c_bus(1, 100, NULL, 0);
 	omap_dsp_init();
+	hwa742_dev_init();
 	ads7846_dev_init();
 	mipid_dev_init();
 }

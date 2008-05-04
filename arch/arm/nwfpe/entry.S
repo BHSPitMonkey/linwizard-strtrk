@@ -63,8 +63,7 @@ the next instruction.  If it is a floating point instruction, it
 executes the instruction, without returning to user space.  In this
 way it repeatedly looks ahead and executes floating point instructions
 until it encounters a non floating point instruction, at which time it
-returns via _fpreturn.  Decoding Thumb-2 instructions is hard so only
-one instuction is emulated before returning.
+returns via _fpreturn.
 
 This is done to reduce the effect of the trap overhead on each
 floating point instructions.  GCC attempts to group floating point
@@ -92,9 +91,7 @@ emulate:
 	bl	EmulateAll		@ emulate the instruction
 	cmp	r0, #0			@ was emulation successful
 	moveq	pc, r4			@ no, return failure
-	ldr	r7, [sp, #64]		@ fetch the PSR
-	tst	r7, #0x20
-	movne	pc, r9			@ return ok if in Thumb mode
+
 next:
 .Lx1:	ldrt	r6, [r5], #4		@ get the next instruction and
 					@ increment PC

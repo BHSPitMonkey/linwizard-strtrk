@@ -13,6 +13,7 @@
 #if defined(CONFIG_ARCH_OMAP2430) || defined(CONFIG_ARCH_OMAP3430)
 #include <asm/arch/hardware.h>
 #include <asm/arch/usb.h>
+
 /*
  * OMAP2430-specific definitions
  */
@@ -21,7 +22,7 @@
 #if	defined(CONFIG_ARCH_OMAP2430)
 #define	OMAP_HSOTG_BASE		(OMAP243X_HS_BASE)
 #elif	defined(CONFIG_ARCH_OMAP3430)
-#define	OMAP_HSOTG_BASE		(HS_BASE)
+#define	OMAP_HSOTG_BASE		(OMAP34XX_HSUSB_OTG_BASE)
 #endif
 #define OMAP_HSOTG(offset)	__REG32(OMAP_HSOTG_BASE + 0x400 + (offset))
 #define OTG_REVISION_REG	OMAP_HSOTG(0x0)

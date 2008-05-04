@@ -5,7 +5,8 @@
 # Common support
 obj-y := io.o id.o clock.o irq.o mux.o serial.o devices.o
 
-obj-$(CONFIG_OMAP_MPU_TIMER)		+= time.o
+obj-$(CONFIG_OMAP_MPU_TIMER)	+= time.o
+obj-$(CONFIG_OMAP_32K_TIMER)	+= timer32k.o
 
 # Power Management
 obj-$(CONFIG_PM) += pm.o sleep.o
@@ -32,7 +33,6 @@ obj-$(CONFIG_MACH_OMAP_PALMZ71)		+= board-palmz71.o
 obj-$(CONFIG_MACH_OMAP_PALMTT)		+= board-palmtt.o
 obj-$(CONFIG_MACH_NOKIA770)		+= board-nokia770.o
 obj-$(CONFIG_MACH_AMS_DELTA)		+= board-ams-delta.o
-obj-$(CONFIG_MACH_SX1)			+= board-sx1.o
 obj-$(CONFIG_MACH_OMAP_HTCWIZARD)   	+= board-htcwizard.o
 obj-$(CONFIG_EFB_DEBUG)	+= efb.o efb-font5x5.o
 

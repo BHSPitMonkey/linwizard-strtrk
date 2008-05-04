@@ -4,7 +4,7 @@
  * OMAP2 Power Management Routines
  *
  * Copyright (C) 2005 Texas Instruments, Inc.
- * Copyright (C) 2006 Nokia Corporation
+ * Copyright (C) 2006-2008 Nokia Corporation
  *
  * Written by:
  * Richard Woodruff <r-woodruff2@ti.com>
@@ -39,18 +39,22 @@
 #include <asm/arch/irqs.h>
 #include <asm/arch/clock.h>
 #include <asm/arch/sram.h>
+#include <asm/arch/control.h>
 #include <asm/arch/gpio.h>
 #include <asm/arch/pm.h>
 #include <asm/arch/mux.h>
 #include <asm/arch/dma.h>
 #include <asm/arch/board.h>
-#include <asm/arch/gpio.h>
 
 #include "prm.h"
-#include "prm_regbits_24xx.h"
+#include "prm-regbits-24xx.h"
 #include "cm.h"
-#include "cm_regbits_24xx.h"
+#include "cm-regbits-24xx.h"
 #include "sdrc.h"
+
+/* These addrs are in assembly language code to be patched at runtime */
+extern void *omap2_ocs_sdrc_power;
+extern void *omap2_ocs_sdrc_dlla_ctrl;
 
 static void (*omap2_sram_idle)(void);
 static void (*omap2_sram_suspend)(void __iomem *dllctrl);
@@ -108,12 +112,194 @@ static void serial_console_fclk_mask(u32 *f1, u32 *f2)
 	}
 }
 
-static int omap2_pm_prepare(void)
+static void serial_console_sleep(int enable)
 {
-	/* We cannot sleep in idle until we have resumed */
-	saved_idle = pm_idle;
-	pm_idle = NULL;
-	return 0;
+	if (console_iclk == NULL || console_fclk == NULL)
+		return;
+
+	if (enable) {
+		BUG_ON(serial_console_clock_disabled);
+		if (clk_get_usecount(console_fclk) == 0)
+			return;
+		if ((int) serial_console_next_disable - (int) omap2_read_32k_sync_counter() >= 0)
+			return;
+		serial_wait_tx();
+		clk_disable(console_iclk);
+		clk_disable(console_fclk);
+		serial_console_clock_disabled = 1;
+	} else {
+		int serial_wakeup = 0;
+		u32 l;
+
+		switch (serial_console_uart)  {
+		case 1:
+			l = prm_read_mod_reg(CORE_MOD, PM_WKST1);
+			if (l & OMAP24XX_ST_UART1)
+				serial_wakeup = 1;
+			break;
+		case 2:
+			l = prm_read_mod_reg(CORE_MOD, PM_WKST1);
+			if (l & OMAP24XX_ST_UART2)
+				serial_wakeup = 1;
+			break;
+		case 3:
+			l = prm_read_mod_reg(CORE_MOD, OMAP24XX_PM_WKST2);
+			if (l & OMAP24XX_ST_UART3)
+				serial_wakeup = 1;
+			break;
+		}
+		if (serial_wakeup)
+			serial_console_kick();
+		if (!serial_console_clock_disabled)
+			return;
+		clk_enable(console_iclk);
+		clk_enable(console_fclk);
+		serial_console_clock_disabled = 0;
+	}
+}
+
+static void pm_init_serial_console(void)
+{
+	const struct omap_serial_console_config *conf;
+	char name[16];
+
+	conf = omap_get_config(OMAP_TAG_SERIAL_CONSOLE,
+			       struct omap_serial_console_config);
+	if (conf == NULL)
+		return;
+	if (conf->console_uart > 3 || conf->console_uart < 1)
+		return;
+	serial_console_uart = conf->console_uart;
+	sprintf(name, "uart%d_fck", conf->console_uart);
+	console_fclk = clk_get(NULL, name);
+	if (IS_ERR(console_fclk))
+		console_fclk = NULL;
+	name[6] = 'i';
+	console_iclk = clk_get(NULL, name);
+	if (IS_ERR(console_fclk))
+		console_iclk = NULL;
+	if (console_fclk == NULL || console_iclk == NULL) {
+		serial_console_uart = 0;
+		return;
+	}
+	switch (serial_console_uart) {
+	case 1:
+		prm_set_mod_reg_bits(OMAP24XX_ST_UART1, CORE_MOD, PM_WKEN1);
+		break;
+	case 2:
+		prm_set_mod_reg_bits(OMAP24XX_ST_UART2, CORE_MOD, PM_WKEN1);
+		break;
+	case 3:
+		prm_set_mod_reg_bits(OMAP24XX_ST_UART3, CORE_MOD, OMAP24XX_PM_WKEN2);
+		break;
+	}
+}
+
+#define DUMP_PRM_MOD_REG(mod, reg)    \
+	regs[reg_count].name = #mod "." #reg; \
+	regs[reg_count++].val = prm_read_mod_reg(mod, reg)
+#define DUMP_CM_MOD_REG(mod, reg)     \
+	regs[reg_count].name = #mod "." #reg; \
+	regs[reg_count++].val = cm_read_mod_reg(mod, reg)
+#define DUMP_PRM_REG(reg) \
+	regs[reg_count].name = #reg; \
+	regs[reg_count++].val = __raw_readl(reg)
+#define DUMP_CM_REG(reg) \
+	regs[reg_count].name = #reg; \
+	regs[reg_count++].val = __raw_readl(reg)
+#define DUMP_INTC_REG(reg, off) \
+	regs[reg_count].name = #reg; \
+	regs[reg_count++].val = __raw_readl(IO_ADDRESS(0x480fe000 + (off)))
+
+static void omap2_pm_dump(int mode, int resume, unsigned int us)
+{
+	struct reg {
+		const char *name;
+		u32 val;
+	} regs[32];
+	int reg_count = 0, i;
+	const char *s1 = NULL, *s2 = NULL;
+
+	if (!resume) {
+#if 0
+		/* MPU */
+		DUMP_PRM_REG(OMAP24XX_PRCM_IRQENABLE_MPU);
+		DUMP_CM_MOD_REG(MPU_MOD, CM_CLKSTCTRL);
+		DUMP_PRM_MOD_REG(MPU_MOD, PM_PWSTCTRL);
+		DUMP_PRM_MOD_REG(MPU_MOD, PM_PWSTST);
+		DUMP_PRM_MOD_REG(MPU_MOD, PM_WKDEP);
+#endif
+#if 0
+		/* INTC */
+		DUMP_INTC_REG(INTC_MIR0, 0x0084);
+		DUMP_INTC_REG(INTC_MIR1, 0x00a4);
+		DUMP_INTC_REG(INTC_MIR2, 0x00c4);
+#endif
+#if 0
+		DUMP_CM_MOD_REG(CORE_MOD, CM_FCLKEN1);
+		DUMP_CM_MOD_REG(CORE_MOD, OMAP24XX_CM_FCLKEN2);
+		DUMP_CM_MOD_REG(WKUP_MOD, CM_FCLKEN);
+		DUMP_CM_MOD_REG(CORE_MOD, CM_ICLKEN1);
+		DUMP_CM_MOD_REG(CORE_MOD, CM_ICLKEN2);
+		DUMP_CM_MOD_REG(WKUP_MOD, CM_ICLKEN);
+		DUMP_CM_MOD_REG(PLL_MOD, CM_CLKEN);
+		DUMP_PRM_REG(OMAP24XX_PRCM_CLKEMUL_CTRL);
+		DUMP_CM_MOD_REG(PLL_MOD, CM_AUTOIDLE);
+		DUMP_PRM_MOD_REG(CORE_MOD, PM_PWSTST);
+		DUMP_PRM_REG(OMAP24XX_PRCM_CLKSRC_CTRL);
+#endif
+#if 0
+		/* DSP */
+		DUMP_CM_MOD_REG(OMAP24XX_DSP_MOD, CM_FCLKEN);
+		DUMP_CM_MOD_REG(OMAP24XX_DSP_MOD, CM_ICLKEN);
+		DUMP_CM_MOD_REG(OMAP24XX_DSP_MOD, CM_IDLEST);
+		DUMP_CM_MOD_REG(OMAP24XX_DSP_MOD, CM_AUTOIDLE);
+		DUMP_CM_MOD_REG(OMAP24XX_DSP_MOD, CM_CLKSEL);
+		DUMP_CM_MOD_REG(OMAP24XX_DSP_MOD, CM_CLKSTCTRL);
+		DUMP_PRM_MOD_REG(OMAP24XX_DSP_MOD, RM_RSTCTRL);
+		DUMP_PRM_MOD_REG(OMAP24XX_DSP_MOD, RM_RSTST);
+		DUMP_PRM_MOD_REG(OMAP24XX_DSP_MOD, PM_PWSTCTRL);
+		DUMP_PRM_MOD_REG(OMAP24XX_DSP_MOD, PM_PWSTST);
+#endif
+	} else {
+		DUMP_PRM_MOD_REG(CORE_MOD, PM_WKST1);
+		DUMP_PRM_MOD_REG(CORE_MOD, OMAP24XX_PM_WKST2);
+		DUMP_PRM_MOD_REG(WKUP_MOD, PM_WKST);
+		DUMP_PRM_REG(OMAP24XX_PRCM_IRQSTATUS_MPU);
+#if 1
+		DUMP_INTC_REG(INTC_PENDING_IRQ0, 0x0098);
+		DUMP_INTC_REG(INTC_PENDING_IRQ1, 0x00b8);
+		DUMP_INTC_REG(INTC_PENDING_IRQ2, 0x00d8);
+#endif
+	}
+
+	switch (mode) {
+	case 0:
+		s1 = "full";
+		s2 = "retention";
+		break;
+	case 1:
+		s1 = "MPU";
+		s2 = "retention";
+		break;
+	case 2:
+		s1 = "MPU";
+		s2 = "idle";
+		break;
+	}
+
+	if (!resume)
+#if defined(CONFIG_NO_IDLE_HZ) || defined(CONFIG_NO_HZ)
+		printk("--- Going to %s %s (next timer after %u ms)\n", s1, s2,
+		       jiffies_to_msecs(get_next_timer_interrupt(jiffies) - 
+					jiffies));
+#else
+		printk("--- Going to %s %s\n", s1, s2);
+#endif
+	else
+		printk("--- Woke up (slept for %u.%03u ms)\n", us / 1000, us % 1000);
+	for (i = 0; i < reg_count; i++)
+		printk("%-20s: 0x%08x\n", regs[i].name, regs[i].val);
 }
 
 #else
@@ -128,14 +314,14 @@ static inline void serial_console_fclk_mask(u32 *f1, u32 *f2) {}
 
 static unsigned short enable_dyn_sleep = 0; /* disabled till drivers are fixed */
 
-static ssize_t omap_pm_sleep_while_idle_show(struct kset * subsys, char *buf)
+static ssize_t idle_show(struct kobject *kobj, struct kobj_attribute *attr,
+			 char *buf)
 {
 	return sprintf(buf, "%hu\n", enable_dyn_sleep);
 }
 
-static ssize_t omap_pm_sleep_while_idle_store(struct kset * subsys,
-					      const char * buf,
-					      size_t n)
+static ssize_t idle_store(struct kobject *kobj, struct kobj_attribute *attr,
+			  const char * buf, size_t n)
 {
 	unsigned short value;
 	if (sscanf(buf, "%hu", &value) != 1 ||
@@ -147,18 +333,10 @@ static ssize_t omap_pm_sleep_while_idle_store(struct kset * subsys,
 	return n;
 }
 
-static struct subsys_attribute sleep_while_idle_attr = {
-	.attr   = {
-		.name = __stringify(sleep_while_idle),
-		.mode = 0644,
-	},
-	.show   = omap_pm_sleep_while_idle_show,
-	.store  = omap_pm_sleep_while_idle_store,
-};
+static struct kobj_attribute sleep_while_idle_attr =
+	__ATTR(sleep_while_idle, 0644, idle_show, idle_store);
 
 static struct clk *osc_ck, *emul_ck;
-
-#define CONTROL_DEVCONF		__REG32(OMAP2_CTRL_BASE + 0x274)
 
 static int omap2_fclks_active(void)
 {
@@ -202,7 +380,7 @@ void omap2_allow_sleep(void)
 
 static void omap2_enter_full_retention(void)
 {
-	u32 sleep_time = 0;
+	u32 l, sleep_time = 0;
 
 	/* There is 1 reference hold for all children of the oscillator
 	 * clock, the following will remove it. If no one else uses the
@@ -222,7 +400,8 @@ static void omap2_enter_full_retention(void)
 			  MPU_MOD, PM_PWSTCTRL);
 
 	/* Workaround to kill USB */
-	CONTROL_DEVCONF |= 0x00008000;
+	l = omap_ctrl_readl(OMAP2_CONTROL_DEVCONF0) | OMAP24XX_USBSTANDBYCTRL;
+	omap_ctrl_writel(l, OMAP2_CONTROL_DEVCONF0);
 
 	omap2_gpio_prepare_for_retention();
 
@@ -255,6 +434,22 @@ no_sleep:
 
 	clk_enable(osc_ck);
 
+	/* clear CORE wake-up events */
+	prm_write_mod_reg(0xffffffff, CORE_MOD, PM_WKST1);
+	prm_write_mod_reg(0xffffffff, CORE_MOD, OMAP24XX_PM_WKST2);
+
+	/* wakeup domain events - bit 1: GPT1, bit5 GPIO */
+	prm_clear_mod_reg_bits(0x4 | 0x1, WKUP_MOD, PM_WKST);
+
+	/* MPU domain wake events */
+	l = __raw_readl(OMAP24XX_PRCM_IRQSTATUS_MPU);
+	if (l & 0x01)
+		__raw_writel(0x01, OMAP24XX_PRCM_IRQSTATUS_MPU);
+	if (l & 0x20)
+		__raw_writel(0x20, OMAP24XX_PRCM_IRQSTATUS_MPU);
+
+	/* Mask future PRCM-to-MPU interrupts */
+	__raw_writel(0x0, OMAP24XX_PRCM_IRQSTATUS_MPU);
 }
 
 static int omap2_i2c_active(void)
@@ -392,23 +587,13 @@ out:
 	local_irq_enable();
 }
 
-static int omap2_pm_prepare(suspend_state_t state)
+static int omap2_pm_prepare(void)
 {
-	int error = 0;
-
 	/* We cannot sleep in idle until we have resumed */
 	saved_idle = pm_idle;
 	pm_idle = NULL;
 
-	switch (state) {
-	case PM_SUSPEND_STANDBY:
-	case PM_SUSPEND_MEM:
-		break;
-	default:
-		return -EINVAL;
-	}
-
-	return error;
+	return 0;
 }
 
 static int omap2_pm_suspend(void)
@@ -463,12 +648,15 @@ static void __init prcm_setup_regs(void)
 	u32 l;
 
 	/* Enable autoidle */
-	prm_write_reg(OMAP24XX_AUTOIDLE, OMAP24XX_PRCM_SYSCONFIG);
+	__raw_writel(OMAP24XX_AUTOIDLE, OMAP24XX_PRCM_SYSCONFIG);
 
 	/* Set all domain wakeup dependencies */
 	prm_write_mod_reg(OMAP_EN_WKUP, MPU_MOD, PM_WKDEP);
 	prm_write_mod_reg(0, OMAP24XX_DSP_MOD, PM_WKDEP);
 	prm_write_mod_reg(0, GFX_MOD, PM_WKDEP);
+	prm_write_mod_reg(0, CORE_MOD, PM_WKDEP);
+	if (cpu_is_omap2430())
+		prm_write_mod_reg(0, OMAP2430_MDM_MOD, PM_WKDEP);
 
 	l = prm_read_mod_reg(CORE_MOD, PM_PWSTCTRL);
 	/* Enable retention for all memory blocks */
@@ -538,7 +726,7 @@ static void __init prcm_setup_regs(void)
 	cm_write_mod_reg(OMAP24XX_AUTO_SDRC |
 			 OMAP24XX_AUTO_GPMC |
 			 OMAP24XX_AUTO_SDMA,
-			 CORE_MOD, OMAP24XX_CM_AUTOIDLE3);
+			 CORE_MOD, CM_AUTOIDLE3);
 	cm_write_mod_reg(OMAP24XX_AUTO_PKA |
 			 OMAP24XX_AUTO_AES |
 			 OMAP24XX_AUTO_RNG |
@@ -564,11 +752,11 @@ static void __init prcm_setup_regs(void)
 
 	/* REVISIT: Configure number of 32 kHz clock cycles for sys_clk
 	 * stabilisation */
-	prm_write_reg(15 << OMAP_SETUP_TIME_SHIFT, OMAP24XX_PRCM_CLKSSETUP);
+	__raw_writel(15 << OMAP_SETUP_TIME_SHIFT, OMAP24XX_PRCM_CLKSSETUP);
 
 	/* Configure automatic voltage transition */
-	prm_write_reg(2 << OMAP_SETUP_TIME_SHIFT, OMAP24XX_PRCM_VOLTSETUP);
-	prm_write_reg(OMAP24XX_AUTO_EXTVOLT |
+	__raw_writel(2 << OMAP_SETUP_TIME_SHIFT, OMAP24XX_PRCM_VOLTSETUP);
+	__raw_writel(OMAP24XX_AUTO_EXTVOLT |
 		      (0x1 << OMAP24XX_SETOFF_LEVEL_SHIFT) |
 		      OMAP24XX_MEMRETCTRL |
 		      (0x1 << OMAP24XX_SETRET_LEVEL_SHIFT) |
@@ -583,9 +771,10 @@ static void __init prcm_setup_regs(void)
 int __init omap2_pm_init(void)
 {
 	u32 l;
+	int error;
 
 	printk(KERN_INFO "Power Management for OMAP2 initializing\n");
-	l = prm_read_reg(OMAP24XX_PRCM_REVISION);
+	l = __raw_readl(OMAP24XX_PRCM_REVISION);
 	printk(KERN_INFO "PRCM revision %d.%d\n", (l >> 4) & 0x0f, l & 0x0f);
 
 	osc_ck = clk_get(NULL, "osc_ck");
@@ -624,15 +813,24 @@ int __init omap2_pm_init(void)
 	 */
 	omap2_sram_idle = omap_sram_push(omap24xx_idle_loop_suspend,
 					 omap24xx_idle_loop_suspend_sz);
+
 	omap2_sram_suspend = omap_sram_push(omap24xx_cpu_suspend,
 					    omap24xx_cpu_suspend_sz);
+
+	/* Patch in the correct register addresses for multiboot */
+	omap_sram_patch_va(omap24xx_cpu_suspend, &omap2_ocs_sdrc_power,
+			   omap2_sram_suspend,
+			   OMAP_SDRC_REGADDR(SDRC_POWER));
+	omap_sram_patch_va(omap24xx_cpu_suspend, &omap2_ocs_sdrc_dlla_ctrl,
+			   omap2_sram_suspend,
+			   OMAP_SDRC_REGADDR(SDRC_DLLA_CTRL));
 
 	suspend_set_ops(&omap_pm_ops);
 	pm_idle = omap2_pm_idle;
 
-	l = subsys_create_file(&power_subsys, &sleep_while_idle_attr);
-	if (l)
-		printk(KERN_ERR "subsys_create_file failed: %d\n", l);
+	error = sysfs_create_file(power_kobj, &sleep_while_idle_attr.attr);
+	if (error)
+		printk(KERN_ERR "sysfs_create_file failed: %d\n", error);
 
 	return 0;
 }

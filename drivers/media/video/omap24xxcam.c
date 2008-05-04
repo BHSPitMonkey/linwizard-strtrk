@@ -46,7 +46,7 @@
 
 static void omap24xxcam_reset(struct omap24xxcam_device *cam);
 static int omap24xxcam_sensor_if_enable(struct omap24xxcam_device *cam);
-static void omap24xxcam_device_unregister(struct v4l2_int_device *ctl);
+static void omap24xxcam_device_unregister(struct v4l2_int_device *s);
 static int omap24xxcam_remove(struct platform_device *pdev);
 
 /* module parameters */
@@ -226,27 +226,28 @@ static void omap24xxcam_core_isr(struct omap24xxcam_device *cam)
  */
 static void omap24xxcam_vbq_free_mmap_buffer(struct videobuf_buffer *vb)
 {
-	int i;
+	struct videobuf_dmabuf *dma = videobuf_to_dma(vb);
 	size_t alloc_size;
 	struct page *page;
+	int i;
 
-	if (vb->dma.sglist == NULL)
+	if (dma->sglist == NULL)
 		return;
 
-	i = vb->dma.sglen;
+	i = dma->sglen;
 	while (i) {
 		i--;
-		alloc_size = vb->dma.sglist[i].length;
-		page = vb->dma.sglist[i].page;
+		alloc_size = sg_dma_len(&dma->sglist[i]);
+		page = sg_page(&dma->sglist[i]);
 		do {
 			ClearPageReserved(page++);
 		} while (alloc_size -= PAGE_SIZE);
-		__free_pages(vb->dma.sglist[i].page,
-			     get_order(vb->dma.sglist[i].length));
+		__free_pages(sg_page(&dma->sglist[i]),
+			     get_order(sg_dma_len(&dma->sglist[i])));
 	}
 
-	kfree(vb->dma.sglist);
-	vb->dma.sglist = NULL;
+	kfree(dma->sglist);
+	dma->sglist = NULL;
 }
 
 /* Release all memory related to the videobuf_queue. */
@@ -254,7 +255,7 @@ static void omap24xxcam_vbq_free_mmap_buffers(struct videobuf_queue *vbq)
 {
 	int i;
 
-	mutex_lock(&vbq->lock);
+	mutex_lock(&vbq->vb_lock);
 
 	for (i = 0; i < VIDEO_MAX_FRAME; i++) {
 		if (NULL == vbq->bufs[i])
@@ -267,7 +268,7 @@ static void omap24xxcam_vbq_free_mmap_buffers(struct videobuf_queue *vbq)
 		vbq->bufs[i] = NULL;
 	}
 
-	mutex_unlock(&vbq->lock);
+	mutex_unlock(&vbq->vb_lock);
 
 	videobuf_mmap_free(vbq);
 }
@@ -282,15 +283,15 @@ static int omap24xxcam_vbq_alloc_mmap_buffer(struct videobuf_buffer *vb)
 	size_t alloc_size, size = vb->bsize; /* vb->bsize is page aligned */
 	struct page *page;
 	int max_pages, err = 0, i = 0;
+	struct videobuf_dmabuf *dma = videobuf_to_dma(vb);
 
 	/*
 	 * allocate maximum size scatter-gather list. Note this is
 	 * overhead. We may not use as many entries as we allocate
 	 */
 	max_pages = vb->bsize >> PAGE_SHIFT;
-	vb->dma.sglist =
-		kcalloc(max_pages, sizeof(*vb->dma.sglist), GFP_KERNEL);
-	if (vb->dma.sglist == NULL) {
+	dma->sglist = kcalloc(max_pages, sizeof(*dma->sglist), GFP_KERNEL);
+	if (dma->sglist == NULL) {
 		err = -ENOMEM;
 		goto out;
 	}
@@ -318,9 +319,8 @@ static int omap24xxcam_vbq_alloc_mmap_buffer(struct videobuf_buffer *vb)
 		size -= (PAGE_SIZE << order);
 
 		/* append allocated chunk of pages into scatter-gather list */
-		vb->dma.sglist[i].page = page;
-		vb->dma.sglist[i].length = (PAGE_SIZE << order);
-		vb->dma.sglen++;
+		sg_set_page(&dma->sglist[i], page, PAGE_SIZE << order, 0);
+		dma->sglen++;
 		i++;
 
 		alloc_size = (PAGE_SIZE << order);
@@ -337,8 +337,8 @@ static int omap24xxcam_vbq_alloc_mmap_buffer(struct videobuf_buffer *vb)
 	 * REVISIT: not fully correct to assign nr_pages == sglen but
 	 * video-buf is passing nr_pages for e.g. unmap_sg calls
 	 */
-	vb->dma.nr_pages = vb->dma.sglen;
-	vb->dma.direction = PCI_DMA_FROMDEVICE;
+	dma->nr_pages = dma->sglen;
+	dma->direction = PCI_DMA_FROMDEVICE;
 
 	return 0;
 
@@ -354,17 +354,17 @@ static int omap24xxcam_vbq_alloc_mmap_buffers(struct videobuf_queue *vbq,
 	struct omap24xxcam_fh *fh =
 		container_of(vbq, struct omap24xxcam_fh, vbq);
 
-	mutex_lock(&vbq->lock);
+	mutex_lock(&vbq->vb_lock);
 
 	for (i = 0; i < count; i++) {
 		err = omap24xxcam_vbq_alloc_mmap_buffer(vbq->bufs[i]);
 		if (err)
 			goto out;
 		dev_dbg(fh->cam->dev, "sglen is %d for buffer %d\n",
-			vbq->bufs[i]->dma.sglen, i);
+			videobuf_to_dma(vbq->bufs[i])->sglen, i);
 	}
 
-	mutex_unlock(&vbq->lock);
+	mutex_unlock(&vbq->vb_lock);
 
 	return 0;
 out:
@@ -373,7 +373,7 @@ out:
 		omap24xxcam_vbq_free_mmap_buffer(vbq->bufs[i]);
 	}
 
-	mutex_unlock(&vbq->lock);
+	mutex_unlock(&vbq->vb_lock);
 
 	return err;
 }
@@ -402,20 +402,20 @@ static void omap24xxcam_vbq_complete(struct omap24xxcam_sgdma *sgdma,
 	do_gettimeofday(&vb->ts);
 	vb->field_count = atomic_add_return(2, &fh->field_count);
 	if (csr & csr_error) {
-		vb->state = STATE_ERROR;
+		vb->state = VIDEOBUF_ERROR;
 		if (!atomic_read(&fh->cam->in_reset)) {
 			dev_dbg(cam->dev, "resetting camera, csr 0x%x\n", csr);
 			omap24xxcam_reset(cam);
 		}
 	} else
-		vb->state = STATE_DONE;
+		vb->state = VIDEOBUF_DONE;
 	wake_up(&vb->done);
 }
 
 static void omap24xxcam_vbq_release(struct videobuf_queue *vbq,
 				    struct videobuf_buffer *vb)
 {
-	struct videobuf_dmabuf *dma = &vb->dma;
+	struct videobuf_dmabuf *dma = videobuf_to_dma(vb);
 
 	/* wait for buffer, especially to get out of the sgdma queue */
 	videobuf_waiton(vb, 0, 0);
@@ -424,11 +424,11 @@ static void omap24xxcam_vbq_release(struct videobuf_queue *vbq,
 			     dma->direction);
 		dma->direction = DMA_NONE;
 	} else {
-		videobuf_dma_unmap(vbq, &vb->dma);
-		videobuf_dma_free(&vb->dma);
+		videobuf_dma_unmap(vbq, videobuf_to_dma(vb));
+		videobuf_dma_free(videobuf_to_dma(vb));
 	}
 
-	vb->state = STATE_NEEDS_INIT;
+	vb->state = VIDEOBUF_NEEDS_INIT;
 }
 
 /*
@@ -491,7 +491,7 @@ static int omap24xxcam_vbq_prepare(struct videobuf_queue *vbq,
 		} else
 			vb->size = fh->pix.sizeimage;
 	} else {
-		if (vb->state != STATE_NEEDS_INIT) {
+		if (vb->state != VIDEOBUF_NEEDS_INIT) {
 			/*
 			 * We have a kernel bounce buffer that has
 			 * already been allocated.
@@ -519,19 +519,19 @@ static int omap24xxcam_vbq_prepare(struct videobuf_queue *vbq,
 	vb->height = fh->pix.height;
 	vb->field = field;
 
-	if (vb->state == STATE_NEEDS_INIT) {
+	if (vb->state == VIDEOBUF_NEEDS_INIT) {
 		if (vb->memory == V4L2_MEMORY_MMAP)
 			/*
 			 * we have built the scatter-gather list by ourself so
 			 * do the scatter-gather mapping as well
 			 */
-			err = omap24xxcam_dma_iolock(vbq, &vb->dma);
+			err = omap24xxcam_dma_iolock(vbq, videobuf_to_dma(vb));
 		else
 			err = videobuf_iolock(vbq, vb, NULL);
 	}
 
 	if (!err)
-		vb->state = STATE_PREPARED;
+		vb->state = VIDEOBUF_PREPARED;
 	else
 		omap24xxcam_vbq_release(vbq, vb);
 
@@ -552,10 +552,11 @@ static void omap24xxcam_vbq_queue(struct videobuf_queue *vbq,
 	 * pretty way of marking it active exactly when the
 	 * scatter-gather transfer starts.
 	 */
-	vb->state = STATE_ACTIVE;
+	vb->state = VIDEOBUF_ACTIVE;
 
-	err = omap24xxcam_sgdma_queue(&fh->cam->sgdma, vb->dma.sglist,
-				      vb->dma.sglen, vb->size,
+	err = omap24xxcam_sgdma_queue(&fh->cam->sgdma,
+				      videobuf_to_dma(vb)->sglist,
+				      videobuf_to_dma(vb)->sglen, vb->size,
 				      omap24xxcam_vbq_complete, vb);
 
 	if (!err) {
@@ -1040,9 +1041,9 @@ out:
 	mutex_unlock(&cam->mutex);
 
 	if (!rval) {
-		mutex_lock(&ofh->vbq.lock);
+		mutex_lock(&ofh->vbq.vb_lock);
 		ofh->pix = f->fmt.pix;
-		mutex_unlock(&ofh->vbq.lock);
+		mutex_unlock(&ofh->vbq.vb_lock);
 	}
 
 	memset(f, 0, sizeof(*f));
@@ -1087,10 +1088,10 @@ static int vidioc_reqbufs(struct file *file, void *fh,
 	 * Either videobuf_reqbufs failed or the buffers are not
 	 * memory-mapped (which would need special attention).
 	 */
-	if (rval || b->memory != V4L2_MEMORY_MMAP)
+	if (rval < 0 || b->memory != V4L2_MEMORY_MMAP)
 		goto out;
 
-	rval = omap24xxcam_vbq_alloc_mmap_buffers(&ofh->vbq, b->count);
+	rval = omap24xxcam_vbq_alloc_mmap_buffers(&ofh->vbq, rval);
 	if (rval)
 		omap24xxcam_vbq_free_mmap_buffers(&ofh->vbq);
 
@@ -1120,6 +1121,7 @@ static int vidioc_dqbuf(struct file *file, void *fh, struct v4l2_buffer *b)
 	struct videobuf_buffer *vb;
 	int rval;
 
+videobuf_dqbuf_again:
 	rval = videobuf_dqbuf(&ofh->vbq, b, file->f_flags & O_NONBLOCK);
 	if (rval)
 		goto out;
@@ -1137,12 +1139,20 @@ static int vidioc_dqbuf(struct file *file, void *fh, struct v4l2_buffer *b)
 
 out:
 	/*
-	 * This is a hack. User space won't get the index of this
-	 * buffer and does not want to requeue it so we requeue it
-	 * here.
+	 * This is a hack. We don't want to show -EIO to the user
+	 * space. Requeue the buffer and try again if we're not doing
+	 * this in non-blocking mode.
 	 */
-	if (rval == -EIO)
+	if (rval == -EIO) {
 		videobuf_qbuf(&ofh->vbq, b);
+		if (!(file->f_flags & O_NONBLOCK))
+			goto videobuf_dqbuf_again;
+		/*
+		 * We don't have a videobuf_buffer now --- maybe next
+		 * time...
+		 */
+		rval = -EAGAIN;
+	}
 
 	return rval;
 }
@@ -1344,17 +1354,17 @@ static unsigned int omap24xxcam_poll(struct file *file,
 	}
 	mutex_unlock(&cam->mutex);
 
-	mutex_lock(&fh->vbq.lock);
+	mutex_lock(&fh->vbq.vb_lock);
 	if (list_empty(&fh->vbq.stream)) {
-		mutex_unlock(&fh->vbq.lock);
+		mutex_unlock(&fh->vbq.vb_lock);
 		return POLLERR;
 	}
 	vb = list_entry(fh->vbq.stream.next, struct videobuf_buffer, stream);
-	mutex_unlock(&fh->vbq.lock);
+	mutex_unlock(&fh->vbq.vb_lock);
 
 	poll_wait(file, &vb->done, wait);
 
-	if (vb->state == STATE_DONE || vb->state == STATE_ERROR)
+	if (vb->state == VIDEOBUF_DONE || vb->state == VIDEOBUF_ERROR)
 		return POLLIN | POLLRDNORM;
 
 	return 0;
@@ -1366,7 +1376,6 @@ static int omap24xxcam_mmap_buffers(struct file *file,
 	struct omap24xxcam_fh *fh = file->private_data;
 	struct omap24xxcam_device *cam = fh->cam;
 	struct videobuf_queue *vbq = &fh->vbq;
-	struct videobuf_buffer *vb;
 	unsigned int first, last, size, i, j;
 	int err = 0;
 
@@ -1376,7 +1385,7 @@ static int omap24xxcam_mmap_buffers(struct file *file,
 		return -EBUSY;
 	}
 	mutex_unlock(&cam->mutex);
-	mutex_lock(&vbq->lock);
+	mutex_lock(&vbq->vb_lock);
 
 	/* look for first buffer to map */
 	for (first = 0; first < VIDEO_MAX_FRAME; first++) {
@@ -1401,20 +1410,21 @@ static int omap24xxcam_mmap_buffers(struct file *file,
 
 	size = 0;
 	for (i = first; i <= last; i++) {
-		vb = vbq->bufs[i];
-		for (j = 0; j < vb->dma.sglen; j++) {
+		struct videobuf_dmabuf *dma = videobuf_to_dma(vbq->bufs[i]);
+
+		for (j = 0; j < dma->sglen; j++) {
 			err = remap_pfn_range(
 				vma, vma->vm_start + size,
-				page_to_pfn(vb->dma.sglist[j].page),
-				vb->dma.sglist[j].length, vma->vm_page_prot);
+				page_to_pfn(sg_page(&dma->sglist[j])),
+				sg_dma_len(&dma->sglist[j]), vma->vm_page_prot);
 			if (err)
 				goto out;
-			size += vb->dma.sglist[j].length;
+			size += sg_dma_len(&dma->sglist[j]);
 		}
 	}
 
 out:
-	mutex_unlock(&vbq->lock);
+	mutex_unlock(&vbq->vb_lock);
 
 	return err;
 }
@@ -1483,10 +1493,10 @@ static int omap24xxcam_open(struct inode *inode, struct file *file)
 
 	spin_lock_init(&fh->vbq_lock);
 
-	videobuf_queue_init(&fh->vbq, &omap24xxcam_vbq_ops, NULL,
-			    &fh->vbq_lock, V4L2_BUF_TYPE_VIDEO_CAPTURE,
-			    V4L2_FIELD_NONE,
-			    sizeof(struct videobuf_buffer), fh);
+	videobuf_queue_pci_init(&fh->vbq, &omap24xxcam_vbq_ops, NULL,
+				&fh->vbq_lock, V4L2_BUF_TYPE_VIDEO_CAPTURE,
+				V4L2_FIELD_NONE,
+				sizeof(struct videobuf_buffer), fh);
 
 	return 0;
 
@@ -1509,12 +1519,13 @@ static int omap24xxcam_release(struct inode *inode, struct file *file)
 
 	flush_scheduled_work();
 
-	mutex_lock(&cam->mutex);
 	/* stop streaming capture */
+	videobuf_streamoff(&fh->vbq);
+
+	mutex_lock(&cam->mutex);
 	if (cam->streaming == file) {
 		cam->streaming = NULL;
 		mutex_unlock(&cam->mutex);
-		videobuf_streamoff(&fh->vbq);
 		sysfs_notify(&cam->dev->kobj, NULL, "streaming");
 	} else {
 		mutex_unlock(&cam->mutex);
@@ -1603,10 +1614,9 @@ static int omap24xxcam_resume(struct platform_device *pdev)
  *
  */
 
-static int omap24xxcam_device_register(struct v4l2_int_device *ctl,
-				       struct v4l2_int_device *s)
+static int omap24xxcam_device_register(struct v4l2_int_device *s)
 {
-	struct omap24xxcam_device *cam = ctl->priv;
+	struct omap24xxcam_device *cam = s->u.slave->master->priv;
 	struct video_device *vfd;
 	int rval;
 
@@ -1635,8 +1645,6 @@ static int omap24xxcam_device_register(struct v4l2_int_device *ctl,
 
 	strlcpy(vfd->name, CAM_NAME, sizeof(vfd->name));
 	vfd->type		 = VID_TYPE_CAPTURE | VID_TYPE_CHROMAKEY;
-	/* need to register for a VID_HARDWARE_* ID in videodev.h */
-	vfd->hardware		 = 0;
 	vfd->fops		 = &omap24xxcam_fops;
 	vfd->priv		 = cam;
 	vfd->minor		 = -1;
@@ -1681,14 +1689,14 @@ static int omap24xxcam_device_register(struct v4l2_int_device *ctl,
 	return 0;
 
 err:
-	omap24xxcam_device_unregister(ctl);
+	omap24xxcam_device_unregister(s);
 
 	return rval;
 }
 
-static void omap24xxcam_device_unregister(struct v4l2_int_device *ctl)
+static void omap24xxcam_device_unregister(struct v4l2_int_device *s)
 {
-	struct omap24xxcam_device *cam = ctl->priv;
+	struct omap24xxcam_device *cam = s->u.slave->master->priv;
 
 	omap24xxcam_sensor_exit(cam);
 

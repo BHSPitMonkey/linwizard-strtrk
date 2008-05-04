@@ -4,8 +4,8 @@
 /*
  * OMAP2/3 Power/Reset Management (PRM) register definitions
  *
- * Copyright (C) 2007 Texas Instruments, Inc.
- * Copyright (C) 2007 Nokia Corporation
+ * Copyright (C) 2007-2008 Texas Instruments, Inc.
+ * Copyright (C) 2007-2008 Nokia Corporation
  *
  * Written by Paul Walmsley
  *
@@ -14,12 +14,22 @@
  * published by the Free Software Foundation.
  */
 
-#include <linux/kernel.h>
 #include <asm/io.h>
-#include "prcm_common.h"
+#include <asm/bitops.h>
 
+#include "prcm-common.h"
 
-#define OMAP_PRM_REGADDR(module, reg)	(void __iomem *)IO_ADDRESS(OMAP2_PRM_BASE + module + reg)
+#ifndef __ASSEMBLER__
+#define OMAP_PRM_REGADDR(module, reg)					\
+	(void __iomem *)IO_ADDRESS(OMAP2_PRM_BASE + (module) + (reg))
+#else
+#define OMAP2420_PRM_REGADDR(module, reg)				\
+			IO_ADDRESS(OMAP2420_PRM_BASE + (module) + (reg))
+#define OMAP2430_PRM_REGADDR(module, reg)				\
+			IO_ADDRESS(OMAP2430_PRM_BASE + (module) + (reg))
+#define OMAP34XX_PRM_REGADDR(module, reg)				\
+			IO_ADDRESS(OMAP3430_PRM_BASE + (module) + (reg))
+#endif
 
 /*
  * Architecture-specific global PRM registers
@@ -53,7 +63,6 @@
 
 #define OMAP3430_PRM_IRQSTATUS_MPU	OMAP_PRM_REGADDR(OCP_MOD, 0x0018)
 #define OMAP3430_PRM_IRQENABLE_MPU	OMAP_PRM_REGADDR(OCP_MOD, 0x001c)
-
 
 #define OMAP3430_PRM_VC_SMPS_SA		OMAP_PRM_REGADDR(OMAP3430_GR_MOD, 0x0020)
 #define OMAP3430_PRM_VC_SMPS_VOL_RA	OMAP_PRM_REGADDR(OMAP3430_GR_MOD, 0x0024)
@@ -90,20 +99,23 @@
 #define OMAP3430_PRM_CLKSEL		OMAP_PRM_REGADDR(OMAP3430_CCR_MOD, 0x0040)
 #define OMAP3430_PRM_CLKOUT_CTRL	OMAP_PRM_REGADDR(OMAP3430_CCR_MOD, 0x0070)
 
-/* Power/reset management global register get/set */
+#ifndef __ASSEMBLER__
 
-static void __attribute__((unused)) prm_write_reg(u32 val, void __iomem *addr)
+/* Read-modify-write bits in a PRM register */
+static __inline__ u32 __attribute__((unused)) prm_rmw_reg_bits(u32 mask,
+						u32 bits, void __iomem *va)
 {
-	pr_debug("prm_write_reg: writing 0x%0x to 0x%0x\n", val, (u32)addr);
+	u32 v;
 
-	__raw_writel(val, addr);
+	v = __raw_readl(va);
+	v &= ~mask;
+	v |= bits;
+	__raw_writel(v, va);
+
+	return v;
 }
 
-static u32 __attribute__((unused)) prm_read_reg(void __iomem *addr)
-{
-	return __raw_readl(addr);
-}
-
+#endif
 
 /*
  * Module specific PRM registers from PRM_BASE + domain offset
@@ -122,8 +134,8 @@ static u32 __attribute__((unused)) prm_read_reg(void __iomem *addr)
 #define RM_RSTTIME					0x0054
 #define RM_RSTST					0x0058
 
-#define PM_WKEN1					0x00a0
-#define PM_WKEN						PM_WKEN1
+#define PM_WKEN						0x00a0
+#define PM_WKEN1					PM_WKEN
 #define PM_WKST						0x00b0
 #define PM_WKST1					PM_WKST
 #define PM_WKDEP					0x00c8
@@ -144,6 +156,22 @@ static u32 __attribute__((unused)) prm_read_reg(void __iomem *addr)
 #define OMAP3430_PRM_IRQSTATUS_IVA2			0x00f8
 #define OMAP3430_PRM_IRQENABLE_IVA2			0x00fc
 
+/* Read-modify-write bits in a PRM register (by domain) */
+static u32 __attribute__((unused)) prm_rmw_mod_reg_bits(u32 mask, u32 bits,
+							s16 module, s16 idx)
+{
+	return prm_rmw_reg_bits(mask, bits, OMAP_PRM_REGADDR(module, idx));
+}
+
+static u32 __attribute__((unused)) prm_set_mod_reg_bits(u32 bits, s16 module, s16 idx)
+{
+	return prm_rmw_mod_reg_bits(bits, bits, module, idx);
+}
+
+static u32 __attribute__((unused)) prm_clear_mod_reg_bits(u32 bits, s16 module, s16 idx)
+{
+	return prm_rmw_mod_reg_bits(bits, 0x0, module, idx);
+}
 
 /* Architecture-specific registers */
 
@@ -155,19 +183,23 @@ static u32 __attribute__((unused)) prm_read_reg(void __iomem *addr)
 #define OMAP24XX_PRCM_IRQSTATUS_IVA			0x00f8
 #define OMAP24XX_PRCM_IRQENABLE_IVA			0x00fc
 
+#ifndef __ASSEMBLER__
 
 /* Power/reset management domain register get/set */
 
-static void __attribute__((unused)) prm_write_mod_reg(u32 val, s16 module, s16 idx)
+static __inline__ void __attribute__((unused)) prm_write_mod_reg(u32 val,
+							s16 module, s16 idx)
 {
-	prm_write_reg(val, OMAP_PRM_REGADDR(module, idx));
+	__raw_writel(val, OMAP_PRM_REGADDR(module, idx));
 }
 
-static u32 __attribute__((unused)) prm_read_mod_reg(s16 module, s16 idx)
+static __inline__ u32 __attribute__((unused)) prm_read_mod_reg(s16 module,
+							s16 idx)
 {
-	return prm_read_reg(OMAP_PRM_REGADDR(module, idx));
+	return __raw_readl(OMAP_PRM_REGADDR(module, idx));
 }
 
+#endif
 
 /*
  * Bits common to specific registers

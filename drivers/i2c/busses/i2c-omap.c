@@ -5,7 +5,12 @@
  * Copyright (C) 2005 Nokia Corporation
  * Copyright (C) 2004 - 2007 Texas Instruments.
  *
- * Cleaned up by Juha YrjÃ¶lÃ¤ <juha.yrjola@nokia.com>
+ * Originally written by MontaVista Software, Inc.
+ * Additional contributions by:
+ *	Tony Lindgren <tony@atomide.com>
+ *	Imre Deak <imre.deak@nokia.com>
+ *	Juha Yrjölä <juha.yrjola@nokia.com>
+ *	Syed Khasim <x0khasim@ti.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -139,6 +144,7 @@ struct omap_i2c_dev {
 						 * if set, should be trsh+1
 						 */
 	unsigned		rev1:1;
+	unsigned		b_hw:1;		/* bad h/w fixes */
 	unsigned		idle:1;
 	u16			iestate;	/* Saved interrupt register */
 };
@@ -156,7 +162,7 @@ static inline u16 omap_i2c_read_reg(struct omap_i2c_dev *i2c_dev, int reg)
 
 static int omap_i2c_get_clocks(struct omap_i2c_dev *dev)
 {
-	if (cpu_is_omap16xx() || cpu_is_omap24xx()) {
+	if (cpu_is_omap16xx() || cpu_class_is_omap2()) {
 		dev->iclk = clk_get(dev->dev, "i2c_ick");
 		if (IS_ERR(dev->iclk)) {
 			dev->iclk = NULL;
@@ -216,7 +222,7 @@ static void omap_i2c_idle(struct omap_i2c_dev *dev)
 	dev->iestate = omap_i2c_read_reg(dev, OMAP_I2C_IE_REG);
 	omap_i2c_write_reg(dev, OMAP_I2C_IE_REG, 0);
 	if (dev->rev1)
-		iv = omap_i2c_read_reg(dev, OMAP_I2C_IV_REG);	/* Read clears */
+		iv = omap_i2c_read_reg(dev, OMAP_I2C_IV_REG);
 	else
 		omap_i2c_write_reg(dev, OMAP_I2C_STAT_REG, dev->iestate);
 	clk_disable(dev->fclk);
@@ -273,7 +279,7 @@ static int omap_i2c_init(struct omap_i2c_dev *dev)
 			psc = fclk_rate / 12000000;
 	}
 
-	if (cpu_is_omap2430()) {
+	if (cpu_is_omap2430() || cpu_is_omap34xx()) {
 
 		/* HSI2C controller internal clk rate should be 19.2 Mhz */
 		internal_clk = 19200;
@@ -584,7 +590,7 @@ omap_i2c_isr(int this_irq, void *dev_id)
 	struct omap_i2c_dev *dev = dev_id;
 	u16 bits;
 	u16 stat, w;
-	int count = 0;
+	int err, count = 0;
 
 	if (dev->idle)
 		return IRQ_NONE;
@@ -599,10 +605,19 @@ omap_i2c_isr(int this_irq, void *dev_id)
 
 		omap_i2c_write_reg(dev, OMAP_I2C_STAT_REG, stat);
 
-		if (stat & OMAP_I2C_STAT_ARDY) {
-			omap_i2c_complete_cmd(dev, 0);
-			continue;
+		err = 0;
+		if (stat & OMAP_I2C_STAT_NACK) {
+			err |= OMAP_I2C_STAT_NACK;
+			omap_i2c_write_reg(dev, OMAP_I2C_CON_REG,
+					   OMAP_I2C_CON_STP);
 		}
+		if (stat & OMAP_I2C_STAT_AL) {
+			dev_err(dev->dev, "Arbitration lost\n");
+			err |= OMAP_I2C_STAT_AL;
+		}
+		if (stat & (OMAP_I2C_STAT_ARDY | OMAP_I2C_STAT_NACK |
+					OMAP_I2C_STAT_AL))
+			omap_i2c_complete_cmd(dev, err);
 		if (stat & (OMAP_I2C_STAT_RRDY | OMAP_I2C_STAT_RDR)) {
 			u8 num_bytes = 1;
 			if (dev->fifo_size) {
@@ -615,10 +630,9 @@ omap_i2c_isr(int this_irq, void *dev_id)
 				if (dev->buf_len) {
 					*dev->buf++ = w;
 					dev->buf_len--;
-					/*
-					 * Data reg in 2430 is 8 bit wide,
-					 */
-					if (!cpu_is_omap2430()) {
+					/* Data reg from 2430 is 8 bit wide */
+					if (!cpu_is_omap2430() &&
+							!cpu_is_omap34xx()) {
 						if (dev->buf_len) {
 							*dev->buf++ = w >> 8;
 							dev->buf_len--;
@@ -626,18 +640,15 @@ omap_i2c_isr(int this_irq, void *dev_id)
 					}
 				} else {
 					if (stat & OMAP_I2C_STAT_RRDY)
-						dev_err(dev->dev, "RRDY IRQ while no data"
+						dev_err(dev->dev, "RRDY IRQ while no data "
 								"requested\n");
 					if (stat & OMAP_I2C_STAT_RDR)
-						dev_err(dev->dev, "RDR IRQ while no data"
+						dev_err(dev->dev, "RDR IRQ while no data "
 								"requested\n");
 					break;
 				}
-			} else
-				dev_err(dev->dev, "RRDY IRQ while no data "
-						"requested\n");
-			omap_i2c_ack_stat(dev, OMAP_I2C_STAT_RRDY);
-			continue;
+			}
+			omap_i2c_ack_stat(dev, stat & (OMAP_I2C_STAT_RRDY | OMAP_I2C_STAT_RDR));
 		}
 		if (stat & (OMAP_I2C_STAT_XRDY | OMAP_I2C_STAT_XDR)) {
 			u8 num_bytes = 1;
@@ -651,10 +662,9 @@ omap_i2c_isr(int this_irq, void *dev_id)
 				if (dev->buf_len) {
 					w = *dev->buf++;
 					dev->buf_len--;
-					/*
-					 * Data reg in 2430 is 8 bit wide,
-					 */
-					if (!cpu_is_omap2430()) {
+					/* Data reg from  2430 is 8 bit wide */
+					if (!cpu_is_omap2430() &&
+							!cpu_is_omap34xx()) {
 						if (dev->buf_len) {
 							w |= *dev->buf++ << 8;
 							dev->buf_len--;
@@ -662,19 +672,16 @@ omap_i2c_isr(int this_irq, void *dev_id)
 					}
 				} else {
 					if (stat & OMAP_I2C_STAT_XRDY)
-						dev_err(dev->dev, "XRDY IRQ while no"
+						dev_err(dev->dev, "XRDY IRQ while no "
 								"data to send\n");
 					if (stat & OMAP_I2C_STAT_XDR)
-						dev_err(dev->dev, "XDR IRQ while no"
+						dev_err(dev->dev, "XDR IRQ while no "
 								"data to send\n");
 					break;
 				}
-			} else
-				dev_err(dev->dev, "XRDY IRQ while no "
-					"data to send\n");
-			omap_i2c_write_reg(dev, OMAP_I2C_DATA_REG, w);
-			omap_i2c_ack_stat(dev, OMAP_I2C_STAT_XRDY);
-			continue;
+				omap_i2c_write_reg(dev, OMAP_I2C_DATA_REG, w);
+			}
+			omap_i2c_ack_stat(dev, stat & (OMAP_I2C_STAT_XRDY | OMAP_I2C_STAT_XDR));
 		}
 		if (stat & OMAP_I2C_STAT_ROVR) {
 			dev_err(dev->dev, "Receive overrun\n");
@@ -683,15 +690,6 @@ omap_i2c_isr(int this_irq, void *dev_id)
 		if (stat & OMAP_I2C_STAT_XUDF) {
 			dev_err(dev->dev, "Transmit overflow\n");
 			dev->cmd_err |= OMAP_I2C_STAT_XUDF;
-		}
-		if (stat & OMAP_I2C_STAT_NACK) {
-			omap_i2c_complete_cmd(dev, OMAP_I2C_STAT_NACK);
-			omap_i2c_write_reg(dev, OMAP_I2C_CON_REG,
-					   OMAP_I2C_CON_STP);
-		}
-		if (stat & OMAP_I2C_STAT_AL) {
-			dev_err(dev->dev, "Arbitration lost\n");
-			omap_i2c_complete_cmd(dev, OMAP_I2C_STAT_AL);
 		}
 	}
 
@@ -756,7 +754,7 @@ omap_i2c_probe(struct platform_device *pdev)
 	if (cpu_is_omap15xx())
 		dev->rev1 = omap_i2c_read_reg(dev, OMAP_I2C_REV_REG) < 0x20;
 
-	if (cpu_is_omap2430()) {
+	if (cpu_is_omap2430() || cpu_is_omap34xx()) {
 		/* Set up the fifo size - Get total size */
 		dev->fifo_size = 0x8 <<
 			((omap_i2c_read_reg(dev, OMAP_I2C_BUFSTAT_REG) >> 14) & 0x3);

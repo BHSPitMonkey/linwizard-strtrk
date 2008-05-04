@@ -35,7 +35,6 @@ extern unsigned int system_rev;
  */
 #undef MULTI_OMAP1
 #undef MULTI_OMAP2
-#undef MULTI_OMAP3
 #undef OMAP_NAME
 
 #ifdef CONFIG_ARCH_OMAP730
@@ -97,14 +96,6 @@ extern unsigned int system_rev;
 #  define MULTI_OMAP2
 # else
 #  define OMAP_NAME omap3430
-# endif
-#endif
-#ifdef CONFIG_ARCH_OMAP34XX
-# if (defined(OMAP_NAME) || defined(MULTI_OMAP1) || defined(MULTI_OMAP2))
-#  error "OMAP1 / OMAP2 / OMAP3 can't be selected at the same time"
-# else
-#  undef MULTI_OMAP3
-#  define OMAP_NAME omap34xx
 # endif
 #endif
 
@@ -385,6 +376,8 @@ IS_OMAP_TYPE(3430, 0x3430)
 #define OMAP2430_REV_ES1_0	0x24300000
 #define OMAP3430_REV_ES1_0	0x34300000
 #define OMAP3430_REV_ES2_0	0x34301000
+#define OMAP3430_REV_ES2_1	0x34302000
+#define OMAP3430_REV_ES2_2	0x34303000
 
 /*
  * Macro to detect device type i.e. EMU/HS/TST/GP/BAD

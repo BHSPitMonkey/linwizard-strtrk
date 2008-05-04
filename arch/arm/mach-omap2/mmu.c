@@ -11,18 +11,8 @@
  * TWL support: Hiroshi DOYU <Hiroshi.DOYU@nokia.com>
  *
  * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  */
 #include <linux/types.h>
 #include <linux/init.h>
@@ -153,7 +143,7 @@ static int omap2_mmu_startup(struct omap_mmu *mmu)
 
 	dspvect_page = (void *)__get_dma_pages(GFP_KERNEL, 0);
 	if (dspvect_page == NULL) {
-		dev_err(&mmu->dev, "MMU %s: failed to allocate memory "
+		dev_err(mmu->dev, "MMU %s: failed to allocate memory "
 			"for vector table\n", mmu->name);
 		return -ENOMEM;
 	}
@@ -266,7 +256,7 @@ omap2_mmu_cam_ram_alloc(struct omap_mmu *mmu, struct omap_mmu_tlb_entry *entry)
 	struct cam_ram_regset *cr;
 
 	if (entry->va & ~(get_cam_va_mask(entry->pgsz))) {
-		dev_err(&mmu->dev, "MMU %s: mapping vadr (0x%06lx) is not on"
+		dev_err(mmu->dev, "MMU %s: mapping vadr (0x%06lx) is not on"
 			" an aligned boundary\n", mmu->name, entry->va);
 		return ERR_PTR(-EINVAL);
 	}
