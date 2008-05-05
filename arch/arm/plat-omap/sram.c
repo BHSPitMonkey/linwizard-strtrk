@@ -24,6 +24,7 @@
 
 #include <asm/arch/sram.h>
 #include <asm/arch/board.h>
+#include <asm/arch/cpu.h>
 
 #include <asm/arch/control.h>
 
@@ -33,8 +34,14 @@
 # include "../mach-omap2/sdrc.h"
 #endif
 
-#define OMAP1_SRAM_PA		0x20000000
-#define OMAP1_SRAM_VA		VMALLOC_END
+#ifdef CONFIG_ARCH_OMAP850
+/* This is safer on wizard */
+# define OMAP1_SRAM_PA		0x20000000
+# define OMAP1_SRAM_VA		0xd0000000
+#else
+# define OMAP1_SRAM_PA		0x20000000
+# define OMAP1_SRAM_VA		VMALLOC_END
+#endif
 #define OMAP2_SRAM_PA		0x40200000
 #define OMAP2_SRAM_PUB_PA	0x4020f800
 #define OMAP2_SRAM_VA		VMALLOC_END
