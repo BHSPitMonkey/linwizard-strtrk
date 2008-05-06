@@ -315,6 +315,14 @@ static void __init htcwizard_usb_otg(void)
 	omap_writel(omap_readl(OMAP730_MODE_1) & ~(1 << 11), OMAP730_MODE_1);
 }
 
+static void __init htcwizard_i2c_init(void)
+{
+	/* Set pin mux for I2C */
+	omap_writel(omap_readl(OMAP850_IO_CONF_5) & ~0x000000FF, OMAP850_IO_CONF_5);
+
+	omap_register_i2c_bus(1, 100, NULL, 0);
+}
+
 static void __init htcwizard_init(void)
 {
   printk("HTC Wizard init.\n");
@@ -327,7 +335,7 @@ static void __init htcwizard_init(void)
 
   htcwizard_usb_otg();
   htcwizard_usb_enable();
-  omap_register_i2c_bus(1, 100, NULL, 0);
+  htcwizard_i2c_init();
   htcwizard_mmc_init();
 
   /* For testing.. Disable for now
