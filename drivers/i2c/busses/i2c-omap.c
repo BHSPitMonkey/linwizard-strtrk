@@ -45,7 +45,7 @@
 /* timeout waiting for the controller to respond */
 #define OMAP_I2C_TIMEOUT (msecs_to_jiffies(1000))
 
-#ifdef CONFIG_MACH_OMAP_HTCWIZARD
+#ifdef CONFIG_ARCH_OMAP850
 # define OMAP_I2C_REV_REG		0x00
 # define OMAP_I2C_IE_REG			0x02
 # define OMAP_I2C_STAT_REG		0x04
