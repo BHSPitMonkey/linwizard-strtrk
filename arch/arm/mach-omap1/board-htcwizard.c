@@ -327,6 +327,7 @@ static void __init htcwizard_init(void)
 
   htcwizard_usb_otg();
   htcwizard_usb_enable();
+  omap_register_i2c_bus(1, 100, NULL, 0);
   htcwizard_mmc_init();
 
   /* For testing.. Disable for now

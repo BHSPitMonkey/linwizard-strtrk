@@ -45,23 +45,43 @@
 /* timeout waiting for the controller to respond */
 #define OMAP_I2C_TIMEOUT (msecs_to_jiffies(1000))
 
-#define OMAP_I2C_REV_REG		0x00
-#define OMAP_I2C_IE_REG			0x04
-#define OMAP_I2C_STAT_REG		0x08
-#define OMAP_I2C_IV_REG			0x0c
-#define OMAP_I2C_SYSS_REG		0x10
-#define OMAP_I2C_BUF_REG		0x14
-#define OMAP_I2C_CNT_REG		0x18
-#define OMAP_I2C_DATA_REG		0x1c
-#define OMAP_I2C_SYSC_REG		0x20
-#define OMAP_I2C_CON_REG		0x24
-#define OMAP_I2C_OA_REG			0x28
-#define OMAP_I2C_SA_REG			0x2c
-#define OMAP_I2C_PSC_REG		0x30
-#define OMAP_I2C_SCLL_REG		0x34
-#define OMAP_I2C_SCLH_REG		0x38
-#define OMAP_I2C_SYSTEST_REG		0x3c
-#define OMAP_I2C_BUFSTAT_REG		0x40
+#ifdef CONFIG_MACH_OMAP_HTCWIZARD
+# define OMAP_I2C_REV_REG		0x00
+# define OMAP_I2C_IE_REG			0x02
+# define OMAP_I2C_STAT_REG		0x04
+# define OMAP_I2C_IV_REG			0x06
+# define OMAP_I2C_SYSS_REG		0x08
+# define OMAP_I2C_BUF_REG		0x0a
+# define OMAP_I2C_CNT_REG		0x0c
+# define OMAP_I2C_DATA_REG		0x0e
+# define OMAP_I2C_SYSC_REG		0x10
+# define OMAP_I2C_CON_REG		0x12
+# define OMAP_I2C_OA_REG			0x14
+# define OMAP_I2C_SA_REG			0x16
+# define OMAP_I2C_PSC_REG		0x18
+# define OMAP_I2C_SCLL_REG		0x1a
+# define OMAP_I2C_SCLH_REG		0x1c
+# define OMAP_I2C_SYSTEST_REG		0x1e
+# define OMAP_I2C_BUFSTAT_REG		0x20
+#else
+# define OMAP_I2C_REV_REG		0x00
+# define OMAP_I2C_IE_REG			0x04
+# define OMAP_I2C_STAT_REG		0x08
+# define OMAP_I2C_IV_REG			0x0c
+# define OMAP_I2C_SYSS_REG		0x10
+# define OMAP_I2C_BUF_REG		0x14
+# define OMAP_I2C_CNT_REG		0x18
+# define OMAP_I2C_DATA_REG		0x1c
+# define OMAP_I2C_SYSC_REG		0x20
+# define OMAP_I2C_CON_REG		0x24
+# define OMAP_I2C_OA_REG			0x28
+# define OMAP_I2C_SA_REG			0x2c
+# define OMAP_I2C_PSC_REG		0x30
+# define OMAP_I2C_SCLL_REG		0x34
+# define OMAP_I2C_SCLH_REG		0x38
+# define OMAP_I2C_SYSTEST_REG		0x3c
+# define OMAP_I2C_BUFSTAT_REG		0x40
+#endif
 
 /* I2C Interrupt Enable Register (OMAP_I2C_IE): */
 #define OMAP_I2C_IE_XDR		(1 << 14)	/* TX Buffer draining int enable */
