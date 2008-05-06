@@ -240,7 +240,8 @@ static struct arm_idlect1_clk armxor_ck = {
 	.clk = {
 		.name		= "armxor_ck",
 		.parent		= &ck_ref,
-		.flags		= CLOCK_IN_OMAP1510 | CLOCK_IN_OMAP16XX |
+		.flags		= CLOCK_IN_OMAP1510 | CLOCK_IN_OMAP850 |
+		        CLOCK_IN_OMAP16XX |
 				  CLOCK_IN_OMAP310 | CLOCK_IDLE_CONTROL,
 		.enable_reg	= (void __iomem *)ARM_IDLECT2,
 		.enable_bit	= EN_XORPCK,
@@ -763,7 +764,8 @@ remains active during MPU idle whenever this is enabled */
 static struct clk i2c_fck = {
 	.name		= "i2c_fck",
 	.id		= 1,
-	.flags		= CLOCK_IN_OMAP310 | CLOCK_IN_OMAP1510 | CLOCK_IN_OMAP16XX |
+	.flags		= CLOCK_IN_OMAP310 | CLOCK_IN_OMAP850 |
+	             CLOCK_IN_OMAP1510 | CLOCK_IN_OMAP16XX |
 			  VIRTUAL_CLOCK | CLOCK_NO_IDLE_PARENT |
 			  ALWAYS_ENABLED,
 	.parent		= &armxor_ck.clk,
