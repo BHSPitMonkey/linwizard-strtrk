@@ -56,13 +56,6 @@
 #define HTCWIZARD_GPIO_DM 35
 #define HTCWIZARD_GPIO_DP 36
 
-/* FIXME: These are, at least, omap850 specific, they
-   should go away from this machine file */
-#define OMAP_MMC_REG_SYSC (0xfffb7800 + 0x32)
-#define OMAP_MMC_REG_SYSS (0xfffb7800 + 0x34)
-#define OMAP_MMC_REG_CTO  (0xfffb7800 + 0x0e)
-#define OMAP_MMC_REG_DTO  (0xfffb7800 + 0x1c)
-
 static struct omap_lcd_config htcwizard_lcd_config __initdata = {
 	.ctrl_name	= "internal",
 };
