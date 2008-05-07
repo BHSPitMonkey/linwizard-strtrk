@@ -293,6 +293,7 @@ __pabt_svc:
 	mrs	r9, cpsr
 	tst	r3, #PSR_I_BIT
 	biceq	r9, r9, #PSR_I_BIT
+	msr	cpsr_c, r9
 
 	@
 	@ set args, then call main handler
@@ -300,15 +301,7 @@ __pabt_svc:
 	@  r0 - address of faulting instruction
 	@  r1 - pointer to registers on stack
 	@
-#ifdef MULTI_PABORT
-	mov	r0, r2			@ pass address of aborted instruction.
-	ldr	r4, .LCprocfns
-	mov	lr, pc
-	ldr	pc, [r4, #]
-#else
-	CPU_PABORT_HANDLER(r0, r2)
-#endif
-	msr	cpsr_c, r9			@ Maybe enable interrupts
+	mov	r0, r2				@ address (pc)
 	mov	r1, sp				@ regs
 	bl	do_PrefetchAbort		@ call abort handler
 
@@ -462,6 +455,8 @@ __irq_usr:
 __und_usr:
 	usr_entry
 
+	tst	r3, #PSR_T_BIT			@ Thumb mode?
+	bne	__und_usr_unknown		@ ignore FP
 	sub	r4, r2, #4
 
 	@
@@ -482,14 +477,10 @@ __und_usr:
  * The out of line fixup for the ldrt above.
  */
 	.section .fixup, "ax"
-4:	mov	pc, r9
+2:	mov	pc, r9
 	.previous
 	.section __ex_table,"a"
-	.long	1b, 4b
-#if __LINUX_ARM_ARCH__ >= 7
-	.long	2b, 4b
-	.long	3b, 4b
-#endif
+	.long	1b, 2b
 	.previous
 
 /*
@@ -628,15 +619,8 @@ __und_usr_unknown:
 __pabt_usr:
 	usr_entry
 
-#ifdef MULTI_PABORT
-	mov	r0, r2			@ pass address of aborted instruction.
-	ldr	r4, .LCprocfns
-	mov	lr, pc
-	ldr	pc, [r4, #]
-#else
-	CPU_PABORT_HANDLER(r0, r2)
-#endif
 	enable_irq				@ Enable interrupts
+	mov	r0, r2				@ address (pc)
 	mov	r1, sp				@ regs
 	bl	do_PrefetchAbort		@ call abort handler
 	/* fall through */
@@ -657,12 +641,6 @@ ENTRY(__switch_to)
 	add	ip, r1, #TI_CPU_SAVE
 	ldr	r3, [r2, #TI_TP_VALUE]
 	stmia	ip!, {r4 - sl, fp, sp, lr}	@ Store most regs on stack
-#ifdef CONFIG_ARM_XENON
-	mrc	p14, 6, r4, c1, c0, 0		@ current xenon state
-	ldr	r5, [r2, #TI_XENONSTATE]	@ value to restore
-	str	r4, [r1, #TI_XENONSTATE]	@ save current
-	mcr	p14, 6, r5, c1, c0, 0		@ restore new value
-#endif
 #ifdef CONFIG_MMU
 	ldr	r6, [r2, #TI_CPU_DOMAIN]
 #endif

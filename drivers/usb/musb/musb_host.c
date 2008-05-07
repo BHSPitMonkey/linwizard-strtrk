@@ -103,7 +103,7 @@
 
 static void musb_ep_program(struct musb *musb, u8 epnum,
 			struct urb *urb, unsigned int nOut,
-			u8 * buf, u32 len);
+			u8 *buf, u32 len);
 
 /*
  * Clear TX fifo. Needed to avoid BABBLE errors.
@@ -210,7 +210,7 @@ musb_start_urb(struct musb *musb, int is_in, struct musb_qh *qh)
 			case USB_ENDPOINT_XFER_BULK:	s = "-bulk"; break;
 			case USB_ENDPOINT_XFER_ISOC:	s = "-iso"; break;
 			default:			s = "-intr"; break;
-			}; s;}),
+			}; s; }),
 			epnum, buf, len);
 
 	/* Configure endpoint */
@@ -244,7 +244,7 @@ musb_start_urb(struct musb *musb, int is_in, struct musb_qh *qh)
 		} else {
 			qh->frame = urb->start_frame;
 			/* enable SOF interrupt so we can count down */
-DBG(1,"SOF for %d\n", epnum);
+			DBG(1, "SOF for %d\n", epnum);
 #if 1 /* ifndef	CONFIG_ARCH_DAVINCI */
 			musb_writeb(mbase, MUSB_INTRUSBE, 0xff);
 #endif
@@ -268,18 +268,6 @@ __musb_giveback(struct musb *musb, struct urb *urb, int status)
 __releases(musb->lock)
 __acquires(musb->lock)
 {
-	if ((urb->transfer_flags & URB_SHORT_NOT_OK)
-			&& (urb->actual_length < urb->transfer_buffer_length)
-			&& status == 0
-			&& usb_pipein(urb->pipe))
-		status = -EREMOTEIO;
-
-	spin_lock(&urb->lock);
-	urb->hcpriv = NULL;
-	if (urb->status == -EINPROGRESS)
-		urb->status = status;
-	spin_unlock(&urb->lock);
-
 	DBG(({ int level; switch (urb->status) {
 				case 0:
 					level = 4;
@@ -304,7 +292,7 @@ __acquires(musb->lock)
 			);
 
 	spin_unlock(&musb->lock);
-	usb_hcd_giveback_urb(musb_to_hcd(musb), urb);
+	usb_hcd_giveback_urb(musb_to_hcd(musb), urb, status);
 	spin_lock(&musb->lock);
 }
 
@@ -364,6 +352,8 @@ musb_giveback(struct musb_qh *qh, struct urb *urb, int status)
 			status = -EXDEV;
 		break;
 	}
+
+	usb_hcd_unlink_urb_from_ep(musb_to_hcd(musb), urb);
 
 	qh->is_ready = 0;
 	__musb_giveback(musb, urb, status);
@@ -449,10 +439,9 @@ static inline u16 musb_h_flush_rxfifo(struct musb_hw_ep *hw_ep, u16 csr)
 	 * leave toggle alone (may not have been saved yet)
 	 */
 	csr |= MUSB_RXCSR_FLUSHFIFO | MUSB_RXCSR_RXPKTRDY;
-	csr &= ~( MUSB_RXCSR_H_REQPKT
+	csr &= ~(MUSB_RXCSR_H_REQPKT
 		| MUSB_RXCSR_H_AUTOREQ
-		| MUSB_RXCSR_AUTOCLEAR
-		);
+		| MUSB_RXCSR_AUTOCLEAR);
 
 	/* write 2x to allow double buffering */
 	musb_writew(hw_ep->regs, MUSB_RXCSR, csr);
@@ -624,7 +613,7 @@ musb_rx_reinit(struct musb *musb, struct musb_qh *qh, struct musb_hw_ep *ep)
  */
 static void musb_ep_program(struct musb *musb, u8 epnum,
 			struct urb *urb, unsigned int is_out,
-			u8 * buf, u32 len)
+			u8 *buf, u32 len)
 {
 	struct dma_controller	*dma_controller;
 	struct dma_channel	*dma_channel;
@@ -764,7 +753,7 @@ static void musb_ep_program(struct musb *musb, u8 epnum,
 			csr &= ~(MUSB_TXCSR_AUTOSET
 				| MUSB_TXCSR_DMAMODE
 				| MUSB_TXCSR_DMAENAB);
-                        csr |= MUSB_TXCSR_MODE;
+			csr |= MUSB_TXCSR_MODE;
 			musb_writew(epio, MUSB_TXCSR,
 				csr | MUSB_TXCSR_MODE);
 
@@ -1268,7 +1257,7 @@ void musb_host_tx(struct musb *musb, u8 epnum)
 			d->actual_length = qh->segsize;
 			if (++qh->iso_idx >= urb->number_of_packets) {
 				done = true;
-			} else if (!dma) {
+			} else {
 				d++;
 				buf = urb->transfer_buffer + d->offset;
 				wLength = d->length;
@@ -1280,8 +1269,8 @@ void musb_host_tx(struct musb *musb, u8 epnum)
 			if (qh->segsize < qh->maxpacket)
 				done = true;
 			else if (qh->offset == urb->transfer_buffer_length
-					&& !(urb-> transfer_flags
-							& URB_ZERO_PACKET))
+					&& !(urb->transfer_flags
+						& URB_ZERO_PACKET))
 				done = true;
 			if (!done) {
 				buf = urb->transfer_buffer
@@ -1552,7 +1541,7 @@ void musb_host_rx(struct musb *musb, u8 epnum)
 		if (dma) {
 			struct dma_controller	*c;
 			u16			rx_count;
-			int			status;
+			int			ret;
 
 			rx_count = musb_readw(epio, MUSB_RXCOUNT);
 
@@ -1611,7 +1600,7 @@ void musb_host_rx(struct musb *musb, u8 epnum)
 			 * transfer_buffer_length needs to be
 			 * adjusted first...
 			 */
-			status = c->channel_program(
+			ret = c->channel_program(
 				dma, qh->maxpacket,
 				dma->desired_mode,
 				urb->transfer_dma
@@ -1620,7 +1609,7 @@ void musb_host_rx(struct musb *musb, u8 epnum)
 					? rx_count
 					: urb->transfer_buffer_length);
 
-			if (!status) {
+			if (!ret) {
 				c->channel_release(dma);
 				dma = hw_ep->rx_channel = NULL;
 				/* REVISIT reset CSR */
@@ -1633,6 +1622,19 @@ void musb_host_rx(struct musb *musb, u8 epnum)
 					epnum, iso_err);
 			DBG(6, "read %spacket\n", done ? "last " : "");
 		}
+	}
+
+	if (dma && usb_pipeisoc(pipe)) {
+		struct usb_iso_packet_descriptor	*d;
+		int					iso_stat = status;
+
+		d = urb->iso_frame_desc + qh->iso_idx;
+		d->actual_length += xfer_len;
+		if (iso_err) {
+			iso_stat = -EILSEQ;
+			urb->error_count++;
+		}
+		d->status = iso_stat;
 	}
 
 finish:
@@ -1738,21 +1740,27 @@ success:
 
 static int musb_urb_enqueue(
 	struct usb_hcd			*hcd,
-	struct usb_host_endpoint	*hep,
 	struct urb			*urb,
 	gfp_t				mem_flags)
 {
 	unsigned long			flags;
 	struct musb			*musb = hcd_to_musb(hcd);
+	struct usb_host_endpoint	*hep = urb->ep;
 	struct musb_qh			*qh = hep->hcpriv;
 	struct usb_endpoint_descriptor	*epd = &hep->desc;
-	int				status;
+	int				ret;
 	unsigned			type_reg;
 	unsigned			interval;
 
 	/* host role must be active */
 	if (!is_host_active(musb) || !musb->is_active)
 		return -ENODEV;
+
+	spin_lock_irqsave(&musb->lock, flags);
+	ret = usb_hcd_link_urb_to_ep(hcd, urb);
+	spin_unlock_irqrestore(&musb->lock, flags);
+	if (ret)
+		return ret;
 
 	/* DMA mapping was already done, if needed, and this urb is on
 	 * hep->urb_list ... so there's little to do unless hep wasn't
@@ -1774,8 +1782,10 @@ static int musb_urb_enqueue(
 	 * for bugs in other kernel code to break this driver...
 	 */
 	qh = kzalloc(sizeof *qh, mem_flags);
-	if (!qh)
+	if (!qh) {
+		usb_hcd_unlink_urb_from_ep(hcd, urb);
 		return -ENOMEM;
+	}
 
 	qh->hep = hep;
 	qh->dev = urb->dev;
@@ -1786,7 +1796,7 @@ static int musb_urb_enqueue(
 
 	/* no high bandwidth support yet */
 	if (qh->maxpacket & ~0x7ff) {
-		status = -EMSGSIZE;
+		ret = -EMSGSIZE;
 		goto done;
 	}
 
@@ -1870,12 +1880,12 @@ static int musb_urb_enqueue(
 		 * odd, rare, error prone, but legal.
 		 */
 		kfree(qh);
-		status = 0;
+		ret = 0;
 	} else
-		status = musb_schedule(musb, qh,
+		ret = musb_schedule(musb, qh,
 				epd->bEndpointAddress & USB_ENDPOINT_DIR_MASK);
 
-	if (status == 0) {
+	if (ret == 0) {
 		urb->hcpriv = qh;
 		/* FIXME set urb->start_frame for iso/intr, it's tested in
 		 * musb_start_urb(), but otherwise only konicawc cares ...
@@ -1884,9 +1894,11 @@ static int musb_urb_enqueue(
 	spin_unlock_irqrestore(&musb->lock, flags);
 
 done:
-	if (status != 0)
+	if (ret != 0) {
+		usb_hcd_unlink_urb_from_ep(hcd, urb);
 		kfree(qh);
-	return status;
+	}
+	return ret;
 }
 
 
@@ -1932,13 +1944,12 @@ static int musb_cleanup_urb(struct urb *urb, struct musb_qh *qh, int is_in)
 	} else {
 		musb_h_tx_flush_fifo(ep);
 		csr = musb_readw(epio, MUSB_TXCSR);
-		csr &= ~( MUSB_TXCSR_AUTOSET
+		csr &= ~(MUSB_TXCSR_AUTOSET
 			| MUSB_TXCSR_DMAENAB
 			| MUSB_TXCSR_H_RXSTALL
 			| MUSB_TXCSR_H_NAKTIMEOUT
 			| MUSB_TXCSR_H_ERROR
-			| MUSB_TXCSR_TXPKTRDY
-			);
+			| MUSB_TXCSR_TXPKTRDY);
 		musb_writew(epio, MUSB_TXCSR, csr);
 		/* REVISIT may need to clear FLUSHFIFO ... */
 		musb_writew(epio, MUSB_TXCSR, csr);
@@ -1950,14 +1961,13 @@ static int musb_cleanup_urb(struct urb *urb, struct musb_qh *qh, int is_in)
 	return status;
 }
 
-static int musb_urb_dequeue(struct usb_hcd *hcd, struct urb *urb)
+static int musb_urb_dequeue(struct usb_hcd *hcd, struct urb *urb, int status)
 {
 	struct musb		*musb = hcd_to_musb(hcd);
 	struct musb_qh		*qh;
 	struct list_head	*sched;
-	struct urb		*tmp;
 	unsigned long		flags;
-	int			status = -ENOENT;
+	int			ret;
 
 	DBG(4, "urb=%p, dev%d ep%d%s\n", urb,
 			usb_pipedevice(urb->pipe),
@@ -1965,31 +1975,12 @@ static int musb_urb_dequeue(struct usb_hcd *hcd, struct urb *urb)
 			usb_pipein(urb->pipe) ? "in" : "out");
 
 	spin_lock_irqsave(&musb->lock, flags);
-
-	/* make sure the urb is still queued and not completed */
-	spin_lock(&urb->lock);
-	qh = urb->hcpriv;
-	if (qh) {
-		struct usb_host_endpoint	*hep;
-
-		hep = qh->hep;
-		list_for_each_entry(tmp, &hep->urb_list, urb_list) {
-			if (urb == tmp) {
-				status = 0;
-				break;
-			}
-		}
-	}
-	spin_unlock(&urb->lock);
-
-	/* already completed */
-	if (!qh) {
-		status = 0;
+	ret = usb_hcd_check_unlink_urb(hcd, urb, status);
+	if (ret)
 		goto done;
-	}
 
-	/* still queued but not found on the list */
-	if (status)
+	qh = urb->hcpriv;
+	if (!qh)
 		goto done;
 
 	/* Any URB not actively programmed into endpoint hardware can be
@@ -2002,7 +1993,7 @@ static int musb_urb_dequeue(struct usb_hcd *hcd, struct urb *urb)
 	 * OK to hold off until after some IRQ, though.
 	 */
 	if (!qh->is_ready || urb->urb_list.prev != &qh->hep->urb_list)
-		status = -EINPROGRESS;
+		ret = -EINPROGRESS;
 	else {
 		switch (qh->type) {
 		case USB_ENDPOINT_XFER_CONTROL:
@@ -2025,18 +2016,18 @@ static int musb_urb_dequeue(struct usb_hcd *hcd, struct urb *urb)
 	}
 
 	/* NOTE:  qh is invalid unless !list_empty(&hep->urb_list) */
-	if (status < 0 || (sched && qh != first_qh(sched))) {
+	if (ret < 0 || (sched && qh != first_qh(sched))) {
 		int	ready = qh->is_ready;
 
-		status = 0;
+		ret = 0;
 		qh->is_ready = 0;
 		__musb_giveback(musb, urb, 0);
 		qh->is_ready = ready;
 	} else
-		status = musb_cleanup_urb(urb, qh, urb->pipe & USB_DIR_IN);
+		ret = musb_cleanup_urb(urb, qh, urb->pipe & USB_DIR_IN);
 done:
 	spin_unlock_irqrestore(&musb->lock, flags);
-	return status;
+	return ret;
 }
 
 /* disable an endpoint */
@@ -2082,10 +2073,8 @@ musb_h_disable(struct usb_hcd *hcd, struct usb_host_endpoint *hep)
 		urb = next_urb(qh);
 
 		/* make software (then hardware) stop ASAP */
-		spin_lock(&urb->lock);
-		if (urb->status == -EINPROGRESS)
+		if (!urb->unlinked)
 			urb->status = -ESHUTDOWN;
-		spin_unlock(&urb->lock);
 
 		/* cleanup */
 		musb_cleanup_urb(urb, qh, urb->pipe & USB_DIR_IN);
@@ -2148,7 +2137,7 @@ static int musb_bus_resume(struct usb_hcd *hcd)
 const struct hc_driver musb_hc_driver = {
 	.description		= "musb-hcd",
 	.product_desc		= "MUSB HDRC host driver",
-	.hcd_priv_size		= sizeof (struct musb),
+	.hcd_priv_size		= sizeof(struct musb),
 	.flags			= HCD_USB2 | HCD_MEMORY,
 
 	/* not using irq handler or reset hooks from usbcore, since

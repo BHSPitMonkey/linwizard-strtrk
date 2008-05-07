@@ -32,8 +32,8 @@
 #include "memory.h"
 #include "sdrc.h"
 
-#define SMS_SYSCONFIG			(OMAP2_SMS_BASE + 0x010)
-
+unsigned long omap2_sdrc_base;
+unsigned long omap2_sms_base;
 
 static struct memory_timings mem_timings;
 static u32 curr_perf_level = CORE_CLK_SRC_DPLL_X2;
@@ -93,7 +93,7 @@ u32 omap2_reprogram_sdrc(u32 level, u32 force)
 	m_type = omap2_memory_get_type();
 
 	local_irq_save(flags);
-	prm_write_reg(0xffff, OMAP24XX_PRCM_VOLTSETUP);
+	__raw_writel(0xffff, OMAP24XX_PRCM_VOLTSETUP);
 	omap2_sram_reprogram_sdrc(level, dll_ctrl, m_type);
 	curr_perf_level = level;
 	local_irq_restore(flags);
@@ -159,14 +159,13 @@ void __init omap2_init_memory(void)
 {
 	u32 l;
 
-	l = SMS_SYSCONFIG;
+	l = sms_read_reg(SMS_SYSCONFIG);
 	l &= ~(0x3 << 3);
 	l |= (0x2 << 3);
-	SMS_SYSCONFIG = l;
+	sms_write_reg(l, SMS_SYSCONFIG);
 
-	l = SDRC_SYSCONFIG;
+	l = sdrc_read_reg(SDRC_SYSCONFIG);
 	l &= ~(0x3 << 3);
 	l |= (0x2 << 3);
-	SDRC_SYSCONFIG = l;
-
+	sdrc_write_reg(l, SDRC_SYSCONFIG);
 }

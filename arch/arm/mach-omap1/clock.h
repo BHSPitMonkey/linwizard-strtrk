@@ -240,7 +240,8 @@ static struct arm_idlect1_clk armxor_ck = {
 	.clk = {
 		.name		= "armxor_ck",
 		.parent		= &ck_ref,
-		.flags		= CLOCK_IN_OMAP1510 | CLOCK_IN_OMAP16XX |
+		.flags		= CLOCK_IN_OMAP1510 | CLOCK_IN_OMAP850 |
+		        CLOCK_IN_OMAP16XX |
 				  CLOCK_IN_OMAP310 | CLOCK_IDLE_CONTROL,
 		.enable_reg	= (void __iomem *)ARM_IDLECT2,
 		.enable_bit	= EN_XORPCK,
@@ -732,6 +733,20 @@ static struct clk mmc2_ck = {
 	.disable	= &omap1_clk_disable_generic,
 };
 
+static struct clk mmc3_ck = {
+	.name           = "mmc_ck",
+	.id             = 3,
+	/* Functional clock is direct from ULPD, interface clock is ARMPER */
+	.parent         = &armper_ck.clk,
+	.rate           = 48000000,
+	.flags          = CLOCK_IN_OMAP730 | CLOCK_IN_OMAP850 |
+              RATE_FIXED | ENABLE_REG_32BIT | CLOCK_NO_IDLE_PARENT,
+	.enable_reg     = (void __iomem *)SOFT_REQ_REG,
+	.enable_bit     = 12,
+	.enable         = &omap1_clk_enable_generic,
+	.disable        = &omap1_clk_disable_generic,
+};
+
 static struct clk virtual_ck_mpu = {
 	.name		= "mpu",
 	.flags		= CLOCK_IN_OMAP1510 | CLOCK_IN_OMAP16XX |
@@ -749,7 +764,8 @@ remains active during MPU idle whenever this is enabled */
 static struct clk i2c_fck = {
 	.name		= "i2c_fck",
 	.id		= 1,
-	.flags		= CLOCK_IN_OMAP310 | CLOCK_IN_OMAP1510 | CLOCK_IN_OMAP16XX |
+	.flags		= CLOCK_IN_OMAP310 | CLOCK_IN_OMAP850 |
+	             CLOCK_IN_OMAP1510 | CLOCK_IN_OMAP16XX |
 			  VIRTUAL_CLOCK | CLOCK_NO_IDLE_PARENT |
 			  ALWAYS_ENABLED,
 	.parent		= &armxor_ck.clk,
@@ -837,6 +853,7 @@ static struct clk * onchip_clks[] = {
 	&bclk_1510,  &bclk_16xx,
 	&mmc1_ck,
 	&mmc2_ck,
+	&mmc3_ck,
 	/* Virtual clocks */
 	&virtual_ck_mpu,
 	&i2c_fck,

@@ -41,7 +41,6 @@ static struct gpio_keys_button apollon_gpio_keys_buttons[] = {
 		.gpio		= SW_DOWN_GPIO58,
 		.desc		= "down sw",
 	},
-#ifdef CONFIG_MACH_OMAP_APOLLON_PLUS
 	[3] = {
 		.code		= KEY_LEFT,
 		.gpio		= SW_LEFT_GPIO95,
@@ -57,7 +56,6 @@ static struct gpio_keys_button apollon_gpio_keys_buttons[] = {
 		.gpio		= SW_ESC_GPIO97,
 		.desc		= "esc sw",
 	},
-#endif
 };
 
 static struct gpio_keys_platform_data apollon_gpio_keys = {
@@ -77,30 +75,20 @@ static void __init apollon_sw_init(void)
 {
 	/* Enter SW - Y11 */
 	omap_cfg_reg(Y11_242X_GPIO16);
-	omap_request_gpio(SW_ENTER_GPIO16);
-	omap_set_gpio_direction(SW_ENTER_GPIO16, 1);
 	/* Up SW - AA12 */
 	omap_cfg_reg(AA12_242X_GPIO17);
-	omap_request_gpio(SW_UP_GPIO17);
-	omap_set_gpio_direction(SW_UP_GPIO17, 1);
 	/* Down SW - AA8 */
 	omap_cfg_reg(AA8_242X_GPIO58);
-	omap_request_gpio(SW_DOWN_GPIO58);
-	omap_set_gpio_direction(SW_DOWN_GPIO58, 1);
-#ifdef CONFIG_MACH_OMAP_APOLLON_PLUS
-	/* Left SW - P18 */
-	omap_cfg_reg(P18_24XX_GPIO95);
-	omap_request_gpio(SW_LEFT_GPIO95);
-	omap_set_gpio_direction(SW_LEFT_GPIO95, 1);
-	/* Right SW - M18 */
-	omap_cfg_reg(M18_24XX_GPIO96);
-	omap_request_gpio(SW_RIGHT_GPIO96);
-	omap_set_gpio_direction(SW_RIGHT_GPIO96, 1);
-	/* Esc SW - L14 */
-	omap_cfg_reg(L14_24XX_GPIO97);
-	omap_request_gpio(SW_ESC_GPIO97);
-	omap_set_gpio_direction(SW_ESC_GPIO97, 1);
-#endif
+
+	if (apollon_plus()) {
+		/* Left SW - P18 */
+		omap_cfg_reg(P18_24XX_GPIO95);
+		/* Right SW - M18 */
+		omap_cfg_reg(M18_24XX_GPIO96);
+		/* Esc SW - L14 */
+		omap_cfg_reg(L14_24XX_GPIO97);
+	} else
+		apollon_gpio_keys.nbuttons = 3;
 }
 
 static int __init omap_apollon_keys_init(void)

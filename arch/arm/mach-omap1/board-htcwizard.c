@@ -51,13 +51,17 @@
 
 #include <linux/delay.h>
 
-#define ADS7846_PENDOWN_GPIO	76
+#define ADS7846_PENDOWN_GPIO 76
 
 #define HTCWIZARD_GPIO_DM 35
 #define HTCWIZARD_GPIO_DP 36
 
 /* FIXME: These are, at least, omap850 specific, they
    should go away from this machine file */
+#define OMAP_MMC_REG_SYSC (0xfffb7800 + 0x32)
+#define OMAP_MMC_REG_SYSS (0xfffb7800 + 0x34)
+#define OMAP_MMC_REG_CTO  (0xfffb7800 + 0x0e)
+#define OMAP_MMC_REG_DTO  (0xfffb7800 + 0x1c)
 
 static struct omap_lcd_config htcwizard_lcd_config __initdata = {
 	.ctrl_name	= "internal",
@@ -71,10 +75,22 @@ static struct omap_usb_config htcwizard_usb_config __initdata = {
 	.pins[0]	= 2,
 };
 
+static struct omap_mmc_config htcwizard_mmc_config __initdata =
+{
+	.mmc[0] = {
+		.enabled = 1,
+		.nomux = 1,
+		.wire4 = 1,
+		.power_pin = -1,
+		.switch_pin = -1,
+	}
+};
+
 static struct omap_board_config_kernel htcwizard_config[] = 
 {
 	{ OMAP_TAG_LCD, &htcwizard_lcd_config },
 	{ OMAP_TAG_USB, &htcwizard_usb_config },
+	{ OMAP_TAG_MMC, &htcwizard_mmc_config },
 };
 /* Keyboard definition */
 
@@ -300,7 +316,6 @@ static void __init htcwizard_usb_otg(void)
 }
 
 static void __init htcwizard_spi_mux(void)
-{
 	/* Setup MUX config for SPI */
 	omap_writel(omap_readl(OMAP850_IO_CONF_6) |  0x00088880, OMAP850_IO_CONF_6);
 	omap_writel(omap_readl(OMAP850_IO_CONF_6) & ~0x00077770, OMAP850_IO_CONF_6);
@@ -316,6 +331,12 @@ static void __init htcwizard_spi_mux(void)
 	omap_writew(0x0000, OMAP850_SPI2_BASE + 0x08);
 	omap_writew(0x7ff8, OMAP850_SPI2_BASE + 0x0e);
 }
+static void __init htcwizard_i2c_init(void)
+{
+	/* Set pin mux for I2C */
+	omap_writel(omap_readl(OMAP850_IO_CONF_5) & ~0x000000FF, OMAP850_IO_CONF_5);
+	omap_register_i2c_bus(1, 100, NULL, 0);
+}
 
 static void __init htcwizard_init(void)
 {
@@ -330,6 +351,8 @@ static void __init htcwizard_init(void)
   htcwizard_usb_otg();
   htcwizard_usb_enable();
   htcwizard_spi_mux();
+  htcwizard_i2c_init();
+  htcwizard_mmc_init();
 
   /* For testing.. Disable for now */
   spi_register_board_info(htcwizard_spi_board_info,

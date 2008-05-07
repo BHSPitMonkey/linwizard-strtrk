@@ -29,7 +29,7 @@
 #include <asm/io.h>
 #include <asm/arch/eac.h>
 
-#include "../plat-omap/dsp/dsp_common.h"
+#include <asm/arch/dsp_common.h>
 
 #if defined(CONFIG_SPI_TSC2301_AUDIO) && defined(CONFIG_SND_OMAP24XX_EAC)
 #define AUDIO_ENABLED
@@ -316,7 +316,7 @@ void __init n800_audio_init(struct tsc2301_platform_data *tc)
 
 #else
 
-void __init n800_audio_init(void)
+void __init n800_audio_init(struct tsc2301_platform_data *tc)
 {
 }
 

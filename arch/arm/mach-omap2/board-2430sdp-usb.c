@@ -13,15 +13,17 @@
 #include <linux/errno.h>
 #include <linux/delay.h>
 #include <linux/platform_device.h>
+#include <linux/clk.h>
 #include <linux/usb/musb.h>
 
 #include <asm/arch/hardware.h>
+#include <asm/arch/pm.h>
 #include <asm/arch/usb.h>
 
 static struct resource musb_resources[] = {
 	[0] = {
 		.start	= OMAP243X_HS_BASE,
-		.end	= OMAP243X_HS_BASE + SZ_8K,
+		.end	= OMAP243X_HS_BASE + SZ_8K - 1,
 		.flags	= IORESOURCE_MEM,
 	},
 	[1] = {	/* general IRQ */
@@ -34,15 +36,40 @@ static struct resource musb_resources[] = {
 	},
 };
 
+static int usbhs_ick_on;
+
+static int musb_set_clock(struct clk *clk, int state)
+{
+       if (state) {
+               if (usbhs_ick_on > 0)
+                       return -ENODEV;
+
+               omap2_block_sleep();
+               clk_enable(clk);
+               usbhs_ick_on = 1;
+       } else {
+               if (usbhs_ick_on == 0)
+                       return -ENODEV;
+
+               clk_disable(clk);
+               usbhs_ick_on = 0;
+               omap2_allow_sleep();
+       }
+
+       return 0;
+}
+
 static struct musb_hdrc_platform_data musb_plat = {
 #ifdef CONFIG_USB_MUSB_OTG
 	.mode		= MUSB_OTG,
-#elif CONFIG_USB_MUSB_HDRC_HCD
+#elif defined(CONFIG_USB_MUSB_HDRC_HCD)
 	.mode		= MUSB_HOST,
-#elif CONFIG_USB_GADGET_MUSB_HDRC
+#elif defined(CONFIG_USB_GADGET_MUSB_HDRC)
 	.mode		= MUSB_PERIPHERAL,
 #endif
 	.multipoint	= 1,
+	.clock		= "usbhs_ick",
+	.set_clock	= musb_set_clock,
 };
 
 static u64 musb_dmamask = ~(u32)0;
