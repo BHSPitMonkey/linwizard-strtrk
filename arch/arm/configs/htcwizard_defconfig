@@ -1,7 +1,7 @@
 #
 # Automatically generated make config: don't edit
 # Linux kernel version: 2.6.25-omap1
-# Wed May  7 01:02:00 2008
+# Thu May  8 10:45:37 2008
 #
 CONFIG_ARM=y
 CONFIG_SYS_SUPPORTS_APM_EMULATION=y
@@ -523,16 +523,16 @@ CONFIG_I2C_CHARDEV=y
 #
 # I2C Algorithms
 #
-# CONFIG_I2C_ALGOBIT is not set
+CONFIG_I2C_ALGOBIT=y
 # CONFIG_I2C_ALGOPCF is not set
 # CONFIG_I2C_ALGOPCA is not set
 
 #
 # I2C Hardware Bus support
 #
-# CONFIG_I2C_GPIO is not set
+CONFIG_I2C_GPIO=y
 # CONFIG_I2C_OCORES is not set
-CONFIG_I2C_OMAP=y
+# CONFIG_I2C_OMAP is not set
 # CONFIG_I2C_PARPORT_LIGHT is not set
 # CONFIG_I2C_SIMTEC is not set
 # CONFIG_I2C_TAOS_EVM is not set
@@ -549,12 +549,11 @@ CONFIG_I2C_OMAP=y
 # CONFIG_SENSORS_PCF8591 is not set
 # CONFIG_ISP1301_OMAP is not set
 # CONFIG_TPS65010 is not set
-# CONFIG_SENSORS_TLV320AIC23 is not set
 # CONFIG_SENSORS_MAX6875 is not set
 # CONFIG_SENSORS_TSL2550 is not set
 # CONFIG_LP5521 is not set
 # CONFIG_I2C_DEBUG_CORE is not set
-# CONFIG_I2C_DEBUG_ALGO is not set
+CONFIG_I2C_DEBUG_ALGO=y
 CONFIG_I2C_DEBUG_BUS=y
 # CONFIG_I2C_DEBUG_CHIP is not set
 
