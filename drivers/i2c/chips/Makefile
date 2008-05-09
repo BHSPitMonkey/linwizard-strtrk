@@ -31,7 +31,7 @@ obj-$(CONFIG_TWL4030_PWRBUTTON)	+= twl4030-pwrbutton.o
 obj-$(CONFIG_TWL4030_MADC)	+= twl4030-madc.o
 obj-$(CONFIG_RTC_X1205_I2C)	+= x1205.o
 obj-$(CONFIG_LP5521)		+= lp5521.o
-obj-$(CONFIG_HTCWIZARD_CPLD)	+= htcwizard-cpld.o
+obj-$(CONFIG_HTC_I2C_CPLD)	+= htc-i2c-cpld.o
 
 ifeq ($(CONFIG_I2C_DEBUG_CHIP),y)
 EXTRA_CFLAGS += -DDEBUG

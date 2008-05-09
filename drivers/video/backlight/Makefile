@@ -10,4 +10,4 @@ obj-$(CONFIG_BACKLIGHT_LOCOMO)	+= locomolcd.o
 obj-$(CONFIG_BACKLIGHT_OMAP1)	+= omap1_bl.o
 obj-$(CONFIG_BACKLIGHT_PROGEAR) += progear_bl.o
 obj-$(CONFIG_BACKLIGHT_CARILLO_RANCH) += cr_bllcd.o
-obj-$(CONFIG_BACKLIGHT_HTCWIZARD)  += htcwizard_bl.o
+obj-$(CONFIG_BACKLIGHT_HTC_I2C_CPLD)  += htc-i2c-cpld_bl.o
