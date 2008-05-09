@@ -60,7 +60,7 @@
 	htci2ccpld_chip##C.cmd |= M
 
 #define HTCI2CCPLD_CHIP_CHK(C,M) \
-	htci2ccpld_chip##C.cmd == (htci2ccpld_chip##C.cmd | M)
+	(htci2ccpld_chip##C.cmd | M) == htci2ccpld_chip##C.cmd
 
 /* Addresses to scan */
 static const unsigned short normal_i2c[] = {
@@ -87,48 +87,7 @@ static struct htci2ccpld_chip_data htci2ccpld_chip4;
 static struct htci2ccpld_chip_data htci2ccpld_chip5;
 static struct htci2ccpld_chip_data htci2ccpld_chip6;
 
-/*
- * Chip management
- */
-
-static void htci2ccpld_chip_update(struct htci2ccpld_chip_data *chip)
-{
-	i2c_smbus_read_byte_data(&chip->client, chip->cmd);
-}
-
-static int htci2ccpld_chip3_init(void)
-{
-	return 0;
-}
-
-static int htci2ccpld_chip4_init(void)
-{
-	/* Enable FB output on LCD */
-	HTCI2CCPLD_CHIP_SET(4, HTCI2CCPLD_LCD_FB_MASK1);
-
-	/* Set backlight level to 3 */
-	HTCI2CCPLD_CHIP_RST(4, HTCI2CCPLD_BL_OFF_MASK0);
-	HTCI2CCPLD_CHIP_SET(4, HTCI2CCPLD_BL_L3_MASK1);
-
-	htci2ccpld_chip_update(&htci2ccpld_chip4);
-	return 0;
-}
-
-static int htci2ccpld_chip5_init(void)
-{
-	/* Turn off left led and turn on right green led */
-	HTCI2CCPLD_CHIP_RST(5, HTCI2CCPLD_LLED_OFF_MASK0);
-	HTCI2CCPLD_CHIP_RST(5, HTCI2CCPLD_RLED_OFF_MASK0);
-	HTCI2CCPLD_CHIP_SET(5, HTCI2CCPLD_RLED_GREEN_MASK1);
-
-	htci2ccpld_chip_update(&htci2ccpld_chip5);
-	return 0;
-}
-
-static int htci2ccpld_chip6_init(void)
-{
-	return 0;
-}
+static void htci2ccpld_chip_update(struct htci2ccpld_chip_data *chip);
 
 /*
  * Interface functions
@@ -139,6 +98,8 @@ void htci2ccpld_rumble_set(bool status)
 	HTCI2CCPLD_CHIP_RST(6, HTCI2CCPLD_RUMBLE_OFF_MASK0);
 	if (status)
 		HTCI2CCPLD_CHIP_SET(6, HTCI2CCPLD_RUMBLE_ON_MASK1);
+
+	htci2ccpld_chip_update(&htci2ccpld_chip6);
 }
 EXPORT_SYMBOL(htci2ccpld_rumble_set);
 
@@ -215,6 +176,8 @@ void htci2ccpld_led_set(enum htci2ccpld_led_type led, bool value)
 			HTCI2CCPLD_CHIP_RST(5, HTCI2CCPLD_RLED_OFF_MASK0);
 			HTCI2CCPLD_CHIP_RST(5, HTCI2CCPLD_LLED_OFF_MASK0);
 	}
+
+	htci2ccpld_chip_update(&htci2ccpld_chip5);
 }
 EXPORT_SYMBOL(htci2ccpld_led_set);
 
@@ -238,6 +201,47 @@ bool htci2ccpld_led_get(enum htci2ccpld_led_type led)
 	return 0;
 }
 EXPORT_SYMBOL(htci2ccpld_led_get);
+
+
+/*
+ * Chip management
+ */
+
+static void htci2ccpld_chip_update(struct htci2ccpld_chip_data *chip)
+{
+	i2c_smbus_read_byte_data(&chip->client, chip->cmd);
+}
+
+static int htci2ccpld_chip3_init(void)
+{
+	return 0;
+}
+
+static int htci2ccpld_chip4_init(void)
+{
+	/* Enable FB output on LCD */
+	HTCI2CCPLD_CHIP_SET(4, HTCI2CCPLD_LCD_FB_MASK1);
+
+	/* Set backlight level to 3 */
+	htci2ccpld_bl_set(3);
+	
+	return 0;
+}
+
+static int htci2ccpld_chip5_init(void)
+{
+	/* Turn off left led and turn on right green led */
+	htci2ccpld_led_set(LED_LGREEN, 0);
+	htci2ccpld_led_set(LED_RGREEN, 1);
+
+	return 0;
+}
+
+static int htci2ccpld_chip6_init(void)
+{
+	return 0;
+}
+
 
 /*
  * Driver handling
