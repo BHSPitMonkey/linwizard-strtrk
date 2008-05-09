@@ -1,7 +1,7 @@
 #
 # Automatically generated make config: don't edit
 # Linux kernel version: 2.6.25-omap1
-# Fri May  9 03:00:35 2008
+# Fri May  9 14:36:36 2008
 #
 CONFIG_ARM=y
 CONFIG_SYS_SUPPORTS_APM_EMULATION=y
@@ -653,6 +653,7 @@ CONFIG_BACKLIGHT_CLASS_DEVICE=y
 # CONFIG_BACKLIGHT_CORGI is not set
 # CONFIG_BACKLIGHT_OMAP1 is not set
 # CONFIG_BACKLIGHT_OMAP is not set
+CONFIG_BACKLIGHT_HTCWIZARD=m
 
 #
 # Display device support
