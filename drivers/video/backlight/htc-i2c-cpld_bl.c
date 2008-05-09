@@ -89,6 +89,8 @@ static int __init htci2ccpldbl_init(void)
 			platform_driver_unregister(&htci2ccpldbl_driver);
 		}
 	}
+	printk("htc-i2c-cpld backlight\n");
+
 	return ret;
 }
 

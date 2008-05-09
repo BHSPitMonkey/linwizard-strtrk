@@ -33,34 +33,34 @@
 
 #include <linux/i2c/htc-i2c-cpld.h>
 
-#define HTCI2CCPLD_BL_OFF_MASK0 0xF1
-#define HTCI2CCPLD_BL_L4_MASK1  0x0E
-#define HTCI2CCPLD_BL_L3_MASK1  0x0A
-#define HTCI2CCPLD_BL_L2_MASK1  0x0C
-#define HTCI2CCPLD_BL_L1_MASK1  0x08
+#define HTCI2CCPLD_BL_MASK   0x0E
+#define HTCI2CCPLD_BL_L4_CMD 0x0E
+#define HTCI2CCPLD_BL_L3_CMD 0x0A
+#define HTCI2CCPLD_BL_L2_CMD 0x0C
+#define HTCI2CCPLD_BL_L1_CMD 0x08
 
-#define HTCI2CCPLD_LCD_WHITE_MASK0 0x0F
-#define HTCI2CCPLD_LCD_FB_MASK1    0xF0
+#define HTCI2CCPLD_LCD_MASK   0xF0
+#define HTCI2CCPLD_LCD_FB_CMD 0xF0
 
-#define HTCI2CCPLD_LLED_OFF_MASK0   0xDF
-#define HTCI2CCPLD_LLED_GREEN_MASK1 0x20
+#define HTCI2CCPLD_LLED_MASK      0x20
+#define HTCI2CCPLD_LLED_GREEN_CMD 0x20
 
-#define HTCI2CCPLD_RLED_OFF_MASK0    0xF1
-#define HTCI2CCPLD_RLED_GREEN_MASK1  0x08
-#define HTCI2CCPLD_RLED_RED_MASK1    0x04
-#define HTCI2CCPLD_RLED_ORANGE_MASK1 0x0C
+#define HTCI2CCPLD_RLED_MASK       0x0E
+#define HTCI2CCPLD_RLED_GREEN_CMD  0x08
+#define HTCI2CCPLD_RLED_RED_CMD    0x04
+#define HTCI2CCPLD_RLED_ORANGE_CMD 0x0C
 
-#define HTCI2CCPLD_RUMBLE_OFF_MASK0 0XF7
-#define HTCI2CCPLD_RUMBLE_ON_MASK1  0X08 
+#define HTCI2CCPLD_RUMBLE_MASK 0X08
+#define HTCI2CCPLD_RUMBLE_CMD  0X08 
 
 #define HTCI2CCPLD_CHIP_RST(C,M) \
-	htci2ccpld_chip##C.cmd &= M
+	(htci2ccpld_chip##C.cmd &= ~M)
 
-#define HTCI2CCPLD_CHIP_SET(C,M) \
-	htci2ccpld_chip##C.cmd |= M
+#define HTCI2CCPLD_CHIP_SET(C,D) \
+	(htci2ccpld_chip##C.cmd |= D)
 
-#define HTCI2CCPLD_CHIP_CHK(C,M) \
-	(htci2ccpld_chip##C.cmd | M) == htci2ccpld_chip##C.cmd
+#define HTCI2CCPLD_CHIP_CHK(C,D,M) \
+	(((htci2ccpld_chip##C.cmd & M) ^ D) == 0)
 
 /* Addresses to scan */
 static const unsigned short normal_i2c[] = {
@@ -95,9 +95,9 @@ static void htci2ccpld_chip_update(struct htci2ccpld_chip_data *chip);
 
 void htci2ccpld_rumble_set(bool status)
 {
-	HTCI2CCPLD_CHIP_RST(6, HTCI2CCPLD_RUMBLE_OFF_MASK0);
+	HTCI2CCPLD_CHIP_RST(6, HTCI2CCPLD_RUMBLE_MASK);
 	if (status)
-		HTCI2CCPLD_CHIP_SET(6, HTCI2CCPLD_RUMBLE_ON_MASK1);
+		HTCI2CCPLD_CHIP_SET(6, HTCI2CCPLD_RUMBLE_CMD);
 
 	htci2ccpld_chip_update(&htci2ccpld_chip6);
 }
@@ -106,27 +106,28 @@ EXPORT_SYMBOL(htci2ccpld_rumble_set);
 
 bool htci2ccpld_rumble_get(void)
 {
-	return HTCI2CCPLD_CHIP_CHK(6, HTCI2CCPLD_RUMBLE_ON_MASK1);
+	return HTCI2CCPLD_CHIP_CHK(6, HTCI2CCPLD_RUMBLE_CMD,
+	                              HTCI2CCPLD_RUMBLE_MASK);
 }
 EXPORT_SYMBOL(htci2ccpld_rumble_get);
 
 
 void htci2ccpld_bl_set(int value)
 {
-	HTCI2CCPLD_CHIP_RST(4, HTCI2CCPLD_BL_OFF_MASK0);
+	HTCI2CCPLD_CHIP_RST(4, HTCI2CCPLD_BL_MASK);
 
 	switch (value) {
 		case 1:
-			HTCI2CCPLD_CHIP_SET(4, HTCI2CCPLD_BL_L1_MASK1);
+			HTCI2CCPLD_CHIP_SET(4, HTCI2CCPLD_BL_L1_CMD);
 			break;
 		case 2:
-			HTCI2CCPLD_CHIP_SET(4, HTCI2CCPLD_BL_L2_MASK1);
+			HTCI2CCPLD_CHIP_SET(4, HTCI2CCPLD_BL_L2_CMD);
 			break;
 		case 3:
-			HTCI2CCPLD_CHIP_SET(4, HTCI2CCPLD_BL_L3_MASK1);
+			HTCI2CCPLD_CHIP_SET(4, HTCI2CCPLD_BL_L3_CMD);
 			break;
 		case 4:
-			HTCI2CCPLD_CHIP_SET(4, HTCI2CCPLD_BL_L4_MASK1);
+			HTCI2CCPLD_CHIP_SET(4, HTCI2CCPLD_BL_L4_CMD);
 			break;
 	}
 	
@@ -137,13 +138,13 @@ EXPORT_SYMBOL(htci2ccpld_bl_set);
 
 int htci2ccpld_bl_get(void)
 {
-	if (HTCI2CCPLD_CHIP_CHK(4, HTCI2CCPLD_BL_L1_MASK1));
+	if (HTCI2CCPLD_CHIP_CHK(4, HTCI2CCPLD_BL_L1_CMD, HTCI2CCPLD_BL_MASK))
 		return 1;
-	if (HTCI2CCPLD_CHIP_CHK(4, HTCI2CCPLD_BL_L2_MASK1));
+	if (HTCI2CCPLD_CHIP_CHK(4, HTCI2CCPLD_BL_L2_CMD, HTCI2CCPLD_BL_MASK))
 		return 2;
-	if (HTCI2CCPLD_CHIP_CHK(4, HTCI2CCPLD_BL_L3_MASK1));
+	if (HTCI2CCPLD_CHIP_CHK(4, HTCI2CCPLD_BL_L3_CMD, HTCI2CCPLD_BL_MASK))
 		return 3;
-	if (HTCI2CCPLD_CHIP_CHK(4, HTCI2CCPLD_BL_L4_MASK1));
+	if (HTCI2CCPLD_CHIP_CHK(4, HTCI2CCPLD_BL_L4_CMD, HTCI2CCPLD_BL_MASK))
 		return 4;
 
 	return 0;
@@ -154,27 +155,27 @@ void htci2ccpld_led_set(enum htci2ccpld_led_type led, bool value)
 {
 	switch (led) {
 		case LED_RED:
-			HTCI2CCPLD_CHIP_RST(5, HTCI2CCPLD_RLED_OFF_MASK0);
+			HTCI2CCPLD_CHIP_RST(5, HTCI2CCPLD_RLED_MASK);
 			if (value)
-				HTCI2CCPLD_CHIP_SET(5, HTCI2CCPLD_RLED_RED_MASK1);
+				HTCI2CCPLD_CHIP_SET(5, HTCI2CCPLD_RLED_RED_CMD);
 			break;
 		case LED_ORANGE:
-			HTCI2CCPLD_CHIP_RST(5, HTCI2CCPLD_RLED_OFF_MASK0);
+			HTCI2CCPLD_CHIP_RST(5, HTCI2CCPLD_RLED_MASK);
 			if (value)
-				HTCI2CCPLD_CHIP_SET(5, HTCI2CCPLD_RLED_ORANGE_MASK1);
+				HTCI2CCPLD_CHIP_SET(5, HTCI2CCPLD_RLED_ORANGE_CMD);
 			break;
 		case LED_RGREEN:
-			HTCI2CCPLD_CHIP_RST(5, HTCI2CCPLD_RLED_OFF_MASK0);
+			HTCI2CCPLD_CHIP_RST(5, HTCI2CCPLD_RLED_MASK);
 			if (value)
-				HTCI2CCPLD_CHIP_SET(5, HTCI2CCPLD_RLED_GREEN_MASK1);
+				HTCI2CCPLD_CHIP_SET(5, HTCI2CCPLD_RLED_GREEN_CMD);
 			break;
 		case LED_LGREEN:
-			HTCI2CCPLD_CHIP_RST(5, HTCI2CCPLD_LLED_OFF_MASK0);
+			HTCI2CCPLD_CHIP_RST(5, HTCI2CCPLD_LLED_MASK);
 			if (value)
-				HTCI2CCPLD_CHIP_SET(5, HTCI2CCPLD_LLED_GREEN_MASK1);
+				HTCI2CCPLD_CHIP_SET(5, HTCI2CCPLD_LLED_GREEN_CMD);
 		default:
-			HTCI2CCPLD_CHIP_RST(5, HTCI2CCPLD_RLED_OFF_MASK0);
-			HTCI2CCPLD_CHIP_RST(5, HTCI2CCPLD_LLED_OFF_MASK0);
+			HTCI2CCPLD_CHIP_RST(5, HTCI2CCPLD_RLED_MASK);
+			HTCI2CCPLD_CHIP_RST(5, HTCI2CCPLD_LLED_MASK);
 	}
 
 	htci2ccpld_chip_update(&htci2ccpld_chip5);
@@ -186,16 +187,20 @@ bool htci2ccpld_led_get(enum htci2ccpld_led_type led)
 {
 	switch (led) {
 		case LED_RED:
-			return HTCI2CCPLD_CHIP_CHK(4, HTCI2CCPLD_RLED_RED_MASK1);
+			return HTCI2CCPLD_CHIP_CHK(4, HTCI2CCPLD_RLED_RED_CMD,
+			                              HTCI2CCPLD_RLED_MASK);
 			break;
 		case LED_ORANGE:
-			return HTCI2CCPLD_CHIP_CHK(4, HTCI2CCPLD_RLED_ORANGE_MASK1);
+			return HTCI2CCPLD_CHIP_CHK(4, HTCI2CCPLD_RLED_ORANGE_CMD,
+			                              HTCI2CCPLD_RLED_MASK);
 			break;
 		case LED_RGREEN:
-			return HTCI2CCPLD_CHIP_CHK(4, HTCI2CCPLD_RLED_GREEN_MASK1);
+			return HTCI2CCPLD_CHIP_CHK(4, HTCI2CCPLD_RLED_GREEN_CMD,
+			                              HTCI2CCPLD_RLED_MASK);
 			break;
 		case LED_LGREEN:
-			return HTCI2CCPLD_CHIP_CHK(4, HTCI2CCPLD_LLED_GREEN_MASK1);
+			return HTCI2CCPLD_CHIP_CHK(4, HTCI2CCPLD_LLED_GREEN_CMD,
+			                              HTCI2CCPLD_LLED_MASK);
 			break;
 	}
 	return 0;
@@ -220,7 +225,7 @@ static int htci2ccpld_chip3_init(void)
 static int htci2ccpld_chip4_init(void)
 {
 	/* Enable FB output on LCD */
-	HTCI2CCPLD_CHIP_SET(4, HTCI2CCPLD_LCD_FB_MASK1);
+	HTCI2CCPLD_CHIP_SET(4, HTCI2CCPLD_LCD_FB_CMD);
 
 	/* Set backlight level to 3 */
 	htci2ccpld_bl_set(3);
@@ -318,6 +323,8 @@ static int htci2ccpld_detect(struct i2c_adapter *adapter, int address, int kind)
 		i2c_detach_client(client);
 		return ret;
 	}
+
+	printk("htc-i2c-cpld: Detected chip %x\n", address);
 
 	return 0;
 }
