@@ -29,7 +29,32 @@
 #include <linux/slab.h>
 #include <linux/i2c.h>
 #include <linux/mutex.h>
-#include <linux/backlight.h>
+
+#include <linux/i2c/htcwizard-cpld.h>
+
+#define HTCWIZCPLD_BL_OFF_MASK0 0xF1
+#define HTCWIZCPLD_BL_L4_MASK1  0x0E
+#define HTCWIZCPLD_BL_L3_MASK1  0x0A
+#define HTCWIZCPLD_BL_L2_MASK1  0x0C
+#define HTCWIZCPLD_BL_L1_MASK1  0x08
+
+#define HTCWIZCPLD_LCD_WHITE_MASK0 0x0F
+#define HTCWIZCPLD_LCD_FB_MASK1    0xF0
+
+#define HTCWIZCPLD_LLED_OFF_MASK0   0xDF
+#define HTCWIZCPLD_LLED_GREEN_MASK1 0x20
+
+#define HTCWIZCPLD_RLED_OFF_MASK0    0xF1
+#define HTCWIZCPLD_RLED_GREEN_MASK1  0x08
+#define HTCWIZCPLD_RLED_RED_MASK1    0x04
+#define HTCWIZCPLD_RLED_ORANGE_MASK1 0x0C
+
+#define HTCWIZCPLD_CHIP_RST(C,M) \
+	htcwizcpld_chip##C.cmd &= M
+
+#define HTCWIZCPLD_CHIP_SET(C,M) \
+	htcwizcpld_chip##C.cmd |= M
+
 
 /* Addresses to scan */
 static const unsigned short normal_i2c[] = { 0x03, 0x04, 0x05, 0x06, I2C_CLIENT_END };
@@ -40,48 +65,108 @@ I2C_CLIENT_INSMOD_1(htcwizard_cpld);
  * Chip structures
  */
 
-static struct s_htcwizcpld_chip4_data {
+struct htcwizcpld_chip_data {
 	struct i2c_client client;
-	struct backlight_ops bl_data;
-	struct backlight_device *bl_dev;
-} htcwizcpld_chip4_data;
+	u8 cmd;
+};
+
+static struct htcwizcpld_chip_data htcwizcpld_chip3;
+static struct htcwizcpld_chip_data htcwizcpld_chip4;
+static struct htcwizcpld_chip_data htcwizcpld_chip5;
+static struct htcwizcpld_chip_data htcwizcpld_chip6;
+
 
 
 /*
- * Backlight callbacks
+ * Chip management
  */
-static int htcwizcpld_chip4_get_brightness(struct backlight_device *bl_dev)
+
+static void htcwizcpld_chip_update(struct htcwizcpld_chip_data *chip)
 {
-	
+	i2c_smbus_read_byte_data(&chip->client, chip->cmd);
+}
+
+static int htcwizcpld_chip3_init(void)
+{
 	return 0;
 }
 
-static int htcwizcpld_chip4_set_status(struct backlight_device *bl_dev)
+static int htcwizcpld_chip4_init(void)
 {
-	u8 cmd = 0xF0;
+	/* Enable FB output on LCD */
+	HTCWIZCPLD_CHIP_SET(4, HTCWIZCPLD_LCD_FB_MASK1);
 
-	switch (bl_dev->props.brightness) {
-	case 1:
-		cmd |=  0x08;
-		cmd &= ~0x06;
-		break;
-	case 2:
-		cmd |=  0x0C;
-		cmd &= ~0x02;
-		break;
-	case 3:
-		cmd |=  0x0A;
-		cmd &= ~0x04;
-		break;
-	case 4:
-		cmd |=  0x0E;
-		break;
+	/* Set backlight level to 3 */
+	HTCWIZCPLD_CHIP_RST(4, HTCWIZCPLD_BL_OFF_MASK0);
+	HTCWIZCPLD_CHIP_SET(4, HTCWIZCPLD_BL_L3_MASK1);
+
+	htcwizcpld_chip_update(&htcwizcpld_chip4);
+	return 0;
+}
+
+static int htcwizcpld_chip5_init(void)
+{
+	/* Turn off left led and turn on right green led */
+	HTCWIZCPLD_CHIP_RST(5, HTCWIZCPLD_LLED_OFF_MASK0);
+	HTCWIZCPLD_CHIP_RST(5, HTCWIZCPLD_RLED_OFF_MASK0);
+	HTCWIZCPLD_CHIP_SET(5, HTCWIZCPLD_RLED_GREEN_MASK1);
+
+	htcwizcpld_chip_update(&htcwizcpld_chip5);
+	return 0;
+}
+
+static int htcwizcpld_chip6_init(void)
+{
+	return 0;
+}
+
+/*
+ * Function Interface
+ */
+
+int htcwizcpld_bl_set(int value)
+{
+	HTCWIZCPLD_CHIP_RST(4, HTCWIZCPLD_BL_OFF_MASK0);
+
+	switch (value) {
+		case 1:
+			HTCWIZCPLD_CHIP_SET(4, HTCWIZCPLD_BL_L1_MASK1);
+			break;
+		case 2:
+			HTCWIZCPLD_CHIP_SET(4, HTCWIZCPLD_BL_L2_MASK1);
+			break;
+		case 3:
+			HTCWIZCPLD_CHIP_SET(4, HTCWIZCPLD_BL_L3_MASK1);
+			break;
+		case 4:
+			HTCWIZCPLD_CHIP_SET(4, HTCWIZCPLD_BL_L4_MASK1);
+			break;
 	}
-	i2c_smbus_read_byte_data(&htcwizcpld_chip4_data.client, cmd);
 	
+	htcwizcpld_chip_update(&htcwizcpld_chip4);
 	return 0;
 }
+EXPORT_SYMBOL(htcwizcpld_bl_set);
 
+int htcwizcpld_bl_get(void)
+{
+	return 0;
+}
+EXPORT_SYMBOL(htcwizcpld_bl_get);
+
+int htcwizcpld_led_set(enum htcwizcpld_led_type led, bool value)
+{
+
+	return 0;
+}
+EXPORT_SYMBOL(htcwizcpld_led_set);
+
+
+int htcwizcpld_led_get(enum htcwizcpld_led_type led)
+{
+	return 0;
+}
+EXPORT_SYMBOL(htcwizcpld_led_get);
 
 /*
  * Driver handling
@@ -99,39 +184,64 @@ static struct i2c_driver htcwizcpld_driver = {
 
 static int htcwizcpld_detect(struct i2c_adapter *adapter, int address, int kind)
 {
-	struct s_htcwizcpld_chip4_data *chip4_data = &htcwizcpld_chip4_data;
-	struct i2c_client *client;
-	int err;
+	struct i2c_client *client = NULL;
+	int ret;
 	
-	if (!i2c_check_functionality(adapter, I2C_FUNC_SMBUS_READ_BYTE_DATA)) {
-		printk("htcwizcpld: Unsuported I2C BUS!\n");
+	if (!i2c_check_functionality(adapter, I2C_FUNC_SMBUS_READ_BYTE_DATA))
 		return -ENODEV;
+
+	switch (address) {
+		case 0x03:
+			client = &htcwizcpld_chip3.client;
+			i2c_set_clientdata(client, &htcwizcpld_chip3);
+			strlcpy(client->name, "htcwizcpld_chip3", I2C_NAME_SIZE);
+			break;
+		case 0x04:
+			client = &htcwizcpld_chip4.client;
+			i2c_set_clientdata(client, &htcwizcpld_chip4);
+			strlcpy(client->name, "htcwizcpld_chip4", I2C_NAME_SIZE);
+			break;
+		case 0x05:
+			client = &htcwizcpld_chip5.client;
+			i2c_set_clientdata(client, &htcwizcpld_chip5);
+			strlcpy(client->name, "htcwizcpld_chip5", I2C_NAME_SIZE);
+			break;
+		case 0x06:
+			client = &htcwizcpld_chip6.client;
+			i2c_set_clientdata(client, &htcwizcpld_chip6);
+			strlcpy(client->name, "htcwizcpld_chip6", I2C_NAME_SIZE);
+			break;
+		default:
+			return -ENODEV;
 	}
 
-	if (address == 0x04)
-		goto chip4;
-
-	return -ENODEV;
-
-chip4:
-	client = &chip4_data->client;
-	i2c_set_clientdata(client, chip4_data);
 	client->addr = address;
 	client->adapter = adapter;
 	client->driver = &htcwizcpld_driver;
-	strlcpy(client->name, "htcwizcpld", I2C_NAME_SIZE);
 
-	chip4_data->bl_data.get_brightness = htcwizcpld_chip4_get_brightness;
-	chip4_data->bl_data.update_status = htcwizcpld_chip4_set_status;
-	chip4_data->bl_dev = backlight_device_register("htcwizcpld_bl", NULL, 
-						 NULL, &chip4_data->bl_data);
-	//FIXME: Check success of code above!!
-	chip4_data->bl_dev->props.max_brightness = 4;
-
-	if ((err = i2c_attach_client(client))) {
-		//FIXME: Free allocated data!!
+	if ((ret = i2c_attach_client(client))) {
 		printk("htcwizcpld: Cannot attach client!\n");
-		return err;
+		return ret;
+	}
+
+	switch (address) {
+		case 0x03:
+			ret = htcwizcpld_chip3_init();
+			break;
+		case 0x04:
+			ret = htcwizcpld_chip4_init();
+			break;
+		case 0x05:
+			ret = htcwizcpld_chip5_init();
+			break;
+		case 0x06:
+			ret = htcwizcpld_chip6_init();
+			break;
+	}
+
+	if (ret) {
+		i2c_detach_client(client);
+		return ret;
 	}
 
 	return 0;

@@ -121,3 +121,11 @@ config BACKLIGHT_CARILLO_RANCH
 	help
 	  If you have a Intel LE80578 (Carillo Ranch) say Y to enable the
 	  backlight driver.
+
+config BACKLIGHT_HTCWIZARD
+	tristate "HTC Wizard backlight driver"
+	depends on BACKLIGHT_CLASS_DEVICE && HTCWIZARD_CPLD
+	default n
+	help
+	  Say Y here to enable support to backlight on your HTC Wizard.
+	  You also need enable the HTC Wizard I2C CPLD driver.
