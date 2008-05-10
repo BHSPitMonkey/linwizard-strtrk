@@ -193,11 +193,18 @@ static struct platform_device i2cgpio_device = {
 	},
 };
 
+static struct platform_device led_device = {
+	.name		= "htc-i2c-cpld-led",
+	.id		= -1,
+};
+
+
 static struct platform_device *devices[] __initdata = {
 /* 	&gsm_device, */
 	&kp_device,
 	&lcd_device,
 	&i2cgpio_device,
+	&led_device,
 };
 
 
