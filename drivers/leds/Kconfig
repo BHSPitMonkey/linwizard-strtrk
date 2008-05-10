@@ -140,6 +140,13 @@ config LEDS_CM_X270
 	help
 	  This option enables support for the CM-X270 LEDs.
 
+config LEDS_HTC_I2C_CPLD
+	tristate "HTC I2C CPLD LED driver"
+	depends on LEDS_CLASS && HTC_I2C_CPLD
+	help
+	  Say Y here to enable support for LEDs on your HTC device.
+          You also need to enable the HTC I2C CPLD driver.
+
 config LEDS_CLEVO_MAIL
 	tristate "Mail LED on Clevo notebook (EXPERIMENTAL)"
 	depends on LEDS_CLASS && X86 && SERIO_I8042 && DMI && EXPERIMENTAL
