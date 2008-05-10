@@ -24,10 +24,28 @@ static void htci2ccpldled_orange_set(struct led_classdev *led_cdev,
 	htci2ccpld_led_set(LED_ORANGE, value);	
 }
 
+static void htci2ccpldled_red_set(struct led_classdev *led_cdev,
+				enum led_brightness value)
+{
+	htci2ccpld_led_set(LED_RED, value);	
+}
+
 static void htci2ccpldled_lgreen_set(struct led_classdev *led_cdev,
 				enum led_brightness value)
 {
 	htci2ccpld_led_set(LED_LGREEN, value);
+}
+
+static void htci2ccpldled_rgreen_set(struct led_classdev *led_cdev,
+				enum led_brightness value)
+{
+	htci2ccpld_led_set(LED_RGREEN, value);
+}
+
+static void htci2ccpldled_vibrator_set(struct led_classdev *led_cdev,
+				enum led_brightness value)
+{
+	htci2ccpld_vibrator_set(value);
 }
 
 static struct led_classdev htci2ccpldled_orange_led = {
@@ -37,18 +55,58 @@ static struct led_classdev htci2ccpldled_orange_led = {
 
 static struct led_classdev htci2ccpldled_lgreen_led = {
 	.name			= "htci2ccpld:lgreen",
+	.default_trigger = "heartbeat",
 	.brightness_set		= htci2ccpldled_lgreen_set,
+};
+
+static struct led_classdev htci2ccpldled_red_led = {
+	.name			= "htci2ccpld:red",
+	.brightness_set		= htci2ccpldled_red_set,
+};
+
+static struct led_classdev htci2ccpldled_rgreen_led = {
+	.name			= "htci2ccpld:rgreen",
+	.brightness_set		= htci2ccpldled_rgreen_set,
+};
+
+static struct led_classdev htci2ccpldled_vibrator = {
+	.name			= "htci2ccpld:vibrator",
+	.brightness_set		= htci2ccpldled_vibrator_set,
 };
 
 static int htci2ccpldled_probe(struct platform_device *pdev)
 {
 	int ret = 0;
+
 	ret = led_classdev_register(&pdev->dev, &htci2ccpldled_orange_led);
 	if (ret < 0)
 		return ret;
 
 	ret = led_classdev_register(&pdev->dev, &htci2ccpldled_lgreen_led);
 	if (ret < 0)
+		goto undo_orange;
+	
+	ret = led_classdev_register(&pdev->dev, &htci2ccpldled_rgreen_led);
+	if (ret < 0)
+		goto undo_lgreen;
+
+	ret = led_classdev_register(&pdev->dev, &htci2ccpldled_red_led);
+	if (ret < 0)
+		goto undo_rgreen;
+
+	ret = led_classdev_register(&pdev->dev, &htci2ccpldled_vibrator);
+	if (ret < 0)
+		goto undo_red;
+
+	return ret;
+
+undo_red:
+		led_classdev_unregister(&htci2ccpldled_red_led);
+undo_rgreen:
+		led_classdev_unregister(&htci2ccpldled_rgreen_led);
+undo_lgreen:
+		led_classdev_unregister(&htci2ccpldled_lgreen_led);
+undo_orange:
 		led_classdev_unregister(&htci2ccpldled_orange_led);
 
 	return ret;
@@ -94,7 +152,7 @@ static struct platform_driver htci2ccpldled_driver = {
 
 static int __init htci2ccpldled_init(void)
 {
-	printk("HTC I2C CPLD LED driver\n");
+	printk("htc-i2c-cpld-led: HTC I2C CPLD LED driver\n");
 	return platform_driver_register(&htci2ccpldled_driver);
 }
 

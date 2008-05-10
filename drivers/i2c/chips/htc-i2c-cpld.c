@@ -2,7 +2,7 @@
  *  htc-i2c-cpld.c
  *  Chip driver for a unknown cpld found on HTC boards with omap850.
  *  The cpld is located on the i2c bus and controls backlight, leds,
- *  rumble and other power devices. The cpld also returns buttons status
+ *  vibrator and other power devices. The cpld also returns buttons status
  *  of the directional pads found on this HTC devices.
  *
  *  Copyright (C) 2008 Angelo Arrifano <miknix@gmail.com>
@@ -93,7 +93,7 @@ static void htci2ccpld_chip_update(struct htci2ccpld_chip_data *chip);
  * Interface functions
  */
 
-void htci2ccpld_rumble_set(bool status)
+void htci2ccpld_vibrator_set(bool status)
 {
 	HTCI2CCPLD_CHIP_RST(6, HTCI2CCPLD_RUMBLE_MASK);
 	if (status)
@@ -101,15 +101,15 @@ void htci2ccpld_rumble_set(bool status)
 
 	htci2ccpld_chip_update(&htci2ccpld_chip6);
 }
-EXPORT_SYMBOL(htci2ccpld_rumble_set);
+EXPORT_SYMBOL(htci2ccpld_vibrator_set);
 
 
-bool htci2ccpld_rumble_get(void)
+bool htci2ccpld_vibrator_get(void)
 {
 	return HTCI2CCPLD_CHIP_CHK(6, HTCI2CCPLD_RUMBLE_CMD,
 	                              HTCI2CCPLD_RUMBLE_MASK);
 }
-EXPORT_SYMBOL(htci2ccpld_rumble_get);
+EXPORT_SYMBOL(htci2ccpld_vibrator_get);
 
 
 void htci2ccpld_bl_set(int value)
@@ -173,6 +173,7 @@ void htci2ccpld_led_set(enum htci2ccpld_led_type led, bool value)
 			HTCI2CCPLD_CHIP_RST(5, HTCI2CCPLD_LLED_MASK);
 			if (value)
 				HTCI2CCPLD_CHIP_SET(5, HTCI2CCPLD_LLED_GREEN_CMD);
+			break;
 		default:
 			HTCI2CCPLD_CHIP_RST(5, HTCI2CCPLD_RLED_MASK);
 			HTCI2CCPLD_CHIP_RST(5, HTCI2CCPLD_LLED_MASK);

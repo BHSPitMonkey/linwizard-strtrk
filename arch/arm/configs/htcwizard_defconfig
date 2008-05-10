@@ -1,7 +1,7 @@
 #
 # Automatically generated make config: don't edit
 # Linux kernel version: 2.6.25-omap1
-# Fri May  9 19:44:55 2008
+# Sat May 10 12:52:52 2008
 #
 CONFIG_ARM=y
 CONFIG_SYS_SUPPORTS_APM_EMULATION=y
@@ -792,22 +792,24 @@ CONFIG_USB_ETH=y
 # CONFIG_USB_G_SERIAL is not set
 # CONFIG_USB_MIDI_GADGET is not set
 # CONFIG_USB_G_PRINTER is not set
-CONFIG_MMC=m
-# CONFIG_MMC_DEBUG is not set
-# CONFIG_MMC_UNSAFE_RESUME is not set
+# CONFIG_MMC is not set
+CONFIG_NEW_LEDS=y
+CONFIG_LEDS_CLASS=y
 
 #
-# MMC/SD Card Drivers
+# LED drivers
 #
-CONFIG_MMC_BLOCK=m
-CONFIG_MMC_BLOCK_BOUNCE=y
-# CONFIG_SDIO_UART is not set
+# CONFIG_LEDS_OMAP_DEBUG is not set
+# CONFIG_LEDS_OMAP is not set
+# CONFIG_LEDS_GPIO is not set
+CONFIG_LEDS_HTC_I2C_CPLD=y
 
 #
-# MMC/SD Host Controller Drivers
+# LED Triggers
 #
-CONFIG_MMC_OMAP=m
-# CONFIG_NEW_LEDS is not set
+CONFIG_LEDS_TRIGGERS=y
+# CONFIG_LEDS_TRIGGER_TIMER is not set
+CONFIG_LEDS_TRIGGER_HEARTBEAT=y
 CONFIG_RTC_LIB=y
 # CONFIG_RTC_CLASS is not set
 

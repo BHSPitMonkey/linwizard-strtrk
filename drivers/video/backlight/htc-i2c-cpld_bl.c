@@ -39,7 +39,7 @@ static int __init htci2ccpldbl_probe(struct platform_device *pdev)
 {
 	struct backlight_device *bl_dev;
 
-	bl_dev = backlight_device_register ("generic-bl", &pdev->dev, NULL,
+	bl_dev = backlight_device_register ("htc-i2c-cpld-bl", &pdev->dev, NULL,
 		    &htci2ccpldbl_ops);
 	/* FIXME:
 	if (IS_ERR(bl_dev))
@@ -89,7 +89,7 @@ static int __init htci2ccpldbl_init(void)
 			platform_driver_unregister(&htci2ccpldbl_driver);
 		}
 	}
-	printk("htc-i2c-cpld backlight\n");
+	printk("htc-i2c-cpld-bl: HTC I2C CPLD backlight driver\n");
 
 	return ret;
 }
