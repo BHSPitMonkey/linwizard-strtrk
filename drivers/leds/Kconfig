@@ -140,11 +140,11 @@ config LEDS_CM_X270
 	help
 	  This option enables support for the CM-X270 LEDs.
 
-config CONFIG_LEDS_HTC_I2C_CPLD
-	tristate "HTC I2C CPLD led driver"
-	depends on LEDS_CLASS
+config LEDS_HTC_I2C_CPLD
+	tristate "HTC I2C CPLD LED driver"
+	depends on LEDS_CLASS && HTC_I2C_CPLD
 	help
-	  Say Y here to enable support for backlight on your HTC device.
+	  Say Y here to enable support for LEDs on your HTC device.
           You also need to enable the HTC I2C CPLD driver.
 
 config LEDS_CLEVO_MAIL
