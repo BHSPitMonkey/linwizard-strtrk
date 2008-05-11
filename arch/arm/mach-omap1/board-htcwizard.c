@@ -309,6 +309,7 @@ static void __init htcwizard_usb_otg(void)
 }
 
 static void __init htcwizard_spi_mux(void)
+{
 	/* Setup MUX config for SPI */
 	omap_writel(omap_readl(OMAP850_IO_CONF_6) |  0x00088880, OMAP850_IO_CONF_6);
 	omap_writel(omap_readl(OMAP850_IO_CONF_6) & ~0x00077770, OMAP850_IO_CONF_6);
