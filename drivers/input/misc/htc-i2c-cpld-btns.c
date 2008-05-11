@@ -45,35 +45,39 @@ struct buttons_dev {
 	struct input_dev *input;
 };
 
+static inline void
+htci2ccpldbtns_report_key(struct buttons_dev *bdev, int key)
+{
+	input_report_key(bdev->input, bdev->keymap[key], 1);
+	input_sync(bdev->input);
+	input_report_key(bdev->input, bdev->keymap[key], 0);
+	input_sync(bdev->input);
+}
+
 static irqreturn_t htci2ccpldbtns_irq(int irq, void *dev_id)
 {
 	struct platform_device *pdev = dev_id;
 	struct device *dev = &pdev->dev;
 	struct buttons_dev *bdev = dev_get_drvdata(dev);
 	int status = 0;
-
+	
 	status = htci2ccpld_btn_get(HTCI2CCPLD_BTN_CHIP_DKB);
 	status |= htci2ccpld_btn_get(HTCI2CCPLD_BTN_CHIP_DPAD);
 	
-	input_report_key(bdev->input, bdev->keymap[0],
-	                 HAS_KEY(status, HTCI2CCPLD_BTN_LEFT));
-	input_sync(bdev->input);
+	if (HAS_KEY(status, HTCI2CCPLD_BTN_LEFT))
+		htci2ccpldbtns_report_key(bdev, 0);
 
-	input_report_key(bdev->input, bdev->keymap[1],
-	                 HAS_KEY(status, HTCI2CCPLD_BTN_UP));
-	input_sync(bdev->input);
+	if (HAS_KEY(status, HTCI2CCPLD_BTN_UP))
+		htci2ccpldbtns_report_key(bdev, 1);
 
-	input_report_key(bdev->input, bdev->keymap[2],
-	                 HAS_KEY(status, HTCI2CCPLD_BTN_DOWN));
-	input_sync(bdev->input);
+	if (HAS_KEY(status, HTCI2CCPLD_BTN_DOWN))
+		htci2ccpldbtns_report_key(bdev, 2);
+		
+	if (HAS_KEY(status, HTCI2CCPLD_BTN_RIGHT))
+		htci2ccpldbtns_report_key(bdev, 3);
 
-	input_report_key(bdev->input, bdev->keymap[3],
-	                 HAS_KEY(status, HTCI2CCPLD_BTN_RIGHT));
-	input_sync(bdev->input);
-
-	input_report_key(bdev->input, bdev->keymap[4],
-	                 HAS_KEY(status, HTCI2CCPLD_BTN_ENTER));
-	input_sync(bdev->input);
+	if (HAS_KEY(status, HTCI2CCPLD_BTN_ENTER))
+		htci2ccpldbtns_report_key(bdev, 4);
 
 	return IRQ_HANDLED;
 }
