@@ -33,14 +33,27 @@
 
 #include <linux/i2c/htc-i2c-cpld.h>
 
+/* TODO:
+ * HTC Herald: Chip6 Bit4 enabled Fn LED.
+ */
+
+/* Enable if building for htc herald */
+/* #define HTC_IS_HERALD */
+
 #define HTCI2CCPLD_BL_MASK   0x0E
 #define HTCI2CCPLD_BL_L4_CMD 0x0E
 #define HTCI2CCPLD_BL_L3_CMD 0x0A
 #define HTCI2CCPLD_BL_L2_CMD 0x0C
 #define HTCI2CCPLD_BL_L1_CMD 0x08
 
-#define HTCI2CCPLD_LCD_MASK   0xF0
-#define HTCI2CCPLD_LCD_FB_CMD 0xF0
+#ifdef HTC_IS_HERALD
+/* On Herald chip4 bit5 enables CAPS LED */
+# define HTCI2CCPLD_LCD_MASK   0xD0
+# define HTCI2CCPLD_LCD_FB_CMD 0xD0
+#else
+# define HTCI2CCPLD_LCD_MASK   0xF0
+# define HTCI2CCPLD_LCD_FB_CMD 0xF0
+#endif
 
 #define HTCI2CCPLD_LLED_MASK      0x20
 #define HTCI2CCPLD_LLED_GREEN_CMD 0x20
@@ -229,7 +242,7 @@ static int htci2ccpld_chip4_init(void)
 	HTCI2CCPLD_CHIP_SET(4, HTCI2CCPLD_LCD_FB_CMD);
 
 	/* Set backlight level to 3 */
-	htci2ccpld_bl_set(3);
+	htci2ccpld_bl_set(1);
 	
 	return 0;
 }
