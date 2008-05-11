@@ -203,9 +203,8 @@ static struct spi_board_info htcwizard_spi_board_info[] __initdata = {
 		.modalias       = "ads7846",
 		.bus_num        = 2,
 		.chip_select    = 0,
-		.max_speed_hz   = 120000 /* max sample rate at 3V */
-                                        * 26 /* command + data + overhead */,
-		.irq		= OMAP_GPIO_IRQ(172),
+		.max_speed_hz   = 2000000,
+		.irq		= 172,
 		.platform_data	= &htcwizard_ads7846_platform_data,
 	}
 };
