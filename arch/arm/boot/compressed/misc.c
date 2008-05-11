@@ -20,6 +20,18 @@ unsigned int __machine_arch_type;
 
 #include <linux/string.h>
 
+#include <linux/autoconf.h>
+
+#ifdef CONFIG_EFB_DEBUG
+# define SCREEN_W 240
+# define SCREEN_H 320
+#endif
+
+
+static unsigned short *vram = 0;
+static unsigned int current_pix = 0;
+static unsigned int y = 0;
+
 #ifdef STANDALONE_DEBUG
 #define putstr printf
 #else
@@ -243,6 +255,37 @@ static ulg free_mem_ptr_end;
 
 #include "../../../../lib/inflate.c"
 
+#ifdef CONFIG_EFB_DEBUG
+/*
+ * put a new pixel. on the frame buffer
+ */
+static void putpix(void)
+{
+       if (current_pix  == SCREEN_W) {
+               current_pix = 0;
+       }
+       vram[current_pix] = 0xFFFF;
+       ++current_pix;
+       vram[current_pix] = 0x0;
+       ++current_pix;
+}
+
+/*
+ * clear the whole screen
+ */
+static void clear_screen(void)
+{
+       unsigned int i;
+
+       vram = (unsigned short *)0x20001020;
+       current_pix = 0;
+
+       for (i = 0; i < SCREEN_W * SCREEN_H; ++i) {
+               vram[i] = 0;
+       }
+}
+#endif
+
 #ifndef STANDALONE_DEBUG
 static void *malloc(int size)
 {
@@ -322,7 +365,11 @@ void flush_window(void)
 	bytes_out += (ulg)outcnt;
 	output_ptr += (ulg)outcnt;
 	outcnt = 0;
+#ifdef CONFIG_EFB_DEBUG
+	putpix();
+#else
 	putstr(".");
+#endif
 }
 
 #ifndef arch_error
@@ -333,7 +380,10 @@ static void error(char *x)
 {
 	arch_error(x);
 
+#ifdef CONFIG_EFB_DEBUG
+#else
 	putstr("\n\n");
+#endif
 	putstr(x);
 	putstr("\n\n -- System halted");
 
@@ -351,12 +401,22 @@ decompress_kernel(ulg output_start, ulg free_mem_ptr_p, ulg free_mem_ptr_end_p,
 	free_mem_ptr_end	= free_mem_ptr_end_p;
 	__machine_arch_type	= arch_id;
 
+#ifdef CONFIG_EFB_DEBUG
+	clear_screen();
+#endif
+
 	arch_decomp_setup();
 
 	makecrc();
+#ifdef CONFIG_EFB_DEBUG
+#else
 	putstr("Uncompressing Linux...");
+#endif
 	gunzip();
+#ifdef CONFIG_EFB_DEBUG
+#else
 	putstr(" done, booting the kernel.\n");
+#endif
 	return output_ptr;
 }
 #else
