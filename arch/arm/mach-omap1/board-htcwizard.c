@@ -47,6 +47,7 @@
 
 #include <linux/spi/spi.h>
 #include <linux/spi/ads7846.h>
+#include <linux/i2c-gpio.h>
 
 #include <linux/delay.h>
 
@@ -177,11 +178,38 @@ static struct platform_device lcd_device = {
 	.id		= -1,
 };
 
+#if defined(CONFIG_I2C_GPIO) || defined(CONFIG_I2C_GPIO_MODULE)
+
+static struct i2c_gpio_platform_data i2cgpio_device_data = {
+	.sda_pin		= 69,
+	.scl_pin		= 70,
+	.udelay			= 2,		/* ~100 kHz */
+};
+
+static struct platform_device i2cgpio_device = {
+	.name			= "i2c-gpio",
+	.id			= 0,
+	.dev	 = {
+		.platform_data	= &i2cgpio_device_data,
+	},
+};
+
+#endif
+
+static struct platform_device led_device = {
+	.name		= "htc-i2c-cpld-led",
+	.id		= -1,
+};
+
 
 static struct platform_device *devices[] __initdata = {
 /* 	&gsm_device, */
 	&kp_device,
 	&lcd_device,
+#if defined(CONFIG_I2C_GPIO) || defined(CONFIG_I2C_GPIO_MODULE)
+	&i2cgpio_device,
+#endif
+	&led_device,
 };
 
 
@@ -317,10 +345,15 @@ static void __init htcwizard_usb_otg(void)
 
 static void __init htcwizard_i2c_init(void)
 {
-	/* Set pin mux for I2C */
+#if defined(CONFIG_I2C_OMAP) || defined(CONFIG_I2C_OMAP_MODULE)
+	/* Use I2C_SCK and I2_SDA */
 	omap_writel(omap_readl(OMAP850_IO_CONF_5) & ~0x000000FF, OMAP850_IO_CONF_5);
-
 	omap_register_i2c_bus(1, 100, NULL, 0);
+#else
+	/* Set GPIOS 70 and 69 */
+	omap_writel(omap_readl(OMAP850_IO_CONF_5) |  0x000000CC, OMAP850_IO_CONF_5);
+	omap_writel(omap_readl(OMAP850_IO_CONF_5) & ~0x00000033, OMAP850_IO_CONF_5);
+#endif
 }
 
 static void __init htcwizard_init(void)

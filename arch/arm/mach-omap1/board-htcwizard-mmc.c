@@ -17,7 +17,7 @@
 
 #include <linux/delay.h>
 
-#ifdef CONFIG_MMC_OMAP
+#if defined(CONFIG_MMC_OMAP) || defined(CONFIG_MMC_OMAP_MODULE)
 static int slot_cover_open;
 static struct device *mmc_device;
 
@@ -94,7 +94,7 @@ void __init htcwizard_mmc_init(void)
 {
 	/* Set MUX config for SDMC, having or not mmc driver */
 	omap_writel(omap_readl(OMAP850_IO_CONF_2) & ~0x0008FF00, OMAP850_IO_CONF_2);
-#ifdef CONFIG_MMC_OMAP
+#if defined(CONFIG_MMC_OMAP) || defined(CONFIG_MMC_OMAP_MODULE)
 	omap_set_mmc_info(1, &htcwizard_mmc_data);
 #endif
 }

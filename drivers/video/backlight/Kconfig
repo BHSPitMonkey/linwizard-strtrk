@@ -121,3 +121,11 @@ config BACKLIGHT_CARILLO_RANCH
 	help
 	  If you have a Intel LE80578 (Carillo Ranch) say Y to enable the
 	  backlight driver.
+
+config BACKLIGHT_HTC_I2C_CPLD
+	tristate "HTC I2C CPLD backlight driver"
+	depends on BACKLIGHT_CLASS_DEVICE && HTC_I2C_CPLD
+	default n
+	help
+	  Say Y here to enable support for backlight on your HTC device.
+	  You also need to enable the HTC I2C CPLD driver.
