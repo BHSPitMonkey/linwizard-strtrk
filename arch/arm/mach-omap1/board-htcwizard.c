@@ -56,10 +56,7 @@
 #define HTCWIZARD_GPIO_DM 35
 #define HTCWIZARD_GPIO_DP 36
 
-#define OMAP_MMC_REG_SYSC (0xfffb7800 + 0x32)
-#define OMAP_MMC_REG_SYSS (0xfffb7800 + 0x34)
-#define OMAP_MMC_REG_CTO  (0xfffb7800 + 0x0e)
-#define OMAP_MMC_REG_DTO  (0xfffb7800 + 0x1c)
+#define HTCWIZARD_GIRQ_BTNS 141
 
 static struct omap_lcd_config htcwizard_lcd_config __initdata = {
 	.ctrl_name	= "internal",
@@ -201,6 +198,20 @@ static struct platform_device led_device = {
 	.id		= -1,
 };
 
+static struct resource btns_resources[] = {
+	[0] = {
+		.start	= OMAP_GPIO_IRQ(HTCWIZARD_GIRQ_BTNS),
+		.end	= OMAP_GPIO_IRQ(HTCWIZARD_GIRQ_BTNS),
+		.flags	= IORESOURCE_IRQ,
+	},
+};
+
+static struct platform_device btns_device = {
+	.name		= "htc-i2c-cpld-btns",
+	.id		= -1,
+	.num_resources	= ARRAY_SIZE(btns_resources),
+	.resource	= btns_resources,
+};
 
 static struct platform_device *devices[] __initdata = {
 /* 	&gsm_device, */
@@ -210,6 +221,7 @@ static struct platform_device *devices[] __initdata = {
 	&i2cgpio_device,
 #endif
 	&led_device,
+	&btns_device,
 };
 
 
