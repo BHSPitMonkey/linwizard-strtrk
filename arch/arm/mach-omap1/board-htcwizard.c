@@ -56,10 +56,7 @@
 #define HTCWIZARD_GPIO_DM 35
 #define HTCWIZARD_GPIO_DP 36
 
-#define OMAP_MMC_REG_SYSC (0xfffb7800 + 0x32)
-#define OMAP_MMC_REG_SYSS (0xfffb7800 + 0x34)
-#define OMAP_MMC_REG_CTO  (0xfffb7800 + 0x0e)
-#define OMAP_MMC_REG_DTO  (0xfffb7800 + 0x1c)
+#define HTCWIZARD_GIRQ_BTNS 141
 
 static struct omap_lcd_config htcwizard_lcd_config __initdata = {
 	.ctrl_name	= "internal",
@@ -178,6 +175,7 @@ static struct platform_device lcd_device = {
 	.id		= -1,
 };
 
+#if defined(CONFIG_I2C_GPIO) || defined(CONFIG_I2C_GPIO_MODULE)
 
 static struct i2c_gpio_platform_data i2cgpio_device_data = {
 	.sda_pin		= 69,
@@ -193,18 +191,37 @@ static struct platform_device i2cgpio_device = {
 	},
 };
 
+#endif
+
 static struct platform_device led_device = {
 	.name		= "htc-i2c-cpld-led",
 	.id		= -1,
 };
 
+static struct resource btns_resources[] = {
+	[0] = {
+		.start	= OMAP_GPIO_IRQ(HTCWIZARD_GIRQ_BTNS),
+		.end	= OMAP_GPIO_IRQ(HTCWIZARD_GIRQ_BTNS),
+		.flags	= IORESOURCE_IRQ,
+	},
+};
+
+static struct platform_device btns_device = {
+	.name		= "htc-i2c-cpld-btns",
+	.id		= -1,
+	.num_resources	= ARRAY_SIZE(btns_resources),
+	.resource	= btns_resources,
+};
 
 static struct platform_device *devices[] __initdata = {
 /* 	&gsm_device, */
 	&kp_device,
 	&lcd_device,
+#if defined(CONFIG_I2C_GPIO) || defined(CONFIG_I2C_GPIO_MODULE)
 	&i2cgpio_device,
+#endif
 	&led_device,
+	&btns_device,
 };
 
 
@@ -340,9 +357,15 @@ static void __init htcwizard_usb_otg(void)
 
 static void __init htcwizard_i2c_init(void)
 {
-	/* Set GPIOS 70 and 69 for I2C_SCK and I2_SDA */
+#if defined(CONFIG_I2C_OMAP) || defined(CONFIG_I2C_OMAP_MODULE)
+	/* Use I2C_SCK and I2_SDA */
+	omap_writel(omap_readl(OMAP850_IO_CONF_5) & ~0x000000FF, OMAP850_IO_CONF_5);
+	omap_register_i2c_bus(1, 100, NULL, 0);
+#else
+	/* Set GPIOS 70 and 69 */
 	omap_writel(omap_readl(OMAP850_IO_CONF_5) |  0x000000CC, OMAP850_IO_CONF_5);
 	omap_writel(omap_readl(OMAP850_IO_CONF_5) & ~0x00000033, OMAP850_IO_CONF_5);
+#endif
 }
 
 static void __init htcwizard_init(void)

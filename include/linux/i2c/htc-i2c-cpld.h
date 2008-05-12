@@ -3,12 +3,29 @@
 
 #define HTCI2CCPLD_BL_LMAX 4
 
+/* FIXME: Change LED_ to HTCI2CCPLD_LED
+   to prevent conflicts */
 enum htci2ccpld_led_type {
 	LED_RED,
 	LED_ORANGE,
 	LED_RGREEN,
 	LED_LGREEN,
 };
+
+enum htci2ccpld_btn_chip {
+	HTCI2CCPLD_BTN_CHIP_DPAD,
+	HTCI2CCPLD_BTN_CHIP_DKB,
+};
+
+enum htci2ccpld_btn {
+	HTCI2CCPLD_BTN_LEFT  = 0x01,
+	HTCI2CCPLD_BTN_RIGHT = 0x02,
+	HTCI2CCPLD_BTN_UP    = 0x04,
+	HTCI2CCPLD_BTN_DOWN  = 0x08,
+	HTCI2CCPLD_BTN_ENTER = 0x10,
+};
+
+extern int htci2ccpld_btn_get(enum htci2ccpld_btn_chip bchip);
 
 extern void htci2ccpld_bl_set(int value);
 extern int htci2ccpld_bl_get(void);

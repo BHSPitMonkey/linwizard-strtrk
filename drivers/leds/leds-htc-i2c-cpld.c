@@ -55,7 +55,6 @@ static struct led_classdev htci2ccpldled_orange_led = {
 
 static struct led_classdev htci2ccpldled_lgreen_led = {
 	.name			= "htci2ccpld:lgreen",
-	.default_trigger = "heartbeat",
 	.brightness_set		= htci2ccpldled_lgreen_set,
 };
 
@@ -66,6 +65,7 @@ static struct led_classdev htci2ccpldled_red_led = {
 
 static struct led_classdev htci2ccpldled_rgreen_led = {
 	.name			= "htci2ccpld:rgreen",
+	.default_trigger = "heartbeat",
 	.brightness_set		= htci2ccpldled_rgreen_set,
 };
 

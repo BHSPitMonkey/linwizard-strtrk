@@ -30,8 +30,16 @@
 #include <linux/slab.h>
 #include <linux/i2c.h>
 #include <linux/mutex.h>
+#include <linux/spinlock.h>
 
 #include <linux/i2c/htc-i2c-cpld.h>
+
+/* TODO:
+ * HTC Herald: Chip6 Bit4 enabled Fn LED.
+ */
+
+/* Enable if building for htc herald */
+/* #define HTC_IS_HERALD */
 
 #define HTCI2CCPLD_BL_MASK   0x0E
 #define HTCI2CCPLD_BL_L4_CMD 0x0E
@@ -39,19 +47,41 @@
 #define HTCI2CCPLD_BL_L2_CMD 0x0C
 #define HTCI2CCPLD_BL_L1_CMD 0x08
 
-#define HTCI2CCPLD_LCD_MASK   0xF0
-#define HTCI2CCPLD_LCD_FB_CMD 0xF0
+#ifdef HTC_IS_HERALD
+/* On Herald chip4 bit5 enables CAPS LED */
+# define HTCI2CCPLD_LCD_MASK   0xD0
+# define HTCI2CCPLD_LCD_FB_CMD 0xD0
+#else
+# define HTCI2CCPLD_LCD_MASK   0xF0
+# define HTCI2CCPLD_LCD_FB_CMD 0xF0
+#endif
 
+/* This one doesnt turn on when usb is off */
 #define HTCI2CCPLD_LLED_MASK      0x20
 #define HTCI2CCPLD_LLED_GREEN_CMD 0x20
 
-#define HTCI2CCPLD_RLED_MASK       0x0E
-#define HTCI2CCPLD_RLED_GREEN_CMD  0x08
-#define HTCI2CCPLD_RLED_RED_CMD    0x04
-#define HTCI2CCPLD_RLED_ORANGE_CMD 0x0C
+/* We force the charge bit to enable leds
+   even with usb off */
+#define HTCI2CCPLD_RLED_MASK       0x1E
+#define HTCI2CCPLD_RLED_GREEN_CMD  0x18
+#define HTCI2CCPLD_RLED_RED_CMD    0x14
+#define HTCI2CCPLD_RLED_ORANGE_CMD 0x1C
 
 #define HTCI2CCPLD_RUMBLE_MASK 0X08
-#define HTCI2CCPLD_RUMBLE_CMD  0X08 
+#define HTCI2CCPLD_RUMBLE_CMD  0X08
+
+#define HTCI2CCPLD_DKB_MASK  0xF0
+#define HTCI2CCPLD_DKB_DOWN  0x10
+#define HTCI2CCPLD_DKB_LEFT  0x20
+#define HTCI2CCPLD_DKB_UP    0x40
+#define HTCI2CCPLD_DKB_RIGHT 0x80
+
+#define HTCI2CCPLD_DPAD_MASK  0xF8
+#define HTCI2CCPLD_DPAD_ENTER 0x08
+#define HTCI2CCPLD_DPAD_DOWN  0x10
+#define HTCI2CCPLD_DPAD_LEFT  0x20
+#define HTCI2CCPLD_DPAD_UP    0x40
+#define HTCI2CCPLD_DPAD_RIGHT 0x80
 
 #define HTCI2CCPLD_CHIP_RST(C,M) \
 	(htci2ccpld_chip##C.cmd &= ~M)
@@ -75,6 +105,7 @@ I2C_CLIENT_INSMOD_1(htc_i2c_cpld);
 
 struct htci2ccpld_chip_data {
 	struct i2c_client client;
+	spinlock_t lock;
 	u8 cmd;
 };
 
@@ -87,7 +118,7 @@ static struct htci2ccpld_chip_data htci2ccpld_chip4;
 static struct htci2ccpld_chip_data htci2ccpld_chip5;
 static struct htci2ccpld_chip_data htci2ccpld_chip6;
 
-static void htci2ccpld_chip_update(struct htci2ccpld_chip_data *chip);
+static u8 htci2ccpld_chip_update(struct htci2ccpld_chip_data *chip);
 
 /*
  * Interface functions
@@ -209,13 +240,50 @@ bool htci2ccpld_led_get(enum htci2ccpld_led_type led)
 EXPORT_SYMBOL(htci2ccpld_led_get);
 
 
+int htci2ccpld_btn_get(enum htci2ccpld_btn_chip bchip)
+{
+	u8 val;
+	int status = 0;
+
+	if (bchip == HTCI2CCPLD_BTN_CHIP_DKB) {
+		val = htci2ccpld_chip_update(&htci2ccpld_chip3);
+		if ((val | HTCI2CCPLD_DKB_UP) != val)
+			status |= HTCI2CCPLD_BTN_UP;
+		if ((val | HTCI2CCPLD_DKB_DOWN) != val)
+			status |= HTCI2CCPLD_BTN_DOWN;
+		if ((val | HTCI2CCPLD_DKB_LEFT) != val)
+			status |= HTCI2CCPLD_BTN_LEFT;
+		if ((val | HTCI2CCPLD_DKB_RIGHT) != val)
+			status |= HTCI2CCPLD_BTN_RIGHT;
+		return status;
+	}
+	
+	val = htci2ccpld_chip_update(&htci2ccpld_chip4);
+	if ((val | HTCI2CCPLD_DPAD_ENTER) != val)
+		status |= HTCI2CCPLD_BTN_ENTER;
+	if ((val | HTCI2CCPLD_DPAD_UP) != val)
+		status |= HTCI2CCPLD_BTN_UP;
+	if ((val | HTCI2CCPLD_DPAD_DOWN) != val)
+		status |= HTCI2CCPLD_BTN_DOWN;
+	if ((val | HTCI2CCPLD_DPAD_LEFT) != val)
+		status |= HTCI2CCPLD_BTN_LEFT;
+	if ((val | HTCI2CCPLD_DPAD_RIGHT) != val)
+		status |= HTCI2CCPLD_BTN_RIGHT;
+	return status;
+}
+EXPORT_SYMBOL(htci2ccpld_btn_get);
+
+
 /*
  * Chip management
  */
 
-static void htci2ccpld_chip_update(struct htci2ccpld_chip_data *chip)
+static u8 htci2ccpld_chip_update(struct htci2ccpld_chip_data *chip)
 {
-	i2c_smbus_read_byte_data(&chip->client, chip->cmd);
+	u8 val;
+
+	val = i2c_smbus_read_byte_data(&chip->client, chip->cmd);
+	return val;
 }
 
 static int htci2ccpld_chip3_init(void)
@@ -229,7 +297,7 @@ static int htci2ccpld_chip4_init(void)
 	HTCI2CCPLD_CHIP_SET(4, HTCI2CCPLD_LCD_FB_CMD);
 
 	/* Set backlight level to 3 */
-	htci2ccpld_bl_set(3);
+	htci2ccpld_bl_set(1);
 	
 	return 0;
 }

@@ -197,4 +197,11 @@ config HP_SDC_RTC
 	  Say Y here if you want to support the built-in real time clock
 	  of the HP SDC controller.
 
+config INPUT_HTC_I2C_CPLD_BTNS
+	tristate "HTC I2C CPLD Buttons"
+	depends on HTC_I2C_CPLD
+	help
+	  Say Y here if you want to support for directional buttons on
+	  HTC devices with omap850 using the I2C CPLD interface.
+
 endif
