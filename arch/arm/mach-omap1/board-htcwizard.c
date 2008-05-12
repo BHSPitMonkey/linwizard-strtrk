@@ -47,7 +47,7 @@
 #include <asm/arch/spi100k.h>
 
 #include <linux/spi/spi.h>
-#include <linux/spi/ads7846.h>
+#include <linux/spi/tsc2046.h>
 
 #include <linux/delay.h>
 
@@ -188,25 +188,23 @@ static int ads7846_get_pendown_state(void)
 	return !omap_get_gpio_datain(76);
 }
 
-/* Values below need to be verified */
-static struct ads7846_platform_data htcwizard_ads7846_platform_data = {
-	.model			= 7846,
-	.vref_delay_usecs	= 100, /* internal, no capacitor */
-	.x_plate_ohms		= 419,
-	.y_plate_ohms		= 486,
-	.get_pendown_state	= ads7846_get_pendown_state,
+static struct tsc2046_platform_data htcwizard_ts_platform_data __initdata = {
+        .ts_x_plate_ohm    = 419,
+        .dav_gpio          = 76,
+        .gpio_debounce     = 0,
+	.ts_max_pressure   = 10000,
+        .ts_touch_pressure = 5000,
 };
 
-/* Values below need to be verified */
-static struct spi_board_info htcwizard_spi_board_info[] __initdata = {
+static struct spi_board_info htcwizard_spi_board_info[] __initdata = { 
 	{
-		.modalias       = "ads7846",
-		.bus_num        = 2,
-		.chip_select    = 0,
-		.max_speed_hz   = 2000000,
-		.irq		= 172,
-		.platform_data	= &htcwizard_ads7846_platform_data,
-	}
+ 	       .modalias               = "tsc2046",
+ 	       .platform_data          = &htcwizard_ts_platform_data,
+	        .max_speed_hz           = 120000 /* max sample rate at 3V */
+         	                                * 26 /* command + data + overhead */,
+	        .bus_num                = 2,
+		.chip_select            = 0,
+	} 
 };
 
 /*
