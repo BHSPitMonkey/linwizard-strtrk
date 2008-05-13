@@ -22,6 +22,7 @@
 #include <linux/interrupt.h>
 #include <linux/delay.h>
 #include <linux/spi/spi.h>
+#include <linux/interrupt.h>
 
 #ifdef CONFIG_ARCH_OMAP
 #include <asm/arch/gpio.h>
@@ -411,7 +412,7 @@ int __devinit tsc2046_ts_init(struct tsc2046 *tsc,
 
 	ts->irq_enabled = 1;
 	r = request_irq(ts->irq, tsc2046_ts_irq_handler,
-			SA_SAMPLE_RANDOM | SA_TRIGGER_FALLING,
+			IRQF_SAMPLE_RANDOM | IRQF_TRIGGER_FALLING,
 			"tsc2046-ts", tsc);
 	if (r < 0) {
 		dev_err(&tsc->spi->dev, "unable to get DAV IRQ");
