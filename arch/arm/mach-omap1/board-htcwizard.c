@@ -213,7 +213,7 @@ static struct spi_board_info htcwizard_spi_board_info[] __initdata = {
        [0] = {
                .modalias       = "ads7846",
                .bus_num        = 2,
-               .chip_select    = 1,
+               .chip_select    = 0,
                .max_speed_hz   = 1500000,
                .irq            = OMAP_GPIO_IRQ(TS_GPIO),
                .platform_data  = &htcwizard_ads7846_platform_data,
@@ -236,7 +236,7 @@ static struct spi_board_info htcwizard_spi_board_info[] __initdata = {
  	       .platform_data          = &htcwizard_ts_platform_data,
 	        .max_speed_hz           = 1500000,
 	        .bus_num                = 2,
-		.chip_select            = 1,
+		.chip_select            = 0,
 	} 
 };
 #endif
