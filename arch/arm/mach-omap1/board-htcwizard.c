@@ -58,7 +58,7 @@
 
 #include <linux/delay.h>
 
-#define ADS7846_PENDOWN_GPIO 76
+#define TS_GPIO 76
 
 #define HTCWIZARD_GPIO_DM 35
 #define HTCWIZARD_GPIO_DP 36
@@ -214,7 +214,7 @@ static struct spi_board_info htcwizard_spi_board_info[] __initdata = {
                .modalias       = "ads7846",
                .bus_num        = 2,
                .chip_select    = 1,
-               .max_speed_hz   = 2500000,
+               .max_speed_hz   = 1500000,
                .irq            = OMAP_GPIO_IRQ(TS_GPIO),
                .platform_data  = &htcwizard_ads7846_platform_data,
        },
@@ -234,8 +234,7 @@ static struct spi_board_info htcwizard_spi_board_info[] __initdata = {
 	{
  	       .modalias               = "tsc2046",
  	       .platform_data          = &htcwizard_ts_platform_data,
-	        .max_speed_hz           = 120000 /* max sample rate at 3V */
-         	                                * 26 /* command + data + overhead */,
+	        .max_speed_hz           = 1500000,
 	        .bus_num                = 2,
 		.chip_select            = 1,
 	} 
