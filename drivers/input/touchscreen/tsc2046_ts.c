@@ -365,6 +365,8 @@ int __devinit tsc2046_ts_init(struct tsc2046 *tsc,
 
 	ts->dav_gpio = dav_gpio;
 #ifdef CONFIG_ARCH_OMAP
+	omap_free_gpio(dav_gpio);
+
 	r = omap_request_gpio(dav_gpio);
 	if (r < 0) {
 		dev_err(&tsc->spi->dev, "unable to get DAV GPIO");
@@ -418,7 +420,7 @@ int __devinit tsc2046_ts_init(struct tsc2046 *tsc,
 		dev_err(&tsc->spi->dev, "unable to get DAV IRQ");
 		goto err3;
 	}
-	set_irq_wake(ts->irq, 1);
+	/* set_irq_wake(ts->irq, 1); */
 
 	if (device_create_file(&tsc->spi->dev, &dev_attr_pen_down) < 0)
 		goto err4;

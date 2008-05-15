@@ -197,11 +197,9 @@ static int ads7846_get_pendown_state(void)
 }
 
 static struct ads7846_platform_data htcwizard_ads7846_platform_data __initdata = {
-       .model                  = 7846,
-       .vref_delay_usecs       = 100, /* internal, no capacitor */
        .x_max          = 0x0fff,
        .y_max          = 0x0fff,
-       .x_plate_ohms   = 180,
+       .x_plate_ohms   = 419,
        .pressure_max   = 255,
        .debounce_max   = 10,
        .debounce_tol   = 3,

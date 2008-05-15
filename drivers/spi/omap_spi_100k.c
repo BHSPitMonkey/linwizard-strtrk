@@ -22,7 +22,7 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  *
  */
-
+#define VERBOSE
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
@@ -57,7 +57,7 @@
 #define OMAP1_SPI100K_TX0			0x0A
 #define OMAP1_SPI100K_RX0			0x0C
 #define OMAP1_SPI100K_CHSTAT_RXS		0x06
-#define OMAP1_SPI100K_CHSTAT_TXS		0x00
+#define OMAP1_SPI100K_CHSTAT_TXS		0x02
 
 /* per-register bitmasks: */
 
