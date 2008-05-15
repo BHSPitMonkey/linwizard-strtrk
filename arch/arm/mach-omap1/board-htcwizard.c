@@ -221,20 +221,20 @@ static struct spi_board_info htcwizard_spi_board_info[] __initdata = {
 
 #ifdef CONFIG_TOUCHSCREEN_TSC2046
 static struct tsc2046_platform_data htcwizard_ts_platform_data __initdata = {
-        .ts_x_plate_ohm    = 419,
+/*        .ts_x_plate_ohm    = 180, */
         .dav_gpio          = TS_GPIO,
-        .gpio_debounce     = 0,
-	.ts_max_pressure   = 10000,
-        .ts_touch_pressure = 5000,
+        .gpio_debounce     = 0xa,
+/*	.ts_max_pressure   = 10000,
+        .ts_touch_pressure = 5000, */
 };
 
 static struct spi_board_info htcwizard_spi_board_info[] __initdata = { 
 	{
  	       .modalias               = "tsc2046",
  	       .platform_data          = &htcwizard_ts_platform_data,
-	        .max_speed_hz           = 1500000,
-	        .bus_num                = 2,
-		.chip_select            = 0,
+	       .max_speed_hz           = 1500000,
+	       .bus_num                = 2,
+	       .chip_select            = 0,
 	} 
 };
 #endif

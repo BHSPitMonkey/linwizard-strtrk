@@ -15,7 +15,7 @@
  *  or implied.
  *  
  */
-
+#define VERBOSE
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/input.h>
@@ -140,6 +140,7 @@ static void tsc2046_ts_rx(void *arg)
 	 */
 	if (pressure < ts->pressure_limit && x < MAX_12BIT && y < MAX_12BIT) {
 		ts->pressure_limit = ts->max_pressure;
+		
 		if (ts->ignore_last) {
 			if (ts->sample_cnt)
 				update_pen_state(tsc, ts->x, ts->y, ts->p);
@@ -148,6 +149,7 @@ static void tsc2046_ts_rx(void *arg)
 			ts->p = pressure;
 		} else
 			update_pen_state(tsc, x, y, pressure);
+
 		ts->sample_cnt++;
 	}
 
