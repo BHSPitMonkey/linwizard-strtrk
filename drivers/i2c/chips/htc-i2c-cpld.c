@@ -34,63 +34,77 @@
 
 #include <linux/i2c/htc-i2c-cpld.h>
 
-/* TODO:
- * HTC Herald: Chip6 Bit4 enabled Fn LED.
- */
+/* Some macros to easy bit handling */
+#define HTCI2CCPLD_CHIP_RST_GRP(X) HTCI2CCPLD_CHIP_RST_GRP_E(X)
+#define HTCI2CCPLD_CHIP_SET(X)     HTCI2CCPLD_CHIP_SET_E(X)
+#define HTCI2CCPLD_CHIP_ISSET(X)    HTCI2CCPLD_CHIP_ISSET_E(X)
+#define HTCI2CCPLD_CHIP_ISNSET(X,Y) HTCI2CCPLD_CHIP_ISNSET_E(X,Y)
+
+#define HTCI2CCPLD_CHIP_RST_GRP_E(C,B,M) \
+	(htci2ccpld_chip##C.cmd &= ~M)
+
+#define HTCI2CCPLD_CHIP_SET_E(C,B,M) \
+	(htci2ccpld_chip##C.cmd |= B)
+
+#define HTCI2CCPLD_CHIP_ISSET_E(C,B,M) \
+	(((htci2ccpld_chip##C.cmd & M) ^ B) == 0)
+
+#define HTCI2CCPLD_CHIP_ISNSET_E(C,B,M,V) \
+	((V | B) != V)
 
 /* Enable if building for htc herald */
 /* #define HTC_IS_HERALD */
 
-#define HTCI2CCPLD_BL_MASK   0x0E
-#define HTCI2CCPLD_BL_L4_CMD 0x0E
-#define HTCI2CCPLD_BL_L3_CMD 0x0A
-#define HTCI2CCPLD_BL_L2_CMD 0x0C
-#define HTCI2CCPLD_BL_L1_CMD 0x08
+/*     function                 chip, bit , group mask */
+#define HTCI2CCPLD_BIT_DKB_DOWN    3, 0x10, 0xF0
+#define HTCI2CCPLD_BIT_DKB_LEFT    3, 0x20, 0xF0
+#define HTCI2CCPLD_BIT_DKB_UP      3, 0x40, 0xF0
+#define HTCI2CCPLD_BIT_DKB_RIGHT   3, 0x80, 0xF0
+
+#define HTCI2CCPLD_BIT_DPAD_BL     3, 0x01, 0x01
+
+#define HTCI2CCPLD_BIT_SOUND       3, 0x08, 0x08
+
+#define HTCI2CCPLD_BIT_DPAD_ENTER  4, 0x08, 0xF8
+#define HTCI2CCPLD_BIT_DPAD_DOWN   4, 0x10, 0xF8
+#define HTCI2CCPLD_BIT_DPAD_LEFT   4, 0x20, 0xF8
+#define HTCI2CCPLD_BIT_DPAD_UP     4, 0x40, 0xF8
+#define HTCI2CCPLD_BIT_DPAD_RIGHT  4, 0x80, 0xF8
+
+#define HTCI2CCPLD_BIT_BL_L4       4, 0x0E, 0x0E
+#define HTCI2CCPLD_BIT_BL_L3       4, 0x0A, 0x0E
+#define HTCI2CCPLD_BIT_BL_L2       4, 0x0C, 0x0E
+#define HTCI2CCPLD_BIT_BL_L1       4, 0x08, 0x0E
+
+#define HTCI2CCPLD_BIT_KB_BL       4, 0x01, 0x01
 
 #ifdef HTC_IS_HERALD
 /* On Herald chip4 bit5 enables CAPS LED */
-# define HTCI2CCPLD_LCD_MASK   0xD0
-# define HTCI2CCPLD_LCD_FB_CMD 0xD0
+# define HTCI2CCPLD_BIT_LCD_FB     4, 0xD0, 0xD0
 #else
-# define HTCI2CCPLD_LCD_MASK   0xF0
-# define HTCI2CCPLD_LCD_FB_CMD 0xF0
+# define HTCI2CCPLD_BIT_LCD_FB     4, 0xF0, 0xF0
 #endif
 
 /* This one doesnt turn on when usb is off */
-#define HTCI2CCPLD_LLED_MASK      0x20
-#define HTCI2CCPLD_LLED_GREEN_CMD 0x20
+#define HTCI2CCPLD_BIT_LLED_GREEN  5, 0x20, 0x20
 
 /* We force the charge bit to enable leds
    even with usb off */
-#define HTCI2CCPLD_RLED_MASK       0x1E
-#define HTCI2CCPLD_RLED_GREEN_CMD  0x18
-#define HTCI2CCPLD_RLED_RED_CMD    0x14
-#define HTCI2CCPLD_RLED_ORANGE_CMD 0x1C
+#define HTCI2CCPLD_BIT_RLED_GREEN  5, 0x18, 0x1E
+#define HTCI2CCPLD_BIT_RLED_RED    5, 0x14, 0x1E
+#define HTCI2CCPLD_BIT_RLED_ORANGE 5, 0x1C, 0x1E
 
-#define HTCI2CCPLD_RUMBLE_MASK 0X08
-#define HTCI2CCPLD_RUMBLE_CMD  0X08
+#define HTCI2CCPLD_BIT_DPAD_OFF    5, 0x01, 0x01
 
-#define HTCI2CCPLD_DKB_MASK  0xF0
-#define HTCI2CCPLD_DKB_DOWN  0x10
-#define HTCI2CCPLD_DKB_LEFT  0x20
-#define HTCI2CCPLD_DKB_UP    0x40
-#define HTCI2CCPLD_DKB_RIGHT 0x80
+#ifdef HTC_IS_HERALD
+# define HTCI2CCPLD_BIT_LED_FN     6, 0x10, 0x10
+#endif
 
-#define HTCI2CCPLD_DPAD_MASK  0xF8
-#define HTCI2CCPLD_DPAD_ENTER 0x08
-#define HTCI2CCPLD_DPAD_DOWN  0x10
-#define HTCI2CCPLD_DPAD_LEFT  0x20
-#define HTCI2CCPLD_DPAD_UP    0x40
-#define HTCI2CCPLD_DPAD_RIGHT 0x80
+#define HTCI2CCPLD_BIT_VIBRATOR    6, 0x08, 0x08
 
-#define HTCI2CCPLD_CHIP_RST(C,M) \
-	(htci2ccpld_chip##C.cmd &= ~M)
+#define HTCI2CCPLD_BIT_LED_CAMERA  6, 0x20, 0x20
 
-#define HTCI2CCPLD_CHIP_SET(C,D) \
-	(htci2ccpld_chip##C.cmd |= D)
-
-#define HTCI2CCPLD_CHIP_CHK(C,D,M) \
-	(((htci2ccpld_chip##C.cmd & M) ^ D) == 0)
+#define HTCI2CCPLD_BIT_DALL_OFF    6, 0x02, 0x02
 
 /* Addresses to scan */
 static const unsigned short normal_i2c[] = {
@@ -126,9 +140,9 @@ static u8 htci2ccpld_chip_update(struct htci2ccpld_chip_data *chip);
 
 void htci2ccpld_vibrator_set(bool status)
 {
-	HTCI2CCPLD_CHIP_RST(6, HTCI2CCPLD_RUMBLE_MASK);
+	HTCI2CCPLD_CHIP_RST_GRP(HTCI2CCPLD_BIT_VIBRATOR);
 	if (status)
-		HTCI2CCPLD_CHIP_SET(6, HTCI2CCPLD_RUMBLE_CMD);
+		HTCI2CCPLD_CHIP_SET(HTCI2CCPLD_BIT_VIBRATOR);
 
 	htci2ccpld_chip_update(&htci2ccpld_chip6);
 }
@@ -137,28 +151,27 @@ EXPORT_SYMBOL(htci2ccpld_vibrator_set);
 
 bool htci2ccpld_vibrator_get(void)
 {
-	return HTCI2CCPLD_CHIP_CHK(6, HTCI2CCPLD_RUMBLE_CMD,
-	                              HTCI2CCPLD_RUMBLE_MASK);
+	return HTCI2CCPLD_CHIP_ISSET(HTCI2CCPLD_BIT_VIBRATOR);
 }
 EXPORT_SYMBOL(htci2ccpld_vibrator_get);
 
 
 void htci2ccpld_bl_set(int value)
 {
-	HTCI2CCPLD_CHIP_RST(4, HTCI2CCPLD_BL_MASK);
+	HTCI2CCPLD_CHIP_RST_GRP(HTCI2CCPLD_BIT_BL_L1);
 
 	switch (value) {
 		case 1:
-			HTCI2CCPLD_CHIP_SET(4, HTCI2CCPLD_BL_L1_CMD);
+			HTCI2CCPLD_CHIP_SET(HTCI2CCPLD_BIT_BL_L1);
 			break;
 		case 2:
-			HTCI2CCPLD_CHIP_SET(4, HTCI2CCPLD_BL_L2_CMD);
+			HTCI2CCPLD_CHIP_SET(HTCI2CCPLD_BIT_BL_L2);
 			break;
 		case 3:
-			HTCI2CCPLD_CHIP_SET(4, HTCI2CCPLD_BL_L3_CMD);
+			HTCI2CCPLD_CHIP_SET(HTCI2CCPLD_BIT_BL_L3);
 			break;
 		case 4:
-			HTCI2CCPLD_CHIP_SET(4, HTCI2CCPLD_BL_L4_CMD);
+			HTCI2CCPLD_CHIP_SET(HTCI2CCPLD_BIT_BL_L4);
 			break;
 	}
 	
@@ -169,13 +182,13 @@ EXPORT_SYMBOL(htci2ccpld_bl_set);
 
 int htci2ccpld_bl_get(void)
 {
-	if (HTCI2CCPLD_CHIP_CHK(4, HTCI2CCPLD_BL_L1_CMD, HTCI2CCPLD_BL_MASK))
+	if (HTCI2CCPLD_CHIP_ISSET(HTCI2CCPLD_BIT_BL_L1))
 		return 1;
-	if (HTCI2CCPLD_CHIP_CHK(4, HTCI2CCPLD_BL_L2_CMD, HTCI2CCPLD_BL_MASK))
+	if (HTCI2CCPLD_CHIP_ISSET(HTCI2CCPLD_BIT_BL_L2))
 		return 2;
-	if (HTCI2CCPLD_CHIP_CHK(4, HTCI2CCPLD_BL_L3_CMD, HTCI2CCPLD_BL_MASK))
+	if (HTCI2CCPLD_CHIP_ISSET(HTCI2CCPLD_BIT_BL_L3))
 		return 3;
-	if (HTCI2CCPLD_CHIP_CHK(4, HTCI2CCPLD_BL_L4_CMD, HTCI2CCPLD_BL_MASK))
+	if (HTCI2CCPLD_CHIP_ISSET(HTCI2CCPLD_BIT_BL_L4))
 		return 4;
 
 	return 0;
@@ -185,29 +198,51 @@ EXPORT_SYMBOL(htci2ccpld_bl_get);
 void htci2ccpld_led_set(enum htci2ccpld_led_type led, bool value)
 {
 	switch (led) {
-		case LED_RED:
-			HTCI2CCPLD_CHIP_RST(5, HTCI2CCPLD_RLED_MASK);
+		case HTCI2CCPLD_LED_RED:
+			HTCI2CCPLD_CHIP_RST_GRP(HTCI2CCPLD_BIT_RLED_RED);
 			if (value)
-				HTCI2CCPLD_CHIP_SET(5, HTCI2CCPLD_RLED_RED_CMD);
+				HTCI2CCPLD_CHIP_SET(HTCI2CCPLD_BIT_RLED_RED);
 			break;
-		case LED_ORANGE:
-			HTCI2CCPLD_CHIP_RST(5, HTCI2CCPLD_RLED_MASK);
+		case HTCI2CCPLD_LED_ORANGE:
+			HTCI2CCPLD_CHIP_RST_GRP(HTCI2CCPLD_BIT_RLED_ORANGE);
 			if (value)
-				HTCI2CCPLD_CHIP_SET(5, HTCI2CCPLD_RLED_ORANGE_CMD);
+				HTCI2CCPLD_CHIP_SET(HTCI2CCPLD_BIT_RLED_ORANGE);
 			break;
-		case LED_RGREEN:
-			HTCI2CCPLD_CHIP_RST(5, HTCI2CCPLD_RLED_MASK);
+		case HTCI2CCPLD_LED_RGREEN:
+			HTCI2CCPLD_CHIP_RST_GRP(HTCI2CCPLD_BIT_RLED_GREEN);
 			if (value)
-				HTCI2CCPLD_CHIP_SET(5, HTCI2CCPLD_RLED_GREEN_CMD);
+				HTCI2CCPLD_CHIP_SET(HTCI2CCPLD_BIT_RLED_GREEN);
 			break;
-		case LED_LGREEN:
-			HTCI2CCPLD_CHIP_RST(5, HTCI2CCPLD_LLED_MASK);
+		case HTCI2CCPLD_LED_LGREEN:
+			HTCI2CCPLD_CHIP_RST_GRP(HTCI2CCPLD_BIT_LLED_GREEN);
 			if (value)
-				HTCI2CCPLD_CHIP_SET(5, HTCI2CCPLD_LLED_GREEN_CMD);
+				HTCI2CCPLD_CHIP_SET(HTCI2CCPLD_BIT_LLED_GREEN);
+			break;
+		case HTCI2CCPLD_LED_CAMERA:
+			HTCI2CCPLD_CHIP_RST_GRP(HTCI2CCPLD_BIT_LED_CAMERA);
+			if (value)
+				HTCI2CCPLD_CHIP_SET(HTCI2CCPLD_BIT_LED_CAMERA);
+			break;
+		case HTCI2CCPLD_LED_KB:
+			HTCI2CCPLD_CHIP_RST_GRP(HTCI2CCPLD_BIT_KB_BL);
+			if (value)
+				HTCI2CCPLD_CHIP_SET(HTCI2CCPLD_BIT_KB_BL);
+			break;
+		case HTCI2CCPLD_LED_DPAD:
+			HTCI2CCPLD_CHIP_RST_GRP(HTCI2CCPLD_BIT_DPAD_BL);
+			if (value)
+				HTCI2CCPLD_CHIP_SET(HTCI2CCPLD_BIT_DPAD_BL);
+			break;
+		case HTCI2CCPLD_LED_FN:
+#ifdef HTC_IS_HERALD
+			HTCI2CCPLD_CHIP_RST_GRP(HTCI2CCPLD_BIT_LED_FN);
+			if (value)
+				HTCI2CCPLD_CHIP_SET(HTCI2CCPLD_BIT_LED_FN);
+#endif
 			break;
 		default:
-			HTCI2CCPLD_CHIP_RST(5, HTCI2CCPLD_RLED_MASK);
-			HTCI2CCPLD_CHIP_RST(5, HTCI2CCPLD_LLED_MASK);
+			HTCI2CCPLD_CHIP_RST_GRP(HTCI2CCPLD_BIT_RLED_GREEN);
+			HTCI2CCPLD_CHIP_RST_GRP(HTCI2CCPLD_BIT_LLED_GREEN);
 	}
 
 	htci2ccpld_chip_update(&htci2ccpld_chip5);
@@ -218,21 +253,31 @@ EXPORT_SYMBOL(htci2ccpld_led_set);
 bool htci2ccpld_led_get(enum htci2ccpld_led_type led)
 {
 	switch (led) {
-		case LED_RED:
-			return HTCI2CCPLD_CHIP_CHK(4, HTCI2CCPLD_RLED_RED_CMD,
-			                              HTCI2CCPLD_RLED_MASK);
+		case HTCI2CCPLD_LED_RED:
+			return HTCI2CCPLD_CHIP_ISSET(HTCI2CCPLD_BIT_RLED_RED);
 			break;
-		case LED_ORANGE:
-			return HTCI2CCPLD_CHIP_CHK(4, HTCI2CCPLD_RLED_ORANGE_CMD,
-			                              HTCI2CCPLD_RLED_MASK);
+		case HTCI2CCPLD_LED_ORANGE:
+			return HTCI2CCPLD_CHIP_ISSET(HTCI2CCPLD_BIT_RLED_ORANGE);
 			break;
-		case LED_RGREEN:
-			return HTCI2CCPLD_CHIP_CHK(4, HTCI2CCPLD_RLED_GREEN_CMD,
-			                              HTCI2CCPLD_RLED_MASK);
+		case HTCI2CCPLD_LED_RGREEN:
+			return HTCI2CCPLD_CHIP_ISSET(HTCI2CCPLD_BIT_RLED_GREEN);
 			break;
-		case LED_LGREEN:
-			return HTCI2CCPLD_CHIP_CHK(4, HTCI2CCPLD_LLED_GREEN_CMD,
-			                              HTCI2CCPLD_LLED_MASK);
+		case HTCI2CCPLD_LED_LGREEN:
+			return HTCI2CCPLD_CHIP_ISSET(HTCI2CCPLD_BIT_LLED_GREEN);
+			break;
+		case HTCI2CCPLD_LED_CAMERA:
+			return HTCI2CCPLD_CHIP_ISSET(HTCI2CCPLD_BIT_LED_CAMERA);
+			break;
+		case HTCI2CCPLD_LED_KB:
+			return HTCI2CCPLD_CHIP_ISSET(HTCI2CCPLD_BIT_KB_BL);
+			break;
+		case HTCI2CCPLD_LED_DPAD:
+			return HTCI2CCPLD_CHIP_ISSET(HTCI2CCPLD_BIT_DPAD_BL);
+			break;
+		case HTCI2CCPLD_LED_FN:
+#ifdef HTC_IS_HERALD
+			return HTCI2CCPLD_CHIP_ISSET(HTCI2CCPLD_BIT_LED_FN);
+#endif
 			break;
 	}
 	return 0;
@@ -247,28 +292,46 @@ int htci2ccpld_btn_get(enum htci2ccpld_btn_chip bchip)
 
 	if (bchip == HTCI2CCPLD_BTN_CHIP_DKB) {
 		val = htci2ccpld_chip_update(&htci2ccpld_chip3);
-		if ((val | HTCI2CCPLD_DKB_UP) != val)
+		if (HTCI2CCPLD_CHIP_ISNSET(HTCI2CCPLD_BIT_DKB_UP, val))
 			status |= HTCI2CCPLD_BTN_UP;
-		if ((val | HTCI2CCPLD_DKB_DOWN) != val)
+
+		if (HTCI2CCPLD_CHIP_ISNSET(HTCI2CCPLD_BIT_DKB_DOWN, val))
 			status |= HTCI2CCPLD_BTN_DOWN;
-		if ((val | HTCI2CCPLD_DKB_LEFT) != val)
+
+		if (HTCI2CCPLD_CHIP_ISNSET(HTCI2CCPLD_BIT_DKB_LEFT, val))
 			status |= HTCI2CCPLD_BTN_LEFT;
-		if ((val | HTCI2CCPLD_DKB_RIGHT) != val)
+
+		if (HTCI2CCPLD_CHIP_ISNSET(HTCI2CCPLD_BIT_DKB_RIGHT, val))
 			status |= HTCI2CCPLD_BTN_RIGHT;
+		
+		/* Check for unhandled keys */
+		if ((! status) && (val < 0xff))
+			printk("htc-i2c-cpld: Unhandled event %x on chip 3.\n", val);
+
 		return status;
 	}
 	
 	val = htci2ccpld_chip_update(&htci2ccpld_chip4);
-	if ((val | HTCI2CCPLD_DPAD_ENTER) != val)
+	
+	if (HTCI2CCPLD_CHIP_ISNSET(HTCI2CCPLD_BIT_DPAD_ENTER, val))
 		status |= HTCI2CCPLD_BTN_ENTER;
-	if ((val | HTCI2CCPLD_DPAD_UP) != val)
+
+	if (HTCI2CCPLD_CHIP_ISNSET(HTCI2CCPLD_BIT_DPAD_UP, val))
 		status |= HTCI2CCPLD_BTN_UP;
-	if ((val | HTCI2CCPLD_DPAD_DOWN) != val)
+
+	if (HTCI2CCPLD_CHIP_ISNSET(HTCI2CCPLD_BIT_DPAD_DOWN, val))
 		status |= HTCI2CCPLD_BTN_DOWN;
-	if ((val | HTCI2CCPLD_DPAD_LEFT) != val)
+
+	if (HTCI2CCPLD_CHIP_ISNSET(HTCI2CCPLD_BIT_DPAD_LEFT, val))
 		status |= HTCI2CCPLD_BTN_LEFT;
-	if ((val | HTCI2CCPLD_DPAD_RIGHT) != val)
+
+	if (HTCI2CCPLD_CHIP_ISNSET(HTCI2CCPLD_BIT_DPAD_RIGHT, val))
 		status |= HTCI2CCPLD_BTN_RIGHT;
+
+	/* Check for unhandled keys */
+	if ((! status) && (val < 0xff))
+		printk("htc-i2c-cpld: Unhandled event %x on chip 4.\n", val);
+
 	return status;
 }
 EXPORT_SYMBOL(htci2ccpld_btn_get);
@@ -280,21 +343,29 @@ EXPORT_SYMBOL(htci2ccpld_btn_get);
 
 static u8 htci2ccpld_chip_update(struct htci2ccpld_chip_data *chip)
 {
-	u8 val;
-
-	val = i2c_smbus_read_byte_data(&chip->client, chip->cmd);
-	return val;
+	return i2c_smbus_read_byte_data(&chip->client, chip->cmd);
 }
 
 static int htci2ccpld_chip3_init(void)
 {
+	/* Enable all, this will mess someone */
+	htci2ccpld_chip3.cmd = 0xff;
+
+	/* Disable sound */
+	HTCI2CCPLD_CHIP_RST_GRP(HTCI2CCPLD_BIT_SOUND);
+
+	/* Disable DPAD backlight */
+	HTCI2CCPLD_CHIP_RST_GRP(HTCI2CCPLD_BIT_DPAD_BL);
+
+	htci2ccpld_chip_update(&htci2ccpld_chip3);
+
 	return 0;
 }
 
 static int htci2ccpld_chip4_init(void)
 {
 	/* Enable FB output on LCD */
-	HTCI2CCPLD_CHIP_SET(4, HTCI2CCPLD_LCD_FB_CMD);
+	HTCI2CCPLD_CHIP_SET(HTCI2CCPLD_BIT_LCD_FB);
 
 	/* Set backlight level to 3 */
 	htci2ccpld_bl_set(1);
@@ -304,15 +375,44 @@ static int htci2ccpld_chip4_init(void)
 
 static int htci2ccpld_chip5_init(void)
 {
-	/* Turn off left led and turn on right green led */
-	htci2ccpld_led_set(LED_LGREEN, 0);
-	htci2ccpld_led_set(LED_RGREEN, 1);
+	/* Enable all, this will mess someone */
+	htci2ccpld_chip5.cmd = 0xff;
+	
+	/* Turn off all known leds */
+	HTCI2CCPLD_CHIP_RST_GRP(HTCI2CCPLD_BIT_LLED_GREEN);
+	HTCI2CCPLD_CHIP_RST_GRP(HTCI2CCPLD_BIT_RLED_GREEN);
+
+	/* Turn on right green led */
+	HTCI2CCPLD_CHIP_SET(HTCI2CCPLD_BIT_RLED_GREEN);
+
+	/* Enable DPAD */
+	HTCI2CCPLD_CHIP_RST_GRP(HTCI2CCPLD_BIT_DPAD_OFF);
+
+	htci2ccpld_chip_update(&htci2ccpld_chip5);
 
 	return 0;
 }
 
 static int htci2ccpld_chip6_init(void)
 {
+	/* Enable all, this will mess someone */
+	htci2ccpld_chip6.cmd = 0xff;
+
+	/* Disable camera led */
+	HTCI2CCPLD_CHIP_RST_GRP(HTCI2CCPLD_BIT_LED_CAMERA);
+
+	/* Disable vibrator */
+	HTCI2CCPLD_CHIP_RST_GRP(HTCI2CCPLD_BIT_VIBRATOR);
+
+	/* Enable dkb and dpad */
+	HTCI2CCPLD_CHIP_RST_GRP(HTCI2CCPLD_BIT_DALL_OFF);
+
+#ifdef HTC_IS_HERALD
+	/* Disable Fn LED */
+	HTCI2CCPLD_CHIP_RST_GRP(HTCI2CCPLD_BIT_LED_FN);
+#endif
+	htci2ccpld_chip_update(&htci2ccpld_chip6);
+
 	return 0;
 }
 
