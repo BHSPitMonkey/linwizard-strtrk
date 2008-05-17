@@ -137,7 +137,6 @@ static void spi100k_disable_clock(struct spi_master *master)
 static void spi100k_write_data(struct spi_master *master, int len, int data)
 {
 	struct omap1_spi100k *spi100k = spi_master_get_devdata(master);
-	int x;
 	// write 16-bit word 
 	spi100k_enable_clock(master);
 	omap_writew( data , spi100k->base_addr + SPI_TX_MSB);
@@ -149,28 +148,29 @@ static void spi100k_write_data(struct spi_master *master, int len, int data)
 		    spi100k->base_addr + SPI_CTRL);
 	// Wait for bit ack send change
 	while((omap_readw(spi100k->base_addr + SPI_STATUS) & SPI_STATUS_WE) != SPI_STATUS_WE);
+	udelay(1000);
 	printk("Write command => 0x%04x give ", data);
 	//spi100k_disable_clock(master);
 }
 
 static int spi100k_read_data(struct spi_master *master, int len)
 {
-	unsigned int val;
-	int dataH;
+	int dataH,dataL;
 	struct omap1_spi100k *spi100k = spi_master_get_devdata(master);
-	int x;
-	int dataL;
+	//spi100k_enable_clock(master);
+	//omap_writew(READ, spi100k->base_addr + SPI_TX_MSB);
 	omap_writew(SPI_CTRL_SEN(0) |
 		    SPI_CTRL_WORD_SIZE(24) |
 		    SPI_CTRL_RD,
 		    spi100k->base_addr + SPI_CTRL);
 	while((omap_readw(spi100k->base_addr + SPI_STATUS) & SPI_STATUS_RD) != SPI_STATUS_RD);
+	udelay(1000);
 	dataL = omap_readw(spi100k->base_addr + SPI_RX_LSB);
 	dataH = omap_readw(spi100k->base_addr + SPI_RX_MSB);
 	spi100k_disable_clock(master);
 	printk("read value => 0x%04x 0x%04x\n", dataH,dataL);
 
-	return dataL >> 8;
+	return dataL;
 }
 
 static void spi100k_open(struct spi_master *master)
@@ -182,7 +182,7 @@ static void spi100k_open(struct spi_master *master)
 		    SPI_SETUP1_INT_WRITE_ENABLE |
 		    SPI_SETUP1_CLOCK_DIVISOR(0), spi100k->base_addr +SPI_SETUP1);
 	/* configure clock and interrupts */
-	omap_writew(SPI_SETUP2_ACTIVE_EDGE_FALLING | 
+	omap_writew(SPI_SETUP2_ACTIVE_EDGE_RISING | 
 		    SPI_SETUP2_POSITIVE_LEVEL |
 		    SPI_SETUP2_EDGE_TRIGGER, spi100k->base_addr +SPI_SETUP2);
 
@@ -190,8 +190,9 @@ static void spi100k_open(struct spi_master *master)
 
 static void spi100k_close(struct spi_master *master)
 {
+	printk("Close spi100k.\n");
 	/* reset to page 0 */
-	struct omap1_spi100k *spi100k = spi_master_get_devdata(master);
+	//struct omap1_spi100k *spi100k = spi_master_get_devdata(master);
 	//spi100k_write_data(master, 0x08, 0x0001);
 
 	/* release SPI */
@@ -200,8 +201,7 @@ static void spi100k_close(struct spi_master *master)
 
 static void omap1_spi100k_force_cs(struct omap1_spi100k *spi100k, int enable)
 {
-	u32 l;
-	printk("Set CS to %d\n",enable);
+	//printk("Set CS to %d\n",enable);
 	if (enable)
 		omap_writew( 0x05fc, spi100k->base_addr +SPI_CTRL);
 	else
@@ -210,8 +210,7 @@ static void omap1_spi100k_force_cs(struct omap1_spi100k *spi100k, int enable)
 
 static void omap1_spi100k_set_enable(struct omap1_spi100k *spi100k, int enable)
 {
-	u32 l;
-	printk("Force enable to %d\n",enable);
+	//printk("Force enable to %d\n",enable);
 /*
 	if (enable) {
 		omap_writew(SPI_SETUP1_INT_READ_ENABLE |
@@ -230,8 +229,6 @@ omap1_spi100k_txrx_pio(struct spi_device *spi, struct spi_transfer *xfer)
 	struct omap1_spi100k	*spi100k;
 	struct omap1_spi100k_cs	*cs = spi->controller_state;
 	unsigned int		count, c;
-	u32			l;
-	void __iomem		*base = cs->base;
 	int			word_len;
 
 	spi100k = spi_master_get_devdata(spi->master);
@@ -240,13 +237,18 @@ omap1_spi100k_txrx_pio(struct spi_device *spi, struct spi_transfer *xfer)
 	word_len = cs->word_len;
 	// dump spi registers
 	dev_dbg(&spi->dev, "Register dump : \n");
+	printk("TX buffer dump:\n");
+	const u16 *txdump = xfer->tx_buf;
+	int i;
+	for (i=0; i < c/2; i++) {
+		printk(" 0x%04x ", *txdump++);
+	}
+	printk("\n");
+
 	/* RX_ONLY mode needs dummy data in TX reg */
 	if (xfer->tx_buf == NULL)
 		spi100k_write_data(spi->master,word_len, 0);
-	if (c ==0)
-	   return c;
 
-	printk("Word len =>%d\n", word_len);
 	if (word_len <= 8) {
 		u8		*rx;
 		const u8	*tx;
@@ -255,10 +257,10 @@ omap1_spi100k_txrx_pio(struct spi_device *spi, struct spi_transfer *xfer)
 		tx = xfer->tx_buf;
                 do {
                         c-=1;
-                        printk("count = %d\n", c);
-                        printk("byte send = 0x%04x\n", *tx);
-                        spi100k_write_data(spi->master,word_len, *tx++);
-                        *rx++ = spi100k_read_data(spi->master,word_len);
+			if (*tx++ != NULL)
+                        	spi100k_write_data(spi->master,word_len, *tx);
+			if (*rx++ != NULL)
+                        	*rx = spi100k_read_data(spi->master,word_len);
                 } while(c);
 	} else if (word_len <= 16) {
 		u16		*rx;
@@ -266,12 +268,12 @@ omap1_spi100k_txrx_pio(struct spi_device *spi, struct spi_transfer *xfer)
 
 		rx = xfer->rx_buf;
 		tx = xfer->tx_buf;
-		do {
+                do {
 			c-=2;
-			printk("count = %d\n", c);
-			printk("byte send = 0x%04x\n", *tx);
-			spi100k_write_data(spi->master,word_len, *tx++);
-			*rx++ = spi100k_read_data(spi->master,word_len);
+			if (*tx != NULL) {
+				spi100k_write_data(spi->master,word_len, *tx++);
+				*rx++ = spi100k_read_data(spi->master,word_len);
+			}
 		} while(c);
 	} else if (word_len <= 32) {
 		u32		*rx;
@@ -281,13 +283,12 @@ omap1_spi100k_txrx_pio(struct spi_device *spi, struct spi_transfer *xfer)
 		tx = xfer->tx_buf;
                 do {
                         c-=4;
-                        printk("count = %d\n", c);
-                        printk("byte send = 0x%04x\n", *tx);
-                        spi100k_write_data(spi->master,word_len, *tx++);
-                        *rx++ = spi100k_read_data(spi->master,word_len);
+			if (*tx++ != NULL)
+                        	spi100k_write_data(spi->master,word_len, *tx);
+			if (*rx++ != NULL)
+                        	*rx = spi100k_read_data(spi->master,word_len);
                 } while(c);
 	}
-out:
 	return count - c;
 }
 
@@ -295,9 +296,10 @@ out:
 static int omap1_spi100k_setup_transfer(struct spi_device *spi,
 		struct spi_transfer *t)
 {
+
+	printk("Setup transfer\n");
 	struct omap1_spi100k *spi100k = spi_master_get_devdata(spi->master);
 	struct omap1_spi100k_cs *cs = spi->controller_state;
-	u32 l = 0, div = 0;
 	u8 word_len = spi->bits_per_word;
 
 	if (t != NULL && t->bits_per_word)
@@ -353,16 +355,15 @@ static int omap1_spi100k_setup(struct spi_device *spi)
 	clk_enable(spi100k->ick);
 	clk_enable(spi100k->fck);
 	ret = omap1_spi100k_setup_transfer(spi, NULL);
+	clk_disable(spi100k->ick);
+	clk_disable(spi100k->fck);
 
 	return ret;
 }
 
 static void omap1_spi100k_cleanup(struct spi_device *spi)
 {
-	struct omap1_spi100k	*spi100k;
 	spi100k_close(spi->master);
-	clk_disable(spi100k->fck);
-	clk_disable(spi100k->ick);
 }
 
 static void omap1_spi100k_work(struct work_struct *work)
@@ -389,7 +390,6 @@ static void omap1_spi100k_work(struct work_struct *work)
 		struct omap1_spi100k_cs		*cs;
 		int				par_override = 0;
 		int				status = 0;
-		u32				chconf;
 
 		m = container_of(spi100k->msg_queue.next, struct spi_message,
 				 queue);
@@ -471,8 +471,8 @@ static void omap1_spi100k_work(struct work_struct *work)
 		spin_lock_irq(&spi100k->lock);
 	}
 
-	clk_enable(spi100k->ick);
-	clk_enable(spi100k->fck);
+	clk_disable(spi100k->ick);
+	clk_disable(spi100k->fck);
 	spin_unlock_irq(&spi100k->lock);
 }
 
@@ -527,8 +527,8 @@ static int omap1_spi100k_transfer(struct spi_device *spi, struct spi_message *m)
 
 static int __init omap1_spi100k_reset(struct omap1_spi100k *spi100k)
 {
-	struct spi_master	*master = spi100k->master;
-	u32			tmp;
+	//struct spi_master	*master = spi100k->master;
+	//u32			tmp;
 
 	//clk_enable(spi100k->ick);
 	//clk_enable(spi100k->fck);
@@ -550,25 +550,12 @@ static int __init omap1_spi100k_reset(struct omap1_spi100k *spi100k)
 	return 0;
 }
 
-static irqreturn_t spi100k_int(int irq, void *master)
-{
-	struct omap1_spi100k *spi100k = spi_master_get_devdata(master);
-	printk("IRQ Handled");
-
-	/* Never fail */
-	return IRQ_HANDLED;
-}
-
 static int __init omap1_spi100k_probe(struct platform_device *pdev)
 {
 	struct spi_master	*master;
 	struct omap1_spi100k	*spi100k;
 	struct resource		*r;
-	int			status = 0, i;
-	unsigned		num_chipselect;
-	int			irq;
-	//printk("Probing spi bus...\n");
-
+	int			status = 0;
 	if ( !pdev->id)
 		return -EINVAL;
 
@@ -594,12 +581,10 @@ static int __init omap1_spi100k_probe(struct platform_device *pdev)
 	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (r == NULL) {
 		status = -ENODEV;
-		printk("Leave here 1 !");
 		goto err1;
 	}
 	if (!request_mem_region(r->start, (r->end - r->start) + 1,
 			pdev->dev.bus_id)) {
-		printk("Leave here 2 !");
 		status = -EBUSY;
 		goto err1;
 	}
@@ -618,7 +603,6 @@ static int __init omap1_spi100k_probe(struct platform_device *pdev)
 	}
 */
 	spi100k->base = (void __iomem *) io_p2v(r->start);
-	printk("Bus adress ->0x%08x\n", r->start);
 	spi100k->base_addr = (unsigned long)r->start; //ioremap((unsigned long)r->start, (r->end - r->start) + 1);
 	INIT_WORK(&spi100k->work, omap1_spi100k_work);
 
@@ -637,12 +621,11 @@ static int __init omap1_spi100k_probe(struct platform_device *pdev)
 		goto err2;
 	}
 
-	//if (omap1_spi100k_reset(spi100k) < 0)
-	//	goto err3;
+	if (omap1_spi100k_reset(spi100k) < 0)
+		goto err3;
 
 	status = spi_register_master(master);
 	if (status < 0)
-		printk("Leave here 3 !");
 		goto err3;
 
 	return status;
