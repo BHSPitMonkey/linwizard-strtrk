@@ -1,28 +1,27 @@
 /*
- *  TSC2046 Touchscreen driver
+ * TSC2046 Touchscreen driver
  *
- *  Author: Kevin Hilman, MontaVista Software, Inc. <source at mvista.com>
+ * Author: Kevin Hilman, MontaVista Software, Inc. <source@mvista.com>
  *
- *  Communication details from original TI driver
- *  Copyright (C) 2004-2005 Texas Instruments, Inc.
+ * Communication details from original TI driver
+ * Copyright (C) 2004-2005 Texas Instruments, Inc.
  *
- *  Structure based heavily on TSC2301 driver
- *  Copyright (C) 2005-2006 Nokia Corporation
- *  
- *  2007 (c) MontaVista Software, Inc. This file is licensed under
- *  the terms of the GNU General Public License version 2. This program
- *  is licensed "as is" without any warranty of any kind, whether express
- *  or implied.
- *  
+ * Structure based heavily on TSC2301 driver
+ * Copyright (C) 2005-2006 Nokia Corporation
+ *
+ * 2007 (c) MontaVista Software, Inc. This file is licensed under
+ * the terms of the GNU General Public License version 2. This program
+ * is licensed "as is" without any warranty of any kind, whether express
+ * or implied.
+ *
  */
-#define VERBOSE
+
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/input.h>
 #include <linux/interrupt.h>
 #include <linux/delay.h>
 #include <linux/spi/spi.h>
-#include <linux/interrupt.h>
 
 #ifdef CONFIG_ARCH_OMAP
 #include <asm/arch/gpio.h>
@@ -140,7 +139,6 @@ static void tsc2046_ts_rx(void *arg)
 	 */
 	if (pressure < ts->pressure_limit && x < MAX_12BIT && y < MAX_12BIT) {
 		ts->pressure_limit = ts->max_pressure;
-		
 		if (ts->ignore_last) {
 			if (ts->sample_cnt)
 				update_pen_state(tsc, ts->x, ts->y, ts->p);
@@ -149,7 +147,6 @@ static void tsc2046_ts_rx(void *arg)
 			ts->p = pressure;
 		} else
 			update_pen_state(tsc, x, y, pressure);
-
 		ts->sample_cnt++;
 	}
 
@@ -295,6 +292,7 @@ static void tsc2046_ts_setup_spi_xfer(struct tsc2046 *tsc)
 	/* send another START_BYTE to (re)enable pen interrupts */
 	x++;
 	x->tx_buf = &tsc2046_ts_cmd_data[0];
+	x->rx_buf = &ts->data;
 	x->len = 2;
 	spi_message_add_tail(x, m);
 
@@ -367,7 +365,7 @@ int __devinit tsc2046_ts_init(struct tsc2046 *tsc,
 
 	ts->dav_gpio = dav_gpio;
 #ifdef CONFIG_ARCH_OMAP
-	omap_free_gpio(dav_gpio);
+	omap_free_gpio(76);
 
 	r = omap_request_gpio(dav_gpio);
 	if (r < 0) {
@@ -422,7 +420,7 @@ int __devinit tsc2046_ts_init(struct tsc2046 *tsc,
 		dev_err(&tsc->spi->dev, "unable to get DAV IRQ");
 		goto err3;
 	}
-	/* set_irq_wake(ts->irq, 1); */
+	set_irq_wake(ts->irq, 1);
 
 	if (device_create_file(&tsc->spi->dev, &dev_attr_pen_down) < 0)
 		goto err4;
@@ -556,5 +554,5 @@ static void __exit tsc2046_exit(void)
 }
 module_exit(tsc2046_exit);
 
-MODULE_AUTHOR("Kevin Hilman <khilman at mvista.com>");
+MODULE_AUTHOR("Kevin Hilman <khilman@mvista.com>");
 MODULE_LICENSE("GPL");

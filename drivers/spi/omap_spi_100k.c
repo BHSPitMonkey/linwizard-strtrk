@@ -149,7 +149,7 @@ static void spi100k_write_data(struct spi_master *master, int len, int data)
 	// Wait for bit ack send change
 	while((omap_readw(spi100k->base_addr + SPI_STATUS) & SPI_STATUS_WE) != SPI_STATUS_WE);
 	udelay(1000);
-	printk("Write command => 0x%04x give ", data);
+	//printk("Write command => 0x%04x give ", data);
 	//spi100k_disable_clock(master);
 }
 
@@ -168,7 +168,7 @@ static int spi100k_read_data(struct spi_master *master, int len)
 	dataL = omap_readw(spi100k->base_addr + SPI_RX_LSB);
 	dataH = omap_readw(spi100k->base_addr + SPI_RX_MSB);
 	spi100k_disable_clock(master);
-	printk("read value => 0x%04x 0x%04x\n", dataH,dataL);
+	//printk("read value => 0x%04x 0x%04x\n", dataH,dataL);
 
 	return dataL;
 }
@@ -182,9 +182,9 @@ static void spi100k_open(struct spi_master *master)
 		    SPI_SETUP1_INT_WRITE_ENABLE |
 		    SPI_SETUP1_CLOCK_DIVISOR(0), spi100k->base_addr +SPI_SETUP1);
 	/* configure clock and interrupts */
-	omap_writew(SPI_SETUP2_ACTIVE_EDGE_RISING | 
-		    SPI_SETUP2_POSITIVE_LEVEL |
-		    SPI_SETUP2_EDGE_TRIGGER, spi100k->base_addr +SPI_SETUP2);
+	omap_writew(SPI_SETUP2_ACTIVE_EDGE_FALLING | 
+		    SPI_SETUP2_NEGATIVE_LEVEL |
+		    SPI_SETUP2_LEVEL_TRIGGER, spi100k->base_addr +SPI_SETUP2);
 
 }
 
@@ -237,14 +237,6 @@ omap1_spi100k_txrx_pio(struct spi_device *spi, struct spi_transfer *xfer)
 	word_len = cs->word_len;
 	// dump spi registers
 	dev_dbg(&spi->dev, "Register dump : \n");
-	printk("TX buffer dump:\n");
-	const u16 *txdump = xfer->tx_buf;
-	int i;
-	for (i=0; i < c/2; i++) {
-		printk(" 0x%04x ", *txdump++);
-	}
-	printk("\n");
-
 	/* RX_ONLY mode needs dummy data in TX reg */
 	if (xfer->tx_buf == NULL)
 		spi100k_write_data(spi->master,word_len, 0);
@@ -257,10 +249,10 @@ omap1_spi100k_txrx_pio(struct spi_device *spi, struct spi_transfer *xfer)
 		tx = xfer->tx_buf;
                 do {
                         c-=1;
-			if (*tx++ != NULL)
+			if (*tx != NULL) {
                         	spi100k_write_data(spi->master,word_len, *tx);
-			if (*rx++ != NULL)
                         	*rx = spi100k_read_data(spi->master,word_len);
+			}
                 } while(c);
 	} else if (word_len <= 16) {
 		u16		*rx;
@@ -283,10 +275,10 @@ omap1_spi100k_txrx_pio(struct spi_device *spi, struct spi_transfer *xfer)
 		tx = xfer->tx_buf;
                 do {
                         c-=4;
-			if (*tx++ != NULL)
+			if (*tx != NULL) {
                         	spi100k_write_data(spi->master,word_len, *tx);
-			if (*rx++ != NULL)
                         	*rx = spi100k_read_data(spi->master,word_len);
+			}
                 } while(c);
 	}
 	return count - c;
