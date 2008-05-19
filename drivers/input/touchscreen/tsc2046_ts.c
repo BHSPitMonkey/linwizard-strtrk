@@ -365,8 +365,6 @@ int __devinit tsc2046_ts_init(struct tsc2046 *tsc,
 
 	ts->dav_gpio = dav_gpio;
 #ifdef CONFIG_ARCH_OMAP
-	omap_free_gpio(76);
-
 	r = omap_request_gpio(dav_gpio);
 	if (r < 0) {
 		dev_err(&tsc->spi->dev, "unable to get DAV GPIO");

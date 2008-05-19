@@ -47,18 +47,9 @@
 #include <asm/arch/spi100k.h>
 
 #include <linux/spi/spi.h>
-
-#ifdef CONFIG_TOUCHSCREEN_ADS7846
-#include <linux/spi/ads7846.h>
-#endif
-
-#ifdef CONFIG_TOUCHSCREEN_TSC2046
 #include <linux/spi/tsc2046.h>
-#endif
 
 #include <linux/delay.h>
-
-#define TS_GPIO 76
 
 #define HTCWIZARD_GPIO_DM 35
 #define HTCWIZARD_GPIO_DP 36
@@ -190,54 +181,24 @@ static struct platform_device *devices[] __initdata = {
 /*
  * Touchscreen
  */
-#ifdef CONFIG_TOUCHSCREEN_ADS7846
-static int ads7846_get_pendown_state(void)
-{
-	return !omap_get_gpio_datain(76);
-}
-
-static struct ads7846_platform_data htcwizard_ads7846_platform_data __initdata = {
-       .x_max          = 0x0fff,
-       .y_max          = 0x0fff,
-       .x_plate_ohms   = 419,
-       .pressure_max   = 255,
-       .debounce_max   = 10,
-       .debounce_tol   = 3,
-       .debounce_rep   = 1,
-       .get_pendown_state      = ads7846_get_pendown_state,
-};
-
-static struct spi_board_info htcwizard_spi_board_info[] __initdata = {
-       [0] = {
-               .modalias       = "ads7846",
-               .bus_num        = 2,
-               .chip_select    = 0,
-               .max_speed_hz   = 1500000,
-               .irq            = OMAP_GPIO_IRQ(TS_GPIO),
-               .platform_data  = &htcwizard_ads7846_platform_data,
-       },
-};
-#endif
-
-#ifdef CONFIG_TOUCHSCREEN_TSC2046
 static struct tsc2046_platform_data htcwizard_ts_platform_data __initdata = {
-/*        .ts_x_plate_ohm    = 180, */
-        .dav_gpio          = TS_GPIO,
-        .gpio_debounce     = 0xa,
-/*	.ts_max_pressure   = 10000,
-        .ts_touch_pressure = 5000, */
+        .ts_x_plate_ohm    = 496, 
+        .dav_gpio          = 76,
+        .gpio_debounce     = 0,
+	.ts_max_pressure   = 100000,
+        .ts_touch_pressure = 5000, 
 };
 
 static struct spi_board_info htcwizard_spi_board_info[] __initdata = { 
 	{
  	       .modalias               = "tsc2046",
  	       .platform_data          = &htcwizard_ts_platform_data,
-	       .max_speed_hz           = 1500000,
+	       .max_speed_hz           = 2500000,
 	       .bus_num                = 2,
-	       .chip_select            = 0,
+	       .chip_select            = 1,
+	       .irq		       = OMAP_GPIO_IRQ(76),
 	} 
 };
-#endif
 
 /*
  * Init functions from here on
@@ -267,11 +228,7 @@ static void __init htcwizard_disable_watchdog(void)
 }
 
 /* TSC2046 init from board-nokia770.c */
-static void ads7846_dev_init(void)
-{
-	if (omap_request_gpio(TS_GPIO) < 0)
-		printk(KERN_ERR "can't get pen down GPIO\n");
-}
+
 
 static void __init htcwizard_usb_enable(void)
 {
@@ -381,8 +338,7 @@ static void __init htcwizard_init(void)
   spi_register_board_info(htcwizard_spi_board_info,
 			ARRAY_SIZE(htcwizard_spi_board_info));
   
-  ads7846_dev_init(); 
-
+  /* omap_free_gpio(76); */
 }
 
 static void __init htcwizard_init_irq(void)
