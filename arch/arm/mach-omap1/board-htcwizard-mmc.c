@@ -17,12 +17,11 @@
 
 #include <linux/delay.h>
 
-#ifdef CONFIG_MMC_OMAP
+#if defined(CONFIG_MMC_OMAP) || defined(CONFIG_MMC_OMAP_MODULE)
 
 #define OMAP_MMC_REG_SYSC (0xfffb7800 + 0x32)
 #define OMAP_MMC_REG_SYSS (0xfffb7800 + 0x34)
 
-#if defined(CONFIG_MMC_OMAP) || defined(CONFIG_MMC_OMAP_MODULE)
 static int slot_cover_open;
 static struct device *mmc_device;
 
