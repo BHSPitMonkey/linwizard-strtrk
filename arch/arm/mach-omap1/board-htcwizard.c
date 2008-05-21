@@ -244,6 +244,36 @@ static struct spi_board_info htcwizard_spi_board_info[] __initdata = {
 	       .irq		       = OMAP_GPIO_IRQ(76),
 	} 
 };
+/* LCD register definition (maybe to move somewhere else */
+#define       OMAP_LCDC_CONTROL               (0xfffec000 + 0x00)
+#define       OMAP_LCDC_STATUS                (0xfffec000 + 0x10)
+#define       OMAP_DMA_LCD_CCR                (0xfffee300 + 0xc2)
+#define       OMAP_DMA_LCD_CTRL               (0xfffee300 + 0xc4)
+#define       OMAP_LCDC_CTRL_LCD_EN           (1 << 0)
+#define       OMAP_LCDC_STAT_DONE             (1 << 0)
+static void htcwizard_lcd_init(void)
+{
+        u32 reg;
+        /* disable controller if active */
+        reg = omap_readl(OMAP_LCDC_CONTROL);
+        if (reg & OMAP_LCDC_CTRL_LCD_EN) {
+                reg &= ~OMAP_LCDC_CTRL_LCD_EN;
+                omap_writel(reg, OMAP_LCDC_CONTROL);
+
+                /* wait for end of frame */
+                while (!(omap_readl(OMAP_LCDC_STATUS) & OMAP_LCDC_STAT_DONE));
+
+                /* turn off DMA */
+                reg = omap_readw(OMAP_DMA_LCD_CCR);
+                reg &= ~(1 << 7);
+                omap_writew(reg, OMAP_DMA_LCD_CCR);
+
+                reg = omap_readw(OMAP_DMA_LCD_CTRL);
+                reg &= ~(1 << 8);
+                omap_writew(reg, OMAP_DMA_LCD_CTRL);
+        }
+}
+
 
 /*
  * Init functions from here on
@@ -256,6 +286,7 @@ static void __init htcwizard_map_io(void)
 #ifdef CONFIG_EFB_DEBUG
 	efb_enable();
 #endif
+	htcwizard_lcd_init();
 }
 
 static void __init htcwizard_disable_watchdog(void)
