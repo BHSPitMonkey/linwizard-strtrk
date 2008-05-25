@@ -96,7 +96,7 @@ static int htc_wizard_keymap[] = {
 	KEY(0,4,KEY_F2),
 	KEY(0,5,KEY_MAIL),
 	KEY(0,6,KEY_DIRECTORY),
-	KEY(1,0,KEY_MENU),
+	KEY(1,0,KEY_LEFTCTRL), /* FIXME: WIN key. KEY_MENU? */
 	KEY(1,1,KEY_COMMA),
 	KEY(1,2,KEY_M),
 	KEY(1,3,KEY_K),
