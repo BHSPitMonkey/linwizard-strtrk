@@ -9,6 +9,9 @@ obj-$(CONFIG_HAVE_GPIO_LIB)	+= gpio/
 obj-$(CONFIG_PCI)		+= pci/
 obj-$(CONFIG_PARISC)		+= parisc/
 obj-$(CONFIG_RAPIDIO)		+= rapidio/
+# char/ comes before serial/ etc so that the VT console is the boot-time
+# default.
+obj-y				+= char/
 obj-y				+= video/
 obj-$(CONFIG_ACPI)		+= acpi/
 # PnP must come after ACPI since it will eventually need to check if acpi
@@ -17,10 +20,6 @@ obj-$(CONFIG_PNP)		+= pnp/
 obj-$(CONFIG_ARM_AMBA)		+= amba/
 
 obj-$(CONFIG_XEN)		+= xen/
-
-# char/ comes before serial/ etc so that the VT console is the boot-time
-# default.
-obj-y				+= char/
 
 obj-$(CONFIG_CONNECTOR)		+= connector/
 
