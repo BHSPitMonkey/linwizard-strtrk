@@ -26,6 +26,7 @@
 #include <linux/init.h>
 #include <linux/platform_device.h>
 #include <linux/input.h>
+#include <linux/bootmem.h>
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
@@ -86,6 +87,37 @@ static struct omap_board_config_kernel htcwizard_config[] =
 	{ OMAP_TAG_USB, &htcwizard_usb_config },
 	{ OMAP_TAG_MMC, &htcwizard_mmc_config },
 };
+
+/* GSM device */
+#define TYPHOON_GSM_PHYS_START          0x11d80000 /* end of RAM */
+#define TYPHOON_GSM_PHYS_SIZE           0x00280000 /* 2.5 MB code/data/fifo */
+
+#define TORNADO_GSM_PHYS_START          0x13c00000 /* end of RAM */
+#define TORNADO_GSM_PHYS_SIZE           0x00400000 /* 4.0 MB code/data/fifo */
+
+static struct resource typhoon_gsm_resources[] = {
+	{       /* GSM DSP MMU */
+                .start          = IO_ADDRESS(OMAP730_DSP_MMU_BASE),
+                .end            = IO_ADDRESS(OMAP730_DSP_MMU_BASE) + 0x54,
+                .flags          = IORESOURCE_MEM,
+        },
+        {       /* GSM software interrupt */
+                .start          = INT_730_ICR,
+                .flags          = IORESOURCE_IRQ,
+        },
+        {       /* GSM radio interrupt */
+                .start          = INT_730_DBB_RF_EN,
+                .flags          = IORESOURCE_IRQ,
+        },
+};
+
+static struct platform_device gsm_device = {
+        .name           = "typhoon-gsm",
+        .id             = 1,
+        .num_resources  = ARRAY_SIZE(typhoon_gsm_resources),
+        .resource       = typhoon_gsm_resources,
+};
+
 /* Keyboard definition */
 
 static int htc_wizard_keymap[] = {
@@ -213,7 +245,7 @@ static struct platform_device btns_device = {
 };
 
 static struct platform_device *devices[] __initdata = {
-/* 	&gsm_device, */
+ 	&gsm_device,
 	&kp_device,
 	&lcd_device,
 #if defined(CONFIG_I2C_GPIO) || defined(CONFIG_I2C_GPIO_MODULE)
@@ -287,6 +319,9 @@ static void __init htcwizard_map_io(void)
 	efb_enable();
 #endif
 	htcwizard_lcd_init();
+
+	/* Reserve GSM Memory */
+	reserve_bootmem(TORNADO_GSM_PHYS_START, TORNADO_GSM_PHYS_SIZE, 0);
 }
 
 static void __init htcwizard_disable_watchdog(void)
