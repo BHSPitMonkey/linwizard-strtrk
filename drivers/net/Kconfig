@@ -26,6 +26,18 @@ menuconfig NETDEVICES
 # that for each of the symbols.
 if NETDEVICES
 
+config GSM_TYPHOON
+	tristate "HTC GSM (OMAP)"
+	---help---
+	  Say M here if you want to enable GSM support for some HTC devices
+	  load with insmod gsm-typhoon.ko noload=1 noreset=1 model=tornado.
+	  and folow instructions on http://vivien.chappelier.free.fr/typhoon/gsm.html
+
+	  Supported Models:
+	  Typhoon,
+	  Tornado,
+	  Wizard,
+
 config NETDEVICES_MULTIQUEUE
 	bool "Netdevice multiple hardware queue support"
 	---help---
