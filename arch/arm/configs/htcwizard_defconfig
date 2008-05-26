@@ -1,6 +1,7 @@
 #
 # Automatically generated make config: don't edit
 # Linux kernel version: 2.6.25-omap1
+# Mon May 26 15:00:12 2008
 #
 CONFIG_ARM=y
 CONFIG_SYS_SUPPORTS_APM_EMULATION=y
@@ -443,7 +444,39 @@ CONFIG_MISC_DEVICES=y
 # CONFIG_SCSI_NETLINK is not set
 # CONFIG_ATA is not set
 # CONFIG_MD is not set
-# CONFIG_NETDEVICES is not set
+CONFIG_NETDEVICES=y
+CONFIG_GSM_TYPHOON=m
+# CONFIG_NETDEVICES_MULTIQUEUE is not set
+# CONFIG_DUMMY is not set
+# CONFIG_BONDING is not set
+# CONFIG_MACVLAN is not set
+# CONFIG_EQUALIZER is not set
+# CONFIG_TUN is not set
+# CONFIG_VETH is not set
+# CONFIG_NET_ETHERNET is not set
+# CONFIG_NETDEV_1000 is not set
+# CONFIG_NETDEV_10000 is not set
+
+#
+# Wireless LAN
+#
+# CONFIG_WLAN_PRE80211 is not set
+# CONFIG_WLAN_80211 is not set
+
+#
+# USB Network Adapters
+#
+# CONFIG_USB_CATC is not set
+# CONFIG_USB_KAWETH is not set
+# CONFIG_USB_PEGASUS is not set
+# CONFIG_USB_RTL8150 is not set
+# CONFIG_USB_USBNET is not set
+# CONFIG_WAN is not set
+# CONFIG_PPP is not set
+# CONFIG_SLIP is not set
+# CONFIG_NETCONSOLE is not set
+# CONFIG_NETPOLL is not set
+# CONFIG_NET_POLL_CONTROLLER is not set
 # CONFIG_ISDN is not set
 
 #
@@ -709,6 +742,7 @@ CONFIG_DUMMY_CONSOLE=y
 CONFIG_FRAMEBUFFER_CONSOLE=y
 # CONFIG_FRAMEBUFFER_CONSOLE_DETECT_PRIMARY is not set
 CONFIG_FRAMEBUFFER_CONSOLE_ROTATION=y
+# CONFIG_FB_CON_DECOR is not set
 CONFIG_FONTS=y
 # CONFIG_FONT_8x8 is not set
 # CONFIG_FONT_8x16 is not set
@@ -834,26 +868,22 @@ CONFIG_USB_ETH=y
 # CONFIG_USB_MIDI_GADGET is not set
 # CONFIG_USB_G_PRINTER is not set
 CONFIG_MMC=y
-CONFIG_NEW_LEDS=y
-CONFIG_LEDS_CLASS=y
+# CONFIG_MMC_DEBUG is not set
+# CONFIG_MMC_UNSAFE_RESUME is not set
 
 #
-# LED drivers
+# MMC/SD Card Drivers
 #
-# CONFIG_LEDS_OMAP_DEBUG is not set
-# CONFIG_LEDS_OMAP is not set
-# CONFIG_LEDS_GPIO is not set
-CONFIG_LEDS_HTC_I2C_CPLD=y
+CONFIG_MMC_BLOCK=y
+CONFIG_MMC_BLOCK_BOUNCE=y
+# CONFIG_SDIO_UART is not set
 
 #
-# LED Triggers
+# MMC/SD Host Controller Drivers
 #
 CONFIG_MMC_OMAP=y
 # CONFIG_MMC_SPI is not set
 # CONFIG_NEW_LEDS is not set
-CONFIG_LEDS_TRIGGERS=y
-# CONFIG_LEDS_TRIGGER_TIMER is not set
-CONFIG_LEDS_TRIGGER_HEARTBEAT=y
 CONFIG_RTC_LIB=y
 # CONFIG_RTC_CLASS is not set
 
@@ -920,6 +950,7 @@ CONFIG_SYSFS=y
 # CONFIG_BFS_FS is not set
 # CONFIG_EFS_FS is not set
 CONFIG_CRAMFS=y
+# CONFIG_SQUASHFS is not set
 # CONFIG_VXFS_FS is not set
 # CONFIG_MINIX_FS is not set
 # CONFIG_HPFS_FS is not set
