@@ -53,6 +53,9 @@
 
 #include <linux/delay.h>
 
+#include <linux/i2c.h>
+#include <linux/i2c/tps65010.h>
+
 #define HTCWIZARD_GPIO_DM 35
 #define HTCWIZARD_GPIO_DP 36
 
@@ -89,33 +92,30 @@ static struct omap_board_config_kernel htcwizard_config[] =
 };
 
 /* GSM device */
-#define TYPHOON_GSM_PHYS_START          0x11d80000 /* end of RAM */
-#define TYPHOON_GSM_PHYS_SIZE           0x00280000 /* 2.5 MB code/data/fifo */
+#define WIZARD_GSM_PHYS_START          0x13c00000 /* end of RAM */
+#define WIZARD_GSM_PHYS_SIZE           0x00400000 /* 4.0 MB code/data/fifo */
 
-#define TORNADO_GSM_PHYS_START          0x13c00000 /* end of RAM */
-#define TORNADO_GSM_PHYS_SIZE           0x00400000 /* 4.0 MB code/data/fifo */
-
-static struct resource typhoon_gsm_resources[] = {
+static struct resource wizard_gsm_resources[] = {
 	{       /* GSM DSP MMU */
-                .start          = IO_ADDRESS(OMAP730_DSP_MMU_BASE),
-                .end            = IO_ADDRESS(OMAP730_DSP_MMU_BASE) + 0x54,
+                .start          = IO_ADDRESS(OMAP850_DSP_MMU_BASE),
+                .end            = IO_ADDRESS(OMAP850_DSP_MMU_BASE) + 0x54,
                 .flags          = IORESOURCE_MEM,
         },
         {       /* GSM software interrupt */
-                .start          = INT_730_ICR,
+                .start          = INT_850_ICR,
                 .flags          = IORESOURCE_IRQ,
         },
         {       /* GSM radio interrupt */
-                .start          = INT_730_DBB_RF_EN,
+                .start          = INT_850_DBB_RF_EN,
                 .flags          = IORESOURCE_IRQ,
         },
 };
 
 static struct platform_device gsm_device = {
-        .name           = "typhoon-gsm",
+        .name           = "wizard-gsm",
         .id             = 1,
-        .num_resources  = ARRAY_SIZE(typhoon_gsm_resources),
-        .resource       = typhoon_gsm_resources,
+        .num_resources  = ARRAY_SIZE(wizard_gsm_resources),
+        .resource       = wizard_gsm_resources,
 };
 
 /* Keyboard definition */
@@ -321,7 +321,7 @@ static void __init htcwizard_map_io(void)
 	htcwizard_lcd_init();
 
 	/* Reserve GSM Memory */
-	reserve_bootmem(TORNADO_GSM_PHYS_START, TORNADO_GSM_PHYS_SIZE, 0);
+	reserve_bootmem(WIZARD_GSM_PHYS_START, WIZARD_GSM_PHYS_SIZE, 0);
 }
 
 static void __init htcwizard_disable_watchdog(void)
@@ -454,7 +454,6 @@ static void __init htcwizard_init(void)
   /* For testing.. Disable for now */
   spi_register_board_info(htcwizard_spi_board_info,
 			ARRAY_SIZE(htcwizard_spi_board_info));
-  
   /* omap_free_gpio(76); */
 }
 
