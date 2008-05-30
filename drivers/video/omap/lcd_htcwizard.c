@@ -27,6 +27,8 @@
 
 #include <asm/arch/omapfb.h>
 
+#define OMAP_LCDC_SUBPANEL 0xfffec014 
+
 static int htcwizard_panel_init(struct lcd_panel *panel,
                                 struct omapfb_device *fbdev)
 {
@@ -52,8 +54,8 @@ static unsigned long htcwizard_panel_get_caps(struct lcd_panel *panel)
 	return 0;
 }
 
-struct lcd_panel htcwizard_panel = {
-	.name		= "htcwizard",
+struct lcd_panel htcwizard_panel1 = {
+	.name		= "lcd1",
 	.config		= OMAP_LCDC_PANEL_TFT |
 	              OMAP_LCDC_INV_VSYNC |
 	              OMAP_LCDC_INV_HSYNC |
@@ -78,9 +80,43 @@ struct lcd_panel htcwizard_panel = {
 	.get_caps	= htcwizard_panel_get_caps,
 };
 
+struct lcd_panel htcwizard_panel2 = {
+	.name		= "lcd2",
+	.config		= OMAP_LCDC_PANEL_TFT |
+	              OMAP_LCDC_INV_HSYNC |
+					  OMAP_LCDC_INV_PIX_CLOCK,
+	.bpp		= 16,
+	.data_lines	= 16,
+	.x_res		= 240,
+	.y_res		= 320,
+	.pixel_clock = 6093,
+	.hsw		= 10,
+	.hfp		= 10,
+	.hbp		= 20,
+	.vsw		= 3,
+	.vfp		= 2,
+	.vbp		= 2,
+
+	.init		= htcwizard_panel_init,
+	.cleanup	= htcwizard_panel_cleanup,
+	.enable		= htcwizard_panel_enable,
+	.disable	= htcwizard_panel_disable,
+	.get_caps	= htcwizard_panel_get_caps,
+};
+
 static int htcwizard_panel_probe(struct platform_device *pdev)
 {
-	omapfb_register_panel(&htcwizard_panel);
+	u32 type;
+	
+	type = omap_readl(OMAP_LCDC_SUBPANEL);
+	if (type | 0x5c00f000) {
+		printk("LCD: Panel type 2\n");
+		omapfb_register_panel(&htcwizard_panel2);
+		return 0;
+	}
+	
+	printk("LCD: Panel type 1\n");
+	omapfb_register_panel(&htcwizard_panel1);
 	return 0;
 }
 
