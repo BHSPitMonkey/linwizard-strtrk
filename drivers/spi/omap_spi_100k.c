@@ -39,9 +39,6 @@
 
 #include <asm/arch/clock.h>
 
-
-#define VERBOSE
-
 #define OMAP1_SPI100K_MAX_FREQ          48000000
 
 #define ICR_SPITAS      (OMAP730_ICR_BASE + 0x12)

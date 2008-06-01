@@ -192,6 +192,9 @@
 #define GSMCTRL_GSM_INTERRUPT_ENABLE    (1UL << 2)
 #define GSMCTRL_MPU_INTERRUPT_ENABLE    (1UL << 1)
 
+/* Sound GPIO */
+#define WIZARD_SNDDEV_GPIO     176
+
 struct gsm_priv {
         void *fifo_base;
         unsigned long fifo_base_phys;
@@ -1131,6 +1134,10 @@ static int __init wizard_gsm_probe(struct platform_device *pdev)
         if((ret = register_chrdev(212, "gsm", &gsm_fops)) < 0)
                 return ret;
 
+	/* enable sound */
+	omap_set_gpio_direction(WIZARD_SNDDEV_GPIO, 0);
+	omap_set_gpio_dataout(WIZARD_SNDDEV_GPIO, 0);
+
         return 0;
 }
 
@@ -1147,6 +1154,10 @@ static int wizard_gsm_remove(struct platform_device *pdev)
 
         free_irq(INT_850_ICR, dev);
         free_irq(INT_850_DBB_RF_EN, dev);
+
+	/* disable sound */
+	omap_set_gpio_direction(WIZARD_SNDDEV_GPIO, 0);
+	omap_set_gpio_dataout(WIZARD_SNDDEV_GPIO, 0);
 
         return 0;
 }
