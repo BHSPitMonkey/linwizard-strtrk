@@ -54,6 +54,7 @@ static unsigned long htcwizard_panel_get_caps(struct lcd_panel *panel)
 	return 0;
 }
 
+/* Not sure */
 struct lcd_panel htcwizard_panel1 = {
 	.name		= "lcd1",
 	.config		= OMAP_LCDC_PANEL_TFT |
@@ -80,6 +81,7 @@ struct lcd_panel htcwizard_panel1 = {
 	.get_caps	= htcwizard_panel_get_caps,
 };
 
+/* Found on HTC Wizards */
 struct lcd_panel htcwizard_panel2 = {
 	.name		= "lcd2",
 	.config		= OMAP_LCDC_PANEL_TFT |
@@ -104,19 +106,51 @@ struct lcd_panel htcwizard_panel2 = {
 	.get_caps	= htcwizard_panel_get_caps,
 };
 
+/* Found on HTC Elfs */
+struct lcd_panel htcwizard_panel3 = {
+	.name		= "lcd3",
+	.config		= OMAP_LCDC_PANEL_TFT |
+	              OMAP_LCDC_INV_HSYNC |
+					  OMAP_LCDC_INV_PIX_CLOCK,
+	.bpp		= 16,
+	.data_lines	= 16,
+	.x_res		= 240,
+	.y_res		= 320,
+	.pcd = 18,
+	.hsw		= 4,
+	.hfp		= 8,
+	.hbp		= 4,
+	.vsw		= 3,
+	.vfp		= 8,
+	.vbp		= 5,
+
+	.init		= htcwizard_panel_init,
+	.cleanup	= htcwizard_panel_cleanup,
+	.enable		= htcwizard_panel_enable,
+	.disable	= htcwizard_panel_disable,
+	.get_caps	= htcwizard_panel_get_caps,
+};
+
+
 static int htcwizard_panel_probe(struct platform_device *pdev)
 {
 	u32 type;
 	
 	type = omap_readl(OMAP_LCDC_SUBPANEL);
-	if (type | 0x5c00f000) {
+	switch(type){
+	case 0x5c00f000:
 		printk("LCD: Panel type 2\n");
 		omapfb_register_panel(&htcwizard_panel2);
-		return 0;
+		break;
+	case 0x5c000000:
+		printk("LCD: Panel type 1\n");
+		omapfb_register_panel(&htcwizard_panel3);
+		break;
+	default:
+		printk("LCD: Unknown Panel type\n");
+		omapfb_register_panel(&htcwizard_panel1);
 	}
-	
-	printk("LCD: Panel type 1\n");
-	omapfb_register_panel(&htcwizard_panel1);
+
 	return 0;
 }
 
