@@ -96,8 +96,8 @@ int fbcon_decor_disable(struct vc_data *vc, unsigned char redraw)
 			      vc->vc_size_row * (vc->vc_bottom - vc->vc_top) / 2);
 	}
 
-	printk(KERN_INFO "fbcondecor: switched decor state to 'off' on console %d\n", 
-			 vc->vc_num);
+	/*printk(KERN_INFO "fbcondecor: switched decor state to 'off' on console %d\n", 
+			 vc->vc_num);*/
 
 	return 0;
 }
@@ -126,8 +126,8 @@ static int fbcon_decor_enable(struct vc_data *vc)
 		fbcon_decor_clear_margins(vc, info, 0);
 	}
 
-	printk(KERN_INFO "fbcondecor: switched decor state to 'on' on console %d\n", 
-			 vc->vc_num);
+	/*printk(KERN_INFO "fbcondecor: switched decor state to 'on' on console %d\n", 
+			 vc->vc_num);*/
 
 	return 0;
 }
