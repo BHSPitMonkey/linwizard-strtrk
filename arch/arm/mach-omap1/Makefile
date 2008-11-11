@@ -33,6 +33,7 @@ obj-$(CONFIG_MACH_OMAP_PALMZ71)		+= board-palmz71.o
 obj-$(CONFIG_MACH_OMAP_PALMTT)		+= board-palmtt.o
 obj-$(CONFIG_MACH_NOKIA770)		+= board-nokia770.o
 obj-$(CONFIG_MACH_AMS_DELTA)		+= board-ams-delta.o
+obj-$(CONFIG_MACH_OMAP_HTCSTRTRK)	+= board-htcstrtrk.o
 obj-$(CONFIG_MACH_OMAP_HTCWIZARD)   	+= board-htcwizard.o \
                                           board-htcwizard-mmc.o
 obj-$(CONFIG_EFB_DEBUG)	+= efb.o efb-font5x5.o

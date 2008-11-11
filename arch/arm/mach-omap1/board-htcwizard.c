@@ -1,5 +1,8 @@
-/*
- * Modified from board-perseus2.c and htcwizard.c
+/* This is a (rough) modification of board-htcwizard.c in order to
+ * make it support the HTC Star Trek (htcstrtrk).
+ *
+ * Modified from board-htcwizard.c, which was in turn modified from
+ * board-perseus2.c and htcwizard.c
  *
  * HTC Wizard init stuff
  * Copyright (C) 2006 Unai Uribarri
@@ -27,6 +30,7 @@
 #include <linux/platform_device.h>
 #include <linux/input.h>
 #include <linux/bootmem.h>
+#include <linux/gpio_keys.h>
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
@@ -60,6 +64,8 @@
 #define HTCWIZARD_GPIO_DP 36
 
 #define HTCWIZARD_GIRQ_BTNS 141
+
+
 
 static struct omap_lcd_config htcwizard_lcd_config __initdata = {
 	.ctrl_name	= "internal",
@@ -118,59 +124,34 @@ static struct platform_device gsm_device = {
         .resource       = wizard_gsm_resources,
 };
 
-/* Keyboard definition */
+/* Keyboard definition for HTC StarTrek */
+/* Inserted hackishly by BHSPitMonkey */
 
-static int htc_wizard_keymap[] = {
-	KEY(0,0,KEY_RECORD),
-	KEY(0,1,KEY_CAMERA),
-	KEY(0,2,KEY_PHONE),
-	KEY(0,3,KEY_VOLUMEUP),
-	KEY(0,4,KEY_F2),
-	KEY(0,5,KEY_MAIL),
-	KEY(0,6,KEY_DIRECTORY),
-	KEY(1,0,KEY_LEFTCTRL), /* FIXME: WIN key. KEY_MENU? */
-	KEY(1,1,KEY_COMMA),
-	KEY(1,2,KEY_M),
-	KEY(1,3,KEY_K),
-	KEY(1,4,KEY_SLASH), /* FIXME: Should be KEY_OK */
-	KEY(1,5,KEY_I),
-	KEY(1,6,KEY_U),
-	/* Handle red button as alt key,
-	 * and map keys on defkeymap */
-	KEY(2,0,KEY_LEFTALT),
-	KEY(2,1,KEY_TAB),
-	KEY(2,2,KEY_N),
-	KEY(2,3,KEY_J),
-	KEY(2,4,KEY_ENTER),
-	KEY(2,5,KEY_H),
-	KEY(2,6,KEY_Y),
-	KEY(3,0,KEY_SPACE),
-	KEY(3,1,KEY_L),
-	KEY(3,2,KEY_B),
-	KEY(3,3,KEY_V),
-	KEY(3,4,KEY_BACKSPACE),
-	KEY(3,5,KEY_G),
-	KEY(3,6,KEY_T),
-	KEY(4,0,KEY_CAPSLOCK),
-	KEY(4,1,KEY_C),
-	KEY(4,2,KEY_F),
-	KEY(4,3,KEY_R),
-	KEY(4,4,KEY_O),
-	KEY(4,5,KEY_E),
-	KEY(4,6,KEY_D),
-	KEY(5,0,KEY_X),
-	KEY(5,1,KEY_Z),
-	KEY(5,2,KEY_S),
-	KEY(5,3,KEY_W),
-	KEY(5,4,KEY_P),
-	KEY(5,5,KEY_Q),
-	KEY(5,6,KEY_A),
-	KEY(6,0,KEY_CONNECT),
-	KEY(6,2,KEY_CANCEL),
-	KEY(6,3,KEY_VOLUMEDOWN),
-	KEY(6,4,KEY_F1),
-	KEY(6,5,KEY_WWW),
-	KEY(6,6,KEY_CALENDAR),
+static int htc_startrek_keymap[] = {
+/** Still need to figure out KEY_RECORD on a less broken unit than mine. */
+	KEY(0,0,KEY_A),	// 5
+	KEY(0,1,KEY_RECORD),	// Record
+	KEY(0,2,KEY_NEXTSONG),	// External Next
+	KEY(0,3,KEY_PREVIOUSSONG),	// External Prev
+	KEY(0,5,KEY_F1),	// Left Softkey
+	KEY(1,0,KEY_KP0),	// 0
+	KEY(1,1,KEY_H),		// Home key - FIXME: Should be better
+	KEY(1,2,KEY_PLAYPAUSE),	// External Play
+	KEY(1,3,KEY_VOLUMEDOWN),	// Volume down
+	KEY(1,5,KEY_F2),	// Right Softkey
+	KEY(2,1,KEY_BACKSPACE),	// Backspace
+	KEY(2,2,KEY_CAMERA),	// Camera
+	KEY(2,3,KEY_VOLUMEUP),	// Volume up
+	KEY(2,5,KEY_KPASTERISK),	// Star * / T9
+	KEY(3,0,KEY_R),	// 1
+	KEY(3,1,KEY_T),	// 3
+	KEY(3,2,KEY_KP7),	// 7
+	KEY(3,3,KEY_KP9),	// 9
+	KEY(3,5,KEY_SPACE),	// Pound # / Space
+	KEY(4,0,KEY_O),	// 2
+	KEY(4,1,KEY_S),	// 4
+	KEY(4,2,KEY_X),	// 6
+	KEY(4,3,KEY_KP8),	// 8
 	0
 };
 
@@ -178,7 +159,39 @@ struct omap_kp_platform_data kp_data = {
 	.rows	= 7,
 	.cols	= 7,
 	.delay = 20,
-	.keymap = htc_wizard_keymap,
+	.keymap = htc_startrek_keymap,
+};
+
+
+/*
+ * GPIO Keys
+ */
+
+static struct gpio_keys_button htc_strtrk_button_table[] = {
+	{KEY_ESC,        70,    0, "Hangup button"},
+//	{KEY_CAMERA,     GPIO91_MAGICIAN_KEY_CAMERA,    0, "Camera button"},
+	{KEY_UP,         136,        0, "Up button"},
+	{KEY_DOWN,       137,      0, "Down button"},
+	{KEY_LEFT,       139,      0, "Left button"},
+	{KEY_RIGHT,      19,     0, "Right button"},
+	{KEY_KPENTER,    76,     0, "Action button"},
+//	{KEY_RECORD,     GPIO98_MAGICIAN_KEY_RECORD,    0, "Record button"},
+//	{KEY_VOLUMEUP,   GPIO100_MAGICIAN_KEY_VOL_UP,   0, "Volume up"},
+//	{KEY_VOLUMEDOWN, GPIO101_MAGICIAN_KEY_VOL_DOWN, 0, "Volume down"},
+//	{KEY_PHONE,      GPIO102_MAGICIAN_KEY_PHONE,    0, "Phone button"}
+};
+
+static struct gpio_keys_platform_data gpio_keys_data = {
+	.buttons  = htc_strtrk_button_table,
+	.nbuttons = ARRAY_SIZE(htc_strtrk_button_table),
+};
+
+static struct platform_device gpio_keys = {
+	.name = "gpio-keys",
+	.dev  = {
+		.platform_data = &gpio_keys_data,
+	},
+	.id   = -1,
 };
 
 static struct resource kp_resources[] = {
@@ -253,11 +266,12 @@ static struct platform_device *devices[] __initdata = {
 #endif
 	&led_device,
 	&btns_device,
+	&gpio_keys,
 };
 
 /*
  * Touchscreen
- */
+ 
 static struct tsc2046_platform_data htcwizard_ts_platform_data __initdata = {
         .ts_x_plate_ohm    = 496, 
         .dav_gpio          = 76,
@@ -275,7 +289,7 @@ static struct spi_board_info htcwizard_spi_board_info[] __initdata = {
 	       .chip_select            = 1,
 	       .irq		       = OMAP_GPIO_IRQ(76),
 	} 
-};
+}; */
 /* LCD register definition (maybe to move somewhere else */
 #define       OMAP_LCDC_CONTROL               (0xfffec000 + 0x00)
 #define       OMAP_LCDC_STATUS                (0xfffec000 + 0x10)
@@ -452,8 +466,8 @@ static void __init htcwizard_init(void)
   htcwizard_mmc_init();
 
   /* For testing.. Disable for now */
-  spi_register_board_info(htcwizard_spi_board_info,
-			ARRAY_SIZE(htcwizard_spi_board_info));
+//  spi_register_board_info(htcwizard_spi_board_info,
+//			ARRAY_SIZE(htcwizard_spi_board_info));
   /* omap_free_gpio(76); */
 }
 
